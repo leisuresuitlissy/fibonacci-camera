@@ -1,84 +1,104 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Fibonacci">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#0B0B0C">
+<meta name="description" content="Golden-ratio framing guides over a live viewfinder.">
 <title>Fibonacci Camera</title>
-<meta name="claude:viewport-fit-sides" content="cover">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=DM+Mono:wght@400;500&display=swap">
 <style>
-/* Layout: a fixed viewfinder stage between a slim header and a stack of control bands. */
 :root{
   --base:#0B0B0C; --surface:#16161A; --elev:#1F1F25; --line:#2E2E36;
-  --text:#F5F3EF; --muted:#A3A09A; --gold:#E0B252; --gold-dim:#8A6D32; --danger:#E06B5A;
+  --text:#F5F3EF; --muted:#A3A09A; --gold:#E0B252; --danger:#E06B5A;
   --ui:'Inter',system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;
   --mono:'DM Mono',ui-monospace,'SF Mono',Menlo,monospace;
   color-scheme:dark;
+  padding-top:env(safe-area-inset-top,0px);
+  padding-bottom:env(safe-area-inset-bottom,0px);
 }
-html,body{height:100%}
-body{background:var(--base);color:var(--text);font-family:var(--ui);overscroll-behavior:none}
 *{box-sizing:border-box}
+[hidden]{display:none!important}
+html,body{height:100%;margin:0}
+body{background:var(--base);color:var(--text);font-family:var(--ui);font-size:14px;
+  overscroll-behavior:none;-webkit-user-select:none;user-select:none;-webkit-tap-highlight-color:transparent}
+img{max-width:100%}
 .gutter{padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
 
 #app{height:100%;display:flex;flex-direction:column;min-height:0}
-
-header{display:flex;align-items:center;justify-content:space-between;gap:10px;padding-block:10px;flex:0 0 auto}
-.brand{font-size:13px;font-weight:600;letter-spacing:.2px}
-.brand small{display:block;font-family:var(--mono);font-size:9px;letter-spacing:1.1px;color:var(--muted);font-weight:400;margin-top:2px}
+header{display:flex;align-items:center;gap:10px;padding-block:10px;flex:0 0 auto}
+.brand{font-size:13px;font-weight:600;min-width:0}
+.brand small{display:block;font-family:var(--mono);font-size:9px;letter-spacing:1px;color:var(--muted);
+  font-weight:400;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.grow{flex:1 1 auto;min-width:0}
 
 .chip{display:inline-flex;align-items:center;gap:6px;border-radius:999px;background:var(--elev);
   border:1px solid transparent;color:var(--muted);font-size:11px;font-weight:500;letter-spacing:.4px;
-  padding:7px 12px;white-space:nowrap;cursor:pointer;font-family:var(--ui);line-height:1}
+  padding:7px 11px;white-space:nowrap;cursor:pointer;font-family:var(--ui);line-height:1}
 .chip.on{background:rgba(224,178,82,.18);border-color:rgba(224,178,82,.85);color:var(--gold)}
-.chip:focus-visible,button:focus-visible,input:focus-visible{outline:2px solid var(--gold);outline-offset:2px}
+.icobtn{width:36px;height:36px;flex:0 0 auto;border-radius:10px;border:1px solid var(--line);
+  background:var(--elev);display:grid;place-items:center;cursor:pointer;padding:0}
+.icobtn.on{background:rgba(224,178,82,.22);border-color:rgba(224,178,82,.9)}
+.icobtn svg{width:17px;height:17px;stroke:var(--muted);fill:none;stroke-width:1.5;
+  stroke-linecap:round;stroke-linejoin:round}
+.icobtn.on svg{stroke:var(--gold)}
+.icobtn[hidden]{display:none}
+:focus-visible{outline:2px solid var(--gold);outline-offset:2px}
 
-#stageWrap{flex:1 1 auto;min-height:0;position:relative;background:#000}
-#cv{display:block;width:100%;height:100%;touch-action:none}
-#drop{position:absolute;inset:0;display:none;align-items:center;justify-content:center;
-  background:rgba(11,11,12,.82);font-size:13px;color:var(--gold);pointer-events:none}
-#drop.on{display:flex}
+#stageWrap{flex:1 1 auto;min-height:0;position:relative;background:#000;overflow:hidden}
+#vid{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;background:#000;display:none}
+#vid.on{display:block}
+#vid.mirror{transform:scaleX(-1)}
+#ov{position:absolute;inset:0;width:100%;height:100%;touch-action:none}
+#gate{position:absolute;inset:0;display:grid;place-content:center;justify-items:center;gap:14px;
+  padding:24px;background:rgba(11,11,12,.72);backdrop-filter:blur(3px);text-align:center}
+#gate[hidden]{display:none}
+#gate p{margin:0;max-width:30ch;font-size:12.5px;line-height:1.55;color:var(--muted)}
+#gate p b{color:var(--text);font-weight:500}
+#gate .warn{color:var(--danger)}
 
 .band{flex:0 0 auto}
 .readout{display:flex;align-items:center;justify-content:space-between;gap:10px;padding-block:11px;
   font-family:var(--mono);font-size:10px;letter-spacing:.5px;color:var(--muted)}
-.readout .val{color:var(--text)}
 .ratio{font-family:var(--mono);font-size:9px;letter-spacing:.7px;color:var(--gold);
-  background:rgba(224,178,82,.12);border:1px solid rgba(224,178,82,.38);border-radius:999px;padding:5px 10px;white-space:nowrap}
-
+  background:rgba(224,178,82,.12);border:1px solid rgba(224,178,82,.38);border-radius:999px;
+  padding:5px 10px;white-space:nowrap}
 .picker{display:flex;gap:8px;overflow-x:auto;padding-block:9px;scrollbar-width:none}
 .picker::-webkit-scrollbar{display:none}
-
 .tbar{display:flex;align-items:center;gap:9px;padding-block:9px}
-.state{display:inline-flex;align-items:center;gap:8px;background:var(--elev);border-radius:999px;
-  padding:6px 12px;font-family:var(--mono);font-size:10px;letter-spacing:.5px;color:var(--text);
-  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.state{display:inline-flex;align-items:center;background:var(--elev);border-radius:999px;padding:6px 12px;
+  font-family:var(--mono);font-size:10px;letter-spacing:.5px;color:var(--text);white-space:nowrap;
+  overflow:hidden;text-overflow:ellipsis;min-width:0}
 .state.dim{color:var(--muted)}
-.spacer{flex:1 1 auto;min-width:0}
 .btn{border:1px solid var(--line);background:var(--elev);color:var(--text);border-radius:999px;
   padding:7px 14px;font-size:11px;font-weight:500;font-family:var(--ui);cursor:pointer;white-space:nowrap}
-.lock{width:34px;height:34px;flex:0 0 auto;border-radius:10px;border:1px solid var(--line);background:var(--elev);
-  display:grid;place-items:center;cursor:pointer;padding:0}
-.lock.on{background:rgba(224,178,82,.22);border-color:rgba(224,178,82,.9)}
-.lock svg{width:16px;height:16px;display:block}
-.lock path,.lock rect{stroke:var(--muted)}
-.lock.on path,.lock.on rect{stroke:var(--gold)}
-@keyframes pulse{0%,100%{transform:scale(1)}35%{transform:scale(1.18)}}
-.lock.pulse{animation:pulse .32s ease}
 
-.actions{display:flex;gap:10px;padding-block:12px}
+.actions{display:flex;align-items:center;gap:10px;padding-block:12px}
 .primary{flex:1 1 auto;min-width:0;border:0;background:var(--gold);color:#0B0B0C;border-radius:14px;
   padding:14px 10px;font-size:14px;font-weight:600;font-family:var(--ui);cursor:pointer;white-space:nowrap}
-.ghost{flex:0 0 auto;border:1px solid var(--line);background:var(--elev);color:var(--text);
-  border-radius:14px;padding:14px 16px;font-size:13px;font-weight:500;font-family:var(--ui);cursor:pointer;white-space:nowrap}
-.primary:disabled,.ghost:disabled{opacity:.4;cursor:default}
+.ghost{flex:0 0 auto;border:1px solid var(--line);background:var(--elev);color:var(--text);border-radius:14px;
+  padding:14px 16px;font-size:13px;font-weight:500;font-family:var(--ui);cursor:pointer;white-space:nowrap}
+#shutter{width:72px;height:72px;border-radius:50%;border:2px solid rgba(255,255,255,.95);
+  background:transparent;padding:4px;cursor:pointer;flex:0 0 auto}
+#shutter i{display:block;width:100%;height:100%;border-radius:50%;background:#fff}
+#shutter:active i{background:var(--gold)}
+.livebar{justify-content:space-between}
 
-.foot{display:flex;gap:26px;justify-content:center;padding-block:12px;
-  font-family:var(--mono);font-size:10px;letter-spacing:1.3px;color:var(--muted)}
+.foot{display:flex;gap:24px;justify-content:center;padding-block:12px;
+  font-family:var(--mono);font-size:10px;letter-spacing:1.2px;color:var(--muted)}
 .foot button{background:none;border:0;color:inherit;font:inherit;letter-spacing:inherit;cursor:pointer;padding:0}
 .foot button.on{color:var(--gold);font-weight:500}
 
-/* adjust sheet */
 #sheet{position:fixed;left:0;right:0;bottom:0;z-index:20;background:var(--surface);
   border-top:1px solid var(--line);border-radius:18px 18px 0 0;
   padding-bottom:calc(16px + env(safe-area-inset-bottom,0px));
   transform:translateY(102%);transition:transform .26s ease;max-height:86%;overflow-y:auto}
 #sheet.open{transform:translateY(0)}
-#scrim{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:19;opacity:0;pointer-events:none;transition:opacity .26s ease}
+#scrim{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:19;opacity:0;pointer-events:none;transition:opacity .26s}
 #scrim.open{opacity:1;pointer-events:auto}
 .sheet-head{display:flex;align-items:center;justify-content:space-between;padding-block:14px}
 .sheet-head h2{margin:0;font-size:15px;font-weight:600}
@@ -90,28 +110,39 @@ header{display:flex;align-items:center;justify-content:space-between;gap:10px;pa
   cursor:pointer;display:grid;justify-items:center;gap:3px}
 .orients button.on{border-color:var(--gold);background:rgba(224,178,82,.14)}
 .orients canvas{display:block;width:40px;height:40px}
-.orients span{font-family:var(--mono);font-size:7.5px;letter-spacing:.3px;color:var(--muted)}
+.orients span{font-family:var(--mono);font-size:7.5px;color:var(--muted)}
 .orients button.on span{color:var(--gold)}
 input[type=range]{width:100%;accent-color:var(--gold);margin:0}
 .rowbtns{display:flex;gap:10px;padding-block:18px 6px}
-.note{font-size:11.5px;line-height:1.5;color:var(--muted);padding-block:14px 2px;border-top:1px solid var(--line);margin-top:18px}
+.note{font-size:11.5px;line-height:1.55;color:var(--muted);padding-block:14px 2px;
+  border-top:1px solid var(--line);margin-top:18px}
 .note b{color:var(--text);font-weight:500}
-#toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(24px + env(safe-area-inset-bottom,0px));
-  background:var(--elev);border:1px solid var(--line);color:var(--text);font-size:12px;
-  padding:10px 16px;border-radius:999px;z-index:40;opacity:0;transition:opacity .2s;pointer-events:none;max-width:88%;text-align:center}
+#toast{position:fixed;left:50%;transform:translateX(-50%);
+  bottom:calc(26px + env(safe-area-inset-bottom,0px));background:var(--elev);border:1px solid var(--line);
+  color:var(--text);font-size:12px;padding:10px 16px;border-radius:999px;z-index:40;opacity:0;
+  transition:opacity .2s;pointer-events:none;max-width:86%;text-align:center}
 #toast.on{opacity:1}
 @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
 </style>
+</head>
+<body>
 
 <div id="app">
   <header class="gutter">
-    <div class="brand">Fibonacci Camera<small id="srcName">SAMPLE SCENE</small></div>
+    <div class="brand grow">Fibonacci Camera<small id="srcName">SAMPLE SCENE</small></div>
     <button class="chip on" id="turnsChip" type="button">SPIRAL · 2.25 TURNS</button>
+    <button class="icobtn" id="torch" type="button" aria-label="Torch" hidden>
+      <svg viewBox="0 0 24 24"><path d="M9 2h6l-1 7h4l-8 13 1-9H7z"/></svg>
+    </button>
   </header>
 
   <div id="stageWrap">
-    <canvas id="cv"></canvas>
-    <div id="drop">Drop a photo</div>
+    <video id="vid" playsinline muted autoplay></video>
+    <canvas id="ov"></canvas>
+    <div id="gate">
+      <button class="primary" id="startCam" type="button" style="padding:14px 22px">Start the live viewfinder</button>
+      <p id="gateMsg">The guide draws over the live camera. Your browser will ask for camera access first.</p>
+    </div>
   </div>
 
   <div class="band gutter readout">
@@ -122,21 +153,28 @@ input[type=range]{width:100%;accent-color:var(--gold);margin:0}
   <div class="band gutter picker" id="picker"></div>
 
   <div class="band gutter tbar">
-    <span class="state" id="gstate">TOP-LEFT ↕ · 100% · 0°</span>
-    <span class="spacer"></span>
+    <span class="state grow" id="gstate">TOP-LEFT ↕ · 92% · 0°</span>
     <button class="btn" id="adjust" type="button">Adjust</button>
-    <button class="lock" id="lock" type="button" aria-label="Lock the guide" aria-pressed="false">
-      <svg viewBox="0 0 16 16" fill="none"><rect x="3.2" y="7" width="9.6" height="6.6" rx="1.6" stroke-width="1.4"/><path id="shackle" d="M5.4 7V5.2a2.6 2.6 0 0 1 5.2 0V7" stroke-width="1.4" stroke-linecap="round"/></svg>
+    <button class="icobtn" id="lock" type="button" aria-label="Lock the guide" aria-pressed="false">
+      <svg viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="9" rx="2"/><path id="shk" d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>
     </button>
   </div>
 
-  <div class="band gutter actions">
+  <div class="band gutter actions livebar" id="liveBar" hidden>
+    <button class="ghost" id="pickBtn2" type="button">Photos</button>
+    <button id="shutter" type="button" aria-label="Take the photo"><i></i></button>
+    <button class="icobtn" id="flip" type="button" aria-label="Switch camera" style="width:46px;height:46px">
+      <svg viewBox="0 0 24 24"><path d="M21 8V5a1 1 0 0 0-1-1h-3M3 16v3a1 1 0 0 0 1 1h3"/><path d="M16 20h4a1 1 0 0 0 1-1v-4M8 4H4a1 1 0 0 0-1 1v4"/><circle cx="12" cy="12" r="3.2"/></svg>
+    </button>
+  </div>
+
+  <div class="band gutter actions" id="photoBar">
     <button class="primary" id="save" type="button">Save φ crop</button>
-    <button class="ghost" id="shootBtn" type="button">Camera</button>
+    <button class="ghost" id="liveBtn" type="button">Live</button>
     <button class="ghost" id="pickBtn" type="button">Photos</button>
   </div>
 
-  <div class="band gutter foot">
+  <div class="band gutter foot" id="foot">
     <button type="button" data-view="original">ORIGINAL</button>
     <button type="button" data-view="guide" class="on">WITH GUIDE</button>
     <button type="button" data-view="crop">φ CROP</button>
@@ -147,31 +185,27 @@ input[type=range]{width:100%;accent-color:var(--gold);margin:0}
 <section id="sheet" aria-label="Adjust the guide">
   <div class="gutter">
     <div class="sheet-head"><h2>Adjust the guide</h2><button class="btn" id="closeSheet" type="button">Done</button></div>
-
     <div class="lab"><span>ORIENTATION</span><b id="orientVal">TOP-LEFT ↕</b></div>
     <div class="orients" id="orients"></div>
-
     <div class="lab"><span>TURNS</span><b id="turnsVal">2.25×</b></div>
     <input type="range" id="turns" min="1" max="4" step="0.25" value="2.25">
-
-    <div class="lab"><span>SIZE</span><b id="scaleVal">100%</b></div>
-    <input type="range" id="scale" min="25" max="160" step="1" value="100">
-
+    <div class="lab"><span>SIZE</span><b id="scaleVal">92%</b></div>
+    <input type="range" id="scale" min="25" max="160" step="1" value="92">
     <div class="lab"><span>ROTATION</span><b id="rotVal">0°</b></div>
     <input type="range" id="rot" min="-180" max="180" step="1" value="0">
-
+    <div class="lab" id="zoomLab" hidden><span>CAMERA ZOOM</span><b id="zoomVal">1.0×</b></div>
+    <input type="range" id="zoom" min="100" max="400" step="5" value="100" hidden>
     <div class="rowbtns">
       <button class="ghost" id="reset" type="button" style="flex:1">Reset the guide</button>
       <button class="ghost" id="saveFull" type="button" style="flex:1">Save full frame</button>
     </div>
-
-    <p class="note"><b>Pinch to zoom the photo.</b> Drag inside the guide to move it, a corner to size it, the top handle to rotate it. Double-tap to step through the eight orientations. The lock hides the handles and holds everything where it is.</p>
+    <p class="note"><b>Drag inside the guide to move it, a corner to size it, the top handle to rotate it.</b>
+      Double-tap steps through the eight orientations. The lock hides the handles and holds everything in place.
+      Pinch zooms the camera where the lens supports it, and the photo once you have taken one.</p>
   </div>
 </section>
 
 <div id="toast" role="status" aria-live="polite"></div>
-
-<input type="file" accept="image/*" capture="environment" id="shoot" hidden>
 <input type="file" accept="image/*" id="pick" hidden>
 
 <script>
@@ -180,380 +214,539 @@ input[type=range]{width:100%;accent-color:var(--gold);margin:0}
 var PHI = 1.6180339887498949;
 var $ = function(id){ return document.getElementById(id); };
 
-/* ---------------------------------------------------------------- state */
-// 0.92 because the φ rectangle is 3.4% taller than the spiral's own box, so a
-// guide fitted flush to the frame would push its crop past the edge of the photo.
+/* ------------------------------------------------------------------ state */
 var DEF = { overlay:'spiral', turns:2.25, orient:0, scale:0.92, rot:0, cx:0.336, cy:0.303,
             locked:false, triFlip:0, view:'guide' };
-var S = {};
-for (var k in DEF) S[k] = DEF[k];
+var S = {}; for (var k in DEF) S[k] = DEF[k];
+var saved = null;
 try {
-  var saved = JSON.parse(localStorage.getItem('fibcam') || '{}');
-  for (var k2 in DEF) if (saved[k2] !== undefined && typeof saved[k2] === typeof DEF[k2]) S[k2] = saved[k2];
+  saved = JSON.parse(localStorage.getItem('fibcam') || 'null');
+  if (saved) for (var k2 in DEF) if (saved[k2] !== undefined && typeof saved[k2] === typeof DEF[k2]) S[k2] = saved[k2];
 } catch (e) {}
 function remember(){ try { localStorage.setItem('fibcam', JSON.stringify(S)); } catch(e){} }
 
-var view = { s:1, tx:0, ty:0 };          // photo zoom / pan, never the guide
-var photo = null;                         // {el, w, h, name}
+var mode = 'photo';                 // 'photo' | 'live'
+var photo = null;                   // {el,w,h,name}
+var view = { s:1, tx:0, ty:0 };     // photo-mode zoom/pan only
+var stream = null, track = null, caps = {}, camZoom = 1, facing = 'environment';
 var W = 0, H = 0, dpr = 1;
-var cv = $('cv'), ctx = cv.getContext('2d');
+var cv = $('ov'), ctx = cv.getContext('2d'), vid = $('vid');
 
-/* ------------------------------------------------------- spiral geometry */
+/* -------------------------------------------------------- spiral geometry */
 var ORIENTS = [
   {fx:0,fy:0,t:0},{fx:1,fy:0,t:0},{fx:0,fy:1,t:0},{fx:1,fy:1,t:0},
   {fx:0,fy:0,t:1},{fx:1,fy:0,t:1},{fx:0,fy:1,t:1},{fx:1,fy:1,t:1}
 ];
 var geoCache = {};
-// Normalised so the EYE is the origin and the longer box side is 1.
-// The scale applied later is a single scalar, so X and Y can never diverge.
+// Eye at the origin, longer box side normalised to 1. Everything downstream
+// multiplies by ONE scalar, so X and Y can never be scaled apart.
 function geoFor(turns, orient){
   var key = turns.toFixed(2) + '|' + orient;
   if (geoCache[key]) return geoCache[key];
-  var o = ORIENTS[orient], b = Math.log(PHI) / (Math.PI/2);
-  var thMax = turns * 2 * Math.PI, N = 700, pts = [], i, th, r, p;
-  for (i = 0; i <= N; i++){ th = thMax * i / N; r = Math.exp(b*th); pts.push([r*Math.cos(th), r*Math.sin(th)]); }
+  var o = ORIENTS[orient], b = Math.log(PHI)/(Math.PI/2);
+  var thMax = turns*2*Math.PI, N = 700, pts = [], i, th, r, p;
+  for (i=0;i<=N;i++){ th = thMax*i/N; r = Math.exp(b*th); pts.push([r*Math.cos(th), r*Math.sin(th)]); }
   if (o.t)  for (i=0;i<pts.length;i++){ p = pts[i]; pts[i] = [p[1], p[0]]; }
-  if (o.fx) for (i=0;i<pts.length;i++){ pts[i] = [-pts[i][0], pts[i][1]]; }
-  if (o.fy) for (i=0;i<pts.length;i++){ pts[i] = [pts[i][0], -pts[i][1]]; }
+  if (o.fx) for (i=0;i<pts.length;i++) pts[i] = [-pts[i][0], pts[i][1]];
+  if (o.fy) for (i=0;i<pts.length;i++) pts[i] = [pts[i][0], -pts[i][1]];
   var eye = pts[0], mnx=Infinity,mxx=-Infinity,mny=Infinity,mxy=-Infinity;
-  for (i=0;i<pts.length;i++){ p=pts[i];
+  for (i=0;i<pts.length;i++){ p = pts[i];
     if(p[0]<mnx)mnx=p[0]; if(p[0]>mxx)mxx=p[0]; if(p[1]<mny)mny=p[1]; if(p[1]>mxy)mxy=p[1]; }
   var bw = mxx-mnx, bh = mxy-mny, kk = 1/Math.max(bw,bh);
   var out = { pts:[], bw:bw*kk, bh:bh*kk, ox:(mnx-eye[0])*kk, oy:(mny-eye[1])*kk };
   for (i=0;i<pts.length;i++) out.pts.push([(pts[i][0]-eye[0])*kk, (pts[i][1]-eye[1])*kk]);
-  geoCache[key] = out;
-  return out;
+  geoCache[key] = out; return out;
 }
 function geo(){ return geoFor(S.turns, S.orient); }
-
 function orientLabel(i){
-  var g = geoFor(S.turns, i);
-  var fx = -g.ox / g.bw, fy = -g.oy / g.bh;
-  return (fy < 0.5 ? 'TOP' : 'BOTTOM') + '-' + (fx < 0.5 ? 'LEFT' : 'RIGHT') + (g.bw < g.bh ? ' ↕' : ' ↔');
+  var g = geoFor(S.turns, i), fx = -g.ox/g.bw, fy = -g.oy/g.bh;
+  return (fy<0.5?'TOP':'BOTTOM') + '-' + (fx<0.5?'LEFT':'RIGHT') + (g.bw<g.bh?' ↕':' ↔');
 }
 
-/* --------------------------------------------------------- frame + maths */
-// The frame is the photo's own rectangle, letterboxed inside the stage.
-// The guide lives on the frame; zoom moves the photo underneath it.
+/* ----------------------------------------------------------- frame + maths */
+function srcSize(){
+  if (mode === 'live' && vid.videoWidth) return { w:vid.videoWidth, h:vid.videoHeight };
+  if (photo) return { w:photo.w, h:photo.h };
+  return { w:W||1, h:H||1 };
+}
+// The frame is the source's own rectangle, letterboxed in the stage — the same
+// rect `object-fit: contain` gives the video, so the overlay sits exactly on it.
 function frame(){
-  if (!photo) return { x:0, y:0, w:W, h:H };
-  var ia = photo.w / photo.h, sa = W / H, w, h;
-  if (ia > sa) { w = W; h = W / ia; } else { h = H; w = H * ia; }
+  var s = srcSize(), ia = s.w/s.h, sa = W/H, w, h;
+  if (ia > sa){ w = W; h = W/ia; } else { h = H; w = H*ia; }
   return { x:(W-w)/2, y:(H-h)/2, w:w, h:h };
 }
-function baseFit(fr){ var g = geo(); return Math.min(fr.w / g.bw, fr.h / g.bh); }
-
+function baseFit(fr){ var g = geo(); return Math.min(fr.w/g.bw, fr.h/g.bh); }
 function xform(fr){
-  var g = geo(), s = baseFit(fr) * S.scale;
-  var c = Math.cos(S.rot), si = Math.sin(S.rot);
-  var ex = fr.x + S.cx * fr.w, ey = fr.y + S.cy * fr.h;
+  var s = baseFit(fr)*S.scale, c = Math.cos(S.rot), si = Math.sin(S.rot);
+  var ex = fr.x + S.cx*fr.w, ey = fr.y + S.cy*fr.h;
   return { s:s, c:c, si:si, ex:ex, ey:ey,
-           at: function(p){ return [ ex + p[0]*s*c - p[1]*s*si, ey + p[0]*s*si + p[1]*s*c ]; } };
+    at:function(p){ return [ ex + p[0]*s*c - p[1]*s*si, ey + p[0]*s*si + p[1]*s*c ]; } };
 }
 function cornersOf(T){
   var g = geo();
   return [[g.ox,g.oy],[g.ox+g.bw,g.oy],[g.ox+g.bw,g.oy+g.bh],[g.ox,g.oy+g.bh]].map(T.at);
 }
 function handleOf(T){
-  var g = geo(), tm = T.at([g.ox + g.bw/2, g.oy]);
-  var hx = tm[0] + 34*T.si, hy = tm[1] - 34*T.c;      // outward normal of the top edge
-  if (hx < 16 || hx > W-16 || hy < 16 || hy > H-16){  // no room outside: sit inboard instead
-    hx = tm[0] - 34*T.si; hy = tm[1] + 34*T.c;
-  }
+  var g = geo(), tm = T.at([g.ox+g.bw/2, g.oy]);
+  var hx = tm[0] + 34*T.si, hy = tm[1] - 34*T.c;
+  if (hx < 16 || hx > W-16 || hy < 16 || hy > H-16){ hx = tm[0] - 34*T.si; hy = tm[1] + 34*T.c; }
   return [hx, hy];
 }
-// The exact φ rectangle the spiral is inscribed in. The spiral's own box is
-// 1.565:1 at 2.25 turns, not φ, so the rect is a touch larger on one axis.
+// Exact φ rectangle inscribing the spiral. The spiral's own box is 1.565:1 at
+// 2.25 turns, not φ, so the rectangle is slightly larger on one axis.
 function phiRectLocal(){
   var g = geo(), x, y, w, h;
-  if (g.bw <= g.bh) { w = g.bw; h = w * PHI; x = g.ox; y = g.oy + (g.bh - h)/2; }
-  else              { h = g.bh; w = h * PHI; y = g.oy; x = g.ox + (g.bw - w)/2; }
+  if (g.bw <= g.bh){ w = g.bw; h = w*PHI; x = g.ox; y = g.oy + (g.bh-h)/2; }
+  else             { h = g.bh; w = h*PHI; y = g.oy; x = g.ox + (g.bw-w)/2; }
   return [[x,y],[x+w,y],[x+w,y+h],[x,y+h]];
 }
-// Put the guide's box in the middle of the frame, whatever the photo's shape.
 function centreGuide(){
-  var fr = frame(), g = geo(), f = baseFit(fr) * S.scale;
-  S.cx = ((fr.w - g.bw*f)/2 - g.ox*f) / fr.w;
-  S.cy = ((fr.h - g.bh*f)/2 - g.oy*f) / fr.h;
+  var fr = frame(), g = geo(), f = baseFit(fr)*S.scale;
+  S.cx = ((fr.w - g.bw*f)/2 - g.ox*f)/fr.w;
+  S.cy = ((fr.h - g.bh*f)/2 - g.oy*f)/fr.h;
 }
 function dist(a,b){ var dx=a[0]-b[0], dy=a[1]-b[1]; return Math.sqrt(dx*dx+dy*dy); }
 function inPoly(p, poly){
   var hit = false;
   for (var i=0, j=poly.length-1; i<poly.length; j=i++){
     var a = poly[i], b = poly[j];
-    if (((a[1] > p[1]) !== (b[1] > p[1])) &&
-        (p[0] < (b[0]-a[0]) * (p[1]-a[1]) / (b[1]-a[1]) + a[0])) hit = !hit;
+    if (((a[1]>p[1]) !== (b[1]>p[1])) && (p[0] < (b[0]-a[0])*(p[1]-a[1])/(b[1]-a[1]) + a[0])) hit = !hit;
   }
   return hit;
 }
+function foot(a,b,p){
+  var vx=b[0]-a[0], vy=b[1]-a[1], t=((p[0]-a[0])*vx + (p[1]-a[1])*vy)/(vx*vx+vy*vy);
+  return [a[0]+vx*t, a[1]+vy*t];
+}
 
-/* ---------------------------------------------------------- sample scene */
+/* ------------------------------------------------------------ sample scene */
 function sampleScene(){
-  var w = 1200, h = 1600, c = document.createElement('canvas');
-  c.width = w; c.height = h;
-  var g = c.getContext('2d'), HZ = h * 0.62;
-  var sky = g.createLinearGradient(0,0,0,HZ);
-  sky.addColorStop(0,'#141a2b'); sky.addColorStop(0.45,'#45354a');
-  sky.addColorStop(0.78,'#a8683f'); sky.addColorStop(1,'#e2a053');
-  g.fillStyle = sky; g.fillRect(0,0,w,HZ);
-  var glow = g.createRadialGradient(w*0.3, HZ, 0, w*0.3, HZ, w*0.72);
-  glow.addColorStop(0,'rgba(255,214,140,.92)'); glow.addColorStop(0.35,'rgba(238,160,80,.34)');
+  var w=1200, h=1600, c=document.createElement('canvas'); c.width=w; c.height=h;
+  var g=c.getContext('2d'), HZ=h*0.62;
+  var sky=g.createLinearGradient(0,0,0,HZ);
+  sky.addColorStop(0,'#141a2b'); sky.addColorStop(.45,'#45354a');
+  sky.addColorStop(.78,'#a8683f'); sky.addColorStop(1,'#e2a053');
+  g.fillStyle=sky; g.fillRect(0,0,w,HZ);
+  var glow=g.createRadialGradient(w*.3,HZ,0,w*.3,HZ,w*.72);
+  glow.addColorStop(0,'rgba(255,214,140,.92)'); glow.addColorStop(.35,'rgba(238,160,80,.34)');
   glow.addColorStop(1,'rgba(238,160,80,0)');
-  g.fillStyle = glow; g.fillRect(0,0,w,HZ);
-  for (var i=0;i<7;i++){                                  // cloud bands
-    var y = h*0.10 + i*h*0.055, a = 0.05 + (i%3)*0.022;
-    g.fillStyle = 'rgba(255,226,186,'+a+')';
-    g.beginPath(); g.ellipse(w*(0.18+0.1*i), y, w*(0.3+0.05*i), h*0.012, 0, 0, 6.3); g.fill();
+  g.fillStyle=glow; g.fillRect(0,0,w,HZ);
+  for (var i=0;i<7;i++){
+    g.fillStyle='rgba(255,226,186,'+(.05+(i%3)*.022)+')';
+    g.beginPath(); g.ellipse(w*(.18+.1*i), h*.10+i*h*.055, w*(.3+.05*i), h*.012, 0, 0, 6.3); g.fill();
   }
-  g.fillStyle = '#2b1f18';                                 // ridge
-  g.beginPath(); g.moveTo(0,h);
-  g.lineTo(0, HZ + h*0.055); g.quadraticCurveTo(w*0.42, HZ - h*0.035, w, HZ + h*0.085);
-  g.lineTo(w,h); g.closePath(); g.fill();
-  var grd = g.createLinearGradient(0,HZ,0,h);
+  g.fillStyle='#2b1f18';
+  g.beginPath(); g.moveTo(0,h); g.lineTo(0,HZ+h*.055);
+  g.quadraticCurveTo(w*.42, HZ-h*.035, w, HZ+h*.085); g.lineTo(w,h); g.closePath(); g.fill();
+  var grd=g.createLinearGradient(0,HZ,0,h);
   grd.addColorStop(0,'rgba(150,95,45,.42)'); grd.addColorStop(1,'rgba(20,14,10,0)');
-  g.fillStyle = grd; g.fillRect(0,HZ,w,h-HZ);
-  // lone tree, on the ridge, left of centre
-  var bx = w*0.275, by = HZ + h*0.012;
-  g.strokeStyle = '#120d0b'; g.lineCap = 'round';
-  (function branch(x,y,len,ang,wid,depth){
-    if (depth === 0 || len < 4) return;
-    var x2 = x + Math.cos(ang)*len, y2 = y + Math.sin(ang)*len;
-    g.lineWidth = wid; g.beginPath(); g.moveTo(x,y); g.lineTo(x2,y2); g.stroke();
-    var spread = 0.42 + (depth % 3) * 0.08;
-    branch(x2, y2, len*0.76, ang - spread, wid*0.68, depth-1);
-    branch(x2, y2, len*0.72, ang + spread, wid*0.66, depth-1);
-    if (depth % 2 === 0) branch(x2, y2, len*0.55, ang + 0.05, wid*0.5, depth-1);
-  })(bx, by, h*0.076, -Math.PI/2, 15, 9);
-  for (var t=0;t<2600;t++){                                // grass texture
-    var gx = Math.random()*w, gy = HZ + Math.pow(Math.random(),0.6)*(h-HZ);
-    g.strokeStyle = 'rgba(0,0,0,'+(0.05+Math.random()*0.14)+')'; g.lineWidth = 1;
-    g.beginPath(); g.moveTo(gx,gy); g.lineTo(gx+(Math.random()-0.5)*5, gy-4-Math.random()*8); g.stroke();
+  g.fillStyle=grd; g.fillRect(0,HZ,w,h-HZ);
+  g.strokeStyle='#120d0b'; g.lineCap='round';
+  (function branch(x,y,len,ang,wid,d){
+    if (d===0 || len<4) return;
+    var x2=x+Math.cos(ang)*len, y2=y+Math.sin(ang)*len;
+    g.lineWidth=wid; g.beginPath(); g.moveTo(x,y); g.lineTo(x2,y2); g.stroke();
+    var sp=.42+(d%3)*.08;
+    branch(x2,y2,len*.76,ang-sp,wid*.68,d-1);
+    branch(x2,y2,len*.72,ang+sp,wid*.66,d-1);
+    if (d%2===0) branch(x2,y2,len*.55,ang+.05,wid*.5,d-1);
+  })(w*.275, HZ+h*.012, h*.076, -Math.PI/2, 15, 9);
+  for (var t=0;t<2600;t++){
+    var gx=Math.random()*w, gy=HZ+Math.pow(Math.random(),.6)*(h-HZ);
+    g.strokeStyle='rgba(0,0,0,'+(.05+Math.random()*.14)+')'; g.lineWidth=1;
+    g.beginPath(); g.moveTo(gx,gy); g.lineTo(gx+(Math.random()-.5)*5, gy-4-Math.random()*8); g.stroke();
   }
   return { el:c, w:w, h:h, name:'SAMPLE SCENE' };
 }
 
-/* -------------------------------------------------------------- painting */
-function clear(){ ctx.setTransform(dpr,0,0,dpr,0,0); ctx.clearRect(0,0,W,H); }
+/* ------------------------------------------------------------------ paint */
 function seg(a,b){ ctx.beginPath(); ctx.moveTo(a[0],a[1]); ctx.lineTo(b[0],b[1]); ctx.stroke(); }
-function ring(p, r, fill, stroke, lw){
+function ring(p,r,fill,stroke,lw){
   ctx.beginPath(); ctx.arc(p[0],p[1],r,0,6.2832);
-  if (fill){ ctx.fillStyle = fill; ctx.fill(); }
-  if (stroke){ ctx.strokeStyle = stroke; ctx.lineWidth = lw || 1; ctx.stroke(); }
+  if (fill){ ctx.fillStyle=fill; ctx.fill(); }
+  if (stroke){ ctx.strokeStyle=stroke; ctx.lineWidth=lw||1; ctx.stroke(); }
+}
+function drawFrameOverlay(fr, fracs){
+  ctx.strokeStyle='rgba(255,255,255,0.30)'; ctx.lineWidth=1;
+  for (var i=0;i<fracs.length;i++){
+    var f=fracs[i];
+    seg([fr.x+f*fr.w, fr.y],[fr.x+f*fr.w, fr.y+fr.h]);
+    seg([fr.x, fr.y+f*fr.h],[fr.x+fr.w, fr.y+f*fr.h]);
+  }
+}
+function drawTriangles(fr){
+  var tl=[fr.x,fr.y], tr=[fr.x+fr.w,fr.y], br=[fr.x+fr.w,fr.y+fr.h], bl=[fr.x,fr.y+fr.h], a,b,c1,c2;
+  if (!S.triFlip){ a=tl; b=br; c1=tr; c2=bl; } else { a=tr; b=bl; c1=tl; c2=br; }
+  ctx.strokeStyle='rgba(255,255,255,0.38)'; ctx.lineWidth=1;
+  seg(a,b); seg(c1,foot(a,b,c1)); seg(c2,foot(a,b,c2));
+  ring(foot(a,b,c1),4,null,'rgba(224,178,82,0.9)',1.4);
+  ring(foot(a,b,c2),4,null,'rgba(224,178,82,0.9)',1.4);
+}
+function drawSpiral(T){
+  var g=geo(), p;
+  ctx.beginPath(); p=T.at(g.pts[0]); ctx.moveTo(p[0],p[1]);
+  for (var i=1;i<g.pts.length;i++){ p=T.at(g.pts[i]); ctx.lineTo(p[0],p[1]); }
+  ctx.strokeStyle='rgba(255,255,255,0.86)'; ctx.lineWidth=1.4;
+  ctx.lineJoin='round'; ctx.lineCap='round'; ctx.stroke();
+}
+function drawWidget(T){
+  var cs=cornersOf(T), h=handleOf(T), g=geo(), i;
+  ctx.setLineDash([5,5]); ctx.strokeStyle='rgba(255,255,255,0.40)'; ctx.lineWidth=1;
+  ctx.beginPath(); ctx.moveTo(cs[0][0],cs[0][1]);
+  for (i=1;i<4;i++) ctx.lineTo(cs[i][0],cs[i][1]);
+  ctx.closePath(); ctx.stroke(); ctx.setLineDash([]);
+  ctx.strokeStyle='rgba(255,255,255,0.5)'; ctx.lineWidth=1.25;
+  seg(T.at([g.ox+g.bw/2, g.oy]), h);
+  for (i=0;i<4;i++) ring(cs[i],4.8,'rgba(255,255,255,0.95)','rgba(11,11,12,0.55)',1);
+  ring(h,6.8,'rgba(255,255,255,0.95)','rgba(11,11,12,0.55)',1);
+}
+function drawCropMask(T){
+  var q=phiRectLocal().map(T.at), i;
+  ctx.save(); ctx.beginPath(); ctx.rect(0,0,W,H);
+  ctx.moveTo(q[0][0],q[0][1]);
+  for (i=3;i>=1;i--) ctx.lineTo(q[i][0],q[i][1]);
+  ctx.closePath(); ctx.fillStyle='rgba(7,8,12,0.74)'; ctx.fill('evenodd'); ctx.restore();
+  ctx.strokeStyle='rgba(255,255,255,0.55)'; ctx.lineWidth=1;
+  ctx.beginPath(); ctx.moveTo(q[0][0],q[0][1]);
+  for (i=1;i<4;i++) ctx.lineTo(q[i][0],q[i][1]);
+  ctx.closePath(); ctx.stroke();
 }
 function drawPhoto(fr){
-  ctx.save();
-  ctx.beginPath(); ctx.rect(fr.x, fr.y, fr.w, fr.h); ctx.clip();
-  ctx.translate(fr.x + fr.w/2 + view.tx, fr.y + fr.h/2 + view.ty);
+  ctx.save(); ctx.beginPath(); ctx.rect(fr.x,fr.y,fr.w,fr.h); ctx.clip();
+  ctx.translate(fr.x+fr.w/2+view.tx, fr.y+fr.h/2+view.ty);
   ctx.scale(view.s, view.s);
   ctx.drawImage(photo.el, -fr.w/2, -fr.h/2, fr.w, fr.h);
   ctx.restore();
 }
-function drawFrameOverlay(fr, fracs){
-  ctx.strokeStyle = 'rgba(255,255,255,0.30)'; ctx.lineWidth = 1;
-  for (var i=0;i<fracs.length;i++){
-    var f = fracs[i];
-    seg([fr.x + f*fr.w, fr.y], [fr.x + f*fr.w, fr.y + fr.h]);
-    seg([fr.x, fr.y + f*fr.h], [fr.x + fr.w, fr.y + f*fr.h]);
-  }
-}
-function foot(a,b,p){                                    // perpendicular foot of p on ab
-  var vx=b[0]-a[0], vy=b[1]-a[1], t=((p[0]-a[0])*vx + (p[1]-a[1])*vy)/(vx*vx+vy*vy);
-  return [a[0]+vx*t, a[1]+vy*t];
-}
-function drawTriangles(fr){
-  var tl=[fr.x,fr.y], tr=[fr.x+fr.w,fr.y], br=[fr.x+fr.w,fr.y+fr.h], bl=[fr.x,fr.y+fr.h];
-  var a,b,c1,c2;
-  if (!S.triFlip){ a=tl; b=br; c1=tr; c2=bl; } else { a=tr; b=bl; c1=tl; c2=br; }
-  ctx.strokeStyle = 'rgba(255,255,255,0.38)'; ctx.lineWidth = 1;
-  seg(a,b); seg(c1, foot(a,b,c1)); seg(c2, foot(a,b,c2));
-  ring(foot(a,b,c1), 4, null, 'rgba(224,178,82,0.9)', 1.4);
-  ring(foot(a,b,c2), 4, null, 'rgba(224,178,82,0.9)', 1.4);
-}
-function drawSpiral(T){
-  var g = geo(), p;
-  ctx.beginPath();
-  p = T.at(g.pts[0]); ctx.moveTo(p[0], p[1]);
-  for (var i=1;i<g.pts.length;i++){ p = T.at(g.pts[i]); ctx.lineTo(p[0], p[1]); }
-  ctx.strokeStyle = 'rgba(255,255,255,0.86)'; ctx.lineWidth = 1.4;
-  ctx.lineJoin = 'round'; ctx.lineCap = 'round'; ctx.stroke();
-}
-function drawWidget(T){
-  var cs = cornersOf(T), h = handleOf(T), i;
-  ctx.setLineDash([5,5]); ctx.strokeStyle = 'rgba(255,255,255,0.40)'; ctx.lineWidth = 1;
-  ctx.beginPath(); ctx.moveTo(cs[0][0],cs[0][1]);
-  for (i=1;i<4;i++) ctx.lineTo(cs[i][0],cs[i][1]);
-  ctx.closePath(); ctx.stroke(); ctx.setLineDash([]);
-  var g = geo();
-  ctx.strokeStyle = 'rgba(255,255,255,0.5)'; ctx.lineWidth = 1.25;
-  seg(T.at([g.ox + g.bw/2, g.oy]), h);
-  for (i=0;i<4;i++) ring(cs[i], 4.8, 'rgba(255,255,255,0.95)', 'rgba(11,11,12,0.55)', 1);
-  ring(h, 6.8, 'rgba(255,255,255,0.95)', 'rgba(11,11,12,0.55)', 1);
-}
-function drawCropMask(T){
-  var q = phiRectLocal().map(T.at);
-  ctx.save();
-  ctx.beginPath(); ctx.rect(0,0,W,H);
-  ctx.moveTo(q[0][0],q[0][1]);
-  for (var i=3;i>=1;i--) ctx.lineTo(q[i][0],q[i][1]);
-  ctx.closePath();
-  ctx.fillStyle = 'rgba(7,8,12,0.74)'; ctx.fill('evenodd');
-  ctx.restore();
-  ctx.strokeStyle = 'rgba(255,255,255,0.55)'; ctx.lineWidth = 1;
-  ctx.beginPath(); ctx.moveTo(q[0][0],q[0][1]);
-  for (var j=1;j<4;j++) ctx.lineTo(q[j][0],q[j][1]);
-  ctx.closePath(); ctx.stroke();
-}
 function draw(){
   if (!W || !H) return;
-  clear();
+  ctx.setTransform(dpr,0,0,dpr,0,0); ctx.clearRect(0,0,W,H);
   var fr = frame();
-  if (photo) drawPhoto(fr);
-  if (S.view === 'original'){ frameEdge(fr); updateReadout(fr); return; }
-
+  if (mode === 'photo' && photo) drawPhoto(fr);
+  if (S.view === 'original' && mode === 'photo'){ frameEdge(fr); updateReadout(fr); return; }
   var T = xform(fr);
-  if (S.view === 'crop' && S.overlay === 'spiral') drawCropMask(T);
-
-  if (S.overlay === 'grid')      drawFrameOverlay(fr, [1 - 1/PHI, 1/PHI]);
-  else if (S.overlay === 'thirds')   drawFrameOverlay(fr, [1/3, 2/3]);
+  if (S.view === 'crop' && S.overlay === 'spiral' && mode === 'photo') drawCropMask(T);
+  if (S.overlay === 'grid')           drawFrameOverlay(fr, [1 - 1/PHI, 1/PHI]);
+  else if (S.overlay === 'thirds')    drawFrameOverlay(fr, [1/3, 2/3]);
   else if (S.overlay === 'triangles') drawTriangles(fr);
   else if (S.overlay === 'spiral'){
     drawSpiral(T);
-    if (!S.locked && S.view !== 'crop') drawWidget(T);
-    ring([T.ex, T.ey], 11, null, 'rgba(224,178,82,0.95)', 1.5);
-    ring([T.ex, T.ey], 2.5, 'rgba(224,178,82,1)', null, 0);
+    if (!S.locked && !(S.view === 'crop' && mode === 'photo')) drawWidget(T);
+    ring([T.ex,T.ey], 11, null, 'rgba(224,178,82,0.95)', 1.5);
+    ring([T.ex,T.ey], 2.5, 'rgba(224,178,82,1)', null, 0);
   }
-  frameEdge(fr);
-  updateReadout(fr);
+  frameEdge(fr); updateReadout(fr);
 }
 function frameEdge(fr){
-  ctx.strokeStyle = 'rgba(255,255,255,0.10)'; ctx.lineWidth = 1;
-  ctx.strokeRect(fr.x + 0.5, fr.y + 0.5, fr.w - 1, fr.h - 1);
+  ctx.strokeStyle='rgba(255,255,255,0.10)'; ctx.lineWidth=1;
+  ctx.strokeRect(fr.x+0.5, fr.y+0.5, fr.w-1, fr.h-1);
 }
 
-/* -------------------------------------------------------- stage -> image */
-function stageToImage(p, fr){
-  var u = (p[0] - (fr.x + fr.w/2) - view.tx) / view.s + fr.w/2;
-  var v = (p[1] - (fr.y + fr.h/2) - view.ty) / view.s + fr.h/2;
-  return [ (u / fr.w) * photo.w, (v / fr.h) * photo.h ];
+/* -------------------------------------------------------- stage -> source */
+function stageToSrc(p, fr){
+  var s = srcSize();
+  if (mode === 'live') return [ ((p[0]-fr.x)/fr.w)*s.w, ((p[1]-fr.y)/fr.h)*s.h ];
+  var u = (p[0] - (fr.x+fr.w/2) - view.tx)/view.s + fr.w/2;
+  var v = (p[1] - (fr.y+fr.h/2) - view.ty)/view.s + fr.h/2;
+  return [ (u/fr.w)*s.w, (v/fr.h)*s.h ];
 }
-function imgPerStagePx(fr){ return photo.w / (fr.w * view.s); }
+function srcPerStagePx(fr){
+  var s = srcSize();
+  return mode === 'live' ? s.w/fr.w : s.w/(fr.w*view.s);
+}
 
-/* ------------------------------------------------------------- readouts */
+/* --------------------------------------------------------------- readouts */
 function updateReadout(fr){
-  $('gstate').textContent = orientLabel(S.orient) + ' · ' + Math.round(S.scale*100) + '% · ' +
-                            Math.round(S.rot * 180 / Math.PI) + '°';
-  $('gstate').className = 'state' + (S.overlay === 'spiral' ? '' : ' dim');
+  var s = srcSize();
   if (S.overlay !== 'spiral'){
-    $('gstate').textContent = (S.overlay === 'off' ? 'NO GUIDE' : S.overlay.toUpperCase() + ' · FRAME-FIXED');
-    $('readLeft').textContent = 'FULL FRAME · ' + photo.w + ' × ' + photo.h + ' px';
-    $('readRatio').textContent = photo.w >= photo.h
-      ? (photo.w/photo.h).toFixed(3) + ' : 1' : '1 : ' + (photo.h/photo.w).toFixed(3);
+    $('gstate').textContent = (S.overlay === 'off') ? 'NO GUIDE' : S.overlay.toUpperCase() + ' · FRAME-FIXED';
+    $('gstate').className = 'state grow dim';
+    $('readLeft').textContent = 'FULL FRAME · ' + s.w + ' × ' + s.h + ' px';
+    $('readRatio').textContent = s.w >= s.h ? (s.w/s.h).toFixed(3)+' : 1' : '1 : '+(s.h/s.w).toFixed(3);
     return;
   }
-  var T = xform(fr), q = phiRectLocal().map(T.at);
-  var k = imgPerStagePx(fr);
-  var cw = Math.round(dist(q[0], q[1]) * k), ch = Math.round(dist(q[1], q[2]) * k);
-  $('readLeft').textContent = 'φ CROP · ' + cw + ' × ' + ch + ' px';
+  $('gstate').className = 'state grow';
+  $('gstate').textContent = orientLabel(S.orient) + ' · ' + Math.round(S.scale*100) + '% · ' +
+                            Math.round(S.rot*180/Math.PI) + '°';
+  var T = xform(fr), q = phiRectLocal().map(T.at), k = srcPerStagePx(fr);
+  $('readLeft').textContent = 'φ CROP · ' + Math.round(dist(q[0],q[1])*k) + ' × ' +
+                              Math.round(dist(q[1],q[2])*k) + ' px';
   $('readRatio').textContent = '1 : 1.618';
 }
 
-/* --------------------------------------------------------- interaction */
-var ptrs = {}, nPtr = 0, mode = null, grab = null, lastTap = 0, downPt = null, moved = false;
-function stagePt(e){ var r = cv.getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top]; }
+/* ------------------------------------------------------------ interaction */
+var ptrs = {}, nPtr = 0, gest = null, grab = null, lastTap = 0, downPt = null, moved = false;
+function stagePt(e){ var r = cv.getBoundingClientRect(); return [e.clientX-r.left, e.clientY-r.top]; }
 
 cv.addEventListener('pointerdown', function(e){
-  cv.setPointerCapture(e.pointerId);
-  ptrs[e.pointerId] = stagePt(e); nPtr++;
+  cv.setPointerCapture(e.pointerId); ptrs[e.pointerId] = stagePt(e); nPtr++;
   if (nPtr === 2){
     var ks = Object.keys(ptrs), a = ptrs[ks[0]], b = ptrs[ks[1]];
-    mode = 'pinch';
-    grab = { d: dist(a,b), s: view.s, mx:(a[0]+b[0])/2, my:(a[1]+b[1])/2, tx:view.tx, ty:view.ty };
+    gest = 'pinch';
+    grab = { d:dist(a,b), s:view.s, z:camZoom, mx:(a[0]+b[0])/2, my:(a[1]+b[1])/2, tx:view.tx, ty:view.ty };
     return;
   }
   if (nPtr !== 1) return;
   var p = ptrs[e.pointerId], fr = frame(), T = xform(fr);
   downPt = p; moved = false;
-  if (S.overlay === 'spiral' && !S.locked && S.view !== 'crop'){
+  if (S.overlay === 'spiral' && !S.locked && !(S.view === 'crop' && mode === 'photo')){
     var h = handleOf(T), cs = cornersOf(T), i;
-    if (dist(p,h) < 26){ mode='rotate'; grab = { a0: Math.atan2(p[1]-T.ey, p[0]-T.ex), r0: S.rot }; return; }
+    if (dist(p,h) < 26){ gest='rotate'; grab={ a0:Math.atan2(p[1]-T.ey,p[0]-T.ex), r0:S.rot }; return; }
     for (i=0;i<4;i++) if (dist(p,cs[i]) < 26){
-      mode='scale'; grab = { d0: Math.max(8, dist(p,[T.ex,T.ey])), s0: S.scale }; return;
+      gest='scale'; grab={ d0:Math.max(8,dist(p,[T.ex,T.ey])), s0:S.scale }; return;
     }
-    if (inPoly(p, cs)){ mode='move'; grab = { px:p[0], py:p[1], cx:S.cx, cy:S.cy, fr:fr }; return; }
+    if (inPoly(p,cs)){ gest='move'; grab={ px:p[0], py:p[1], cx:S.cx, cy:S.cy, fr:fr }; return; }
   }
-  if (S.overlay === 'spiral' && S.locked && inPoly(p, cornersOf(T))){
-    var el = $('lock'); el.classList.remove('pulse'); void el.offsetWidth; el.classList.add('pulse');
-  }
-  if (view.s > 1){ mode='pan'; grab = { px:p[0], py:p[1], tx:view.tx, ty:view.ty }; }
+  if (S.overlay === 'spiral' && S.locked && inPoly(p, cornersOf(T))) pulseLock();
+  if (mode === 'photo' && view.s > 1){ gest='pan'; grab={ px:p[0], py:p[1], tx:view.tx, ty:view.ty }; }
 });
 
 cv.addEventListener('pointermove', function(e){
   if (!(e.pointerId in ptrs)) return;
   ptrs[e.pointerId] = stagePt(e);
   if (downPt && dist(ptrs[e.pointerId], downPt) > 6) moved = true;
-  var fr = frame(), T;
-  if (mode === 'pinch'){
+  var fr = frame(), T, p = ptrs[e.pointerId];
+  if (gest === 'pinch'){
     var ks = Object.keys(ptrs); if (ks.length < 2) return;
-    var a = ptrs[ks[0]], b = ptrs[ks[1]];
-    view.s = Math.min(6, Math.max(1, grab.s * (dist(a,b) / grab.d)));
-    var mx = (a[0]+b[0])/2, my = (a[1]+b[1])/2;
-    view.tx = grab.tx + (mx - grab.mx); view.ty = grab.ty + (my - grab.my);
-    if (view.s <= 1.001){ view.s = 1; view.tx = 0; view.ty = 0; }
+    var a = ptrs[ks[0]], b = ptrs[ks[1]], ratio = dist(a,b)/grab.d;
+    if (mode === 'live'){ setZoom(grab.z * ratio); return; }
+    view.s = Math.min(6, Math.max(1, grab.s*ratio));
+    var mx=(a[0]+b[0])/2, my=(a[1]+b[1])/2;
+    view.tx = grab.tx + (mx-grab.mx); view.ty = grab.ty + (my-grab.my);
+    if (view.s <= 1.001){ view.s=1; view.tx=0; view.ty=0; }
     draw(); return;
   }
-  var p = ptrs[e.pointerId];
-  if (mode === 'move'){
+  if (gest === 'move'){
     S.cx = Math.max(-0.2, Math.min(1.2, grab.cx + (p[0]-grab.px)/grab.fr.w));
     S.cy = Math.max(-0.2, Math.min(1.2, grab.cy + (p[1]-grab.py)/grab.fr.h));
     draw(); return;
   }
-  if (mode === 'scale'){
+  if (gest === 'scale'){
     T = xform(fr);
-    S.scale = Math.max(0.25, Math.min(1.6, grab.s0 * (dist(p,[T.ex,T.ey]) / grab.d0)));
+    S.scale = Math.max(0.25, Math.min(1.6, grab.s0*(dist(p,[T.ex,T.ey])/grab.d0)));
     syncVals(); draw(); return;
   }
-  if (mode === 'rotate'){
+  if (gest === 'rotate'){
     T = xform(fr);
-    var a1 = Math.atan2(p[1]-T.ey, p[0]-T.ex);
-    var r = grab.r0 + (a1 - grab.a0);
-    var deg = r * 180 / Math.PI;
-    deg = ((deg + 180) % 360 + 360) % 360 - 180;
-    var near = [0,90,-90,180,-180];                      // soft detent on the cardinals
-    for (var i=0;i<near.length;i++) if (Math.abs(deg - near[i]) < 3) deg = near[i];
-    S.rot = deg * Math.PI / 180;
-    syncVals(); draw(); return;
+    var deg = (grab.r0 + (Math.atan2(p[1]-T.ey, p[0]-T.ex) - grab.a0))*180/Math.PI;
+    deg = ((deg+180)%360+360)%360 - 180;
+    var near=[0,90,-90,180,-180];
+    for (var i=0;i<near.length;i++) if (Math.abs(deg-near[i]) < 3) deg = near[i];
+    S.rot = deg*Math.PI/180; syncVals(); draw(); return;
   }
-  if (mode === 'pan'){
-    view.tx = grab.tx + (p[0]-grab.px); view.ty = grab.ty + (p[1]-grab.py);
-    draw(); return;
-  }
+  if (gest === 'pan'){ view.tx = grab.tx+(p[0]-grab.px); view.ty = grab.ty+(p[1]-grab.py); draw(); return; }
 });
 
 function endPtr(e){
   if (e.pointerId in ptrs){ delete ptrs[e.pointerId]; nPtr = Math.max(0, nPtr-1); }
   if (nPtr === 0){
-    if (!moved && downPt){                                // double-tap cycles orientation
+    if (!moved && downPt){
       var now = Date.now();
       if (now - lastTap < 340 && S.overlay === 'spiral' && !S.locked){
-        S.orient = (S.orient + 1) % 8; syncSheet(); syncChips(); draw(); remember(); lastTap = 0;
+        S.orient = (S.orient+1)%8; syncSheet(); syncChips(); draw(); remember(); lastTap = 0;
       } else lastTap = now;
     }
-    mode = null; grab = null; remember();
-  } else if (nPtr === 1 && mode === 'pinch'){ mode = null; grab = null; }
+    gest = null; grab = null; remember();
+  } else if (nPtr === 1 && gest === 'pinch'){ gest = null; grab = null; }
 }
 cv.addEventListener('pointerup', endPtr);
 cv.addEventListener('pointercancel', endPtr);
+function pulseLock(){ var el=$('lock'); el.animate([{transform:'scale(1)'},{transform:'scale(1.18)'},{transform:'scale(1)'}],{duration:320}); }
 
-/* ------------------------------------------------------------- controls */
-var OVERLAYS = [
-  ['off','OFF'], ['grid','PHI GRID'], ['spiral','SPIRAL'],
-  ['triangles','TRIANGLES'], ['thirds','THIRDS']
-];
-(function buildPicker(){
+/* ----------------------------------------------------------------- camera */
+function camSupported(){ return !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia); }
+function gateMessage(){
+  if (!window.isSecureContext){
+    var where = location.hostname ? location.protocol + '//' + location.hostname
+                                  : 'opened as a local file';
+    $('gateMsg').innerHTML = '<b class="warn">The camera needs a secure origin.</b><br>' +
+      'This page is ' + where + '. Serve it over <b>https://</b> or from <b>localhost</b> ' +
+      'and the viewfinder will work. Everything else on this page works as it is.';
+    return false;
+  }
+  if (!camSupported()){
+    $('gateMsg').innerHTML = '<b class="warn">This browser exposes no camera API.</b><br>' +
+      'Open the page in Safari or Chrome. Everything else works as it is.';
+    return false;
+  }
+  return true;
+}
+function stopCamera(){
+  if (stream){ stream.getTracks().forEach(function(t){ t.stop(); }); stream = null; track = null; caps = {}; }
+  vid.classList.remove('on');
+}
+async function startCamera(){
+  if (!gateMessage()) return;
+  try {
+    stopCamera();
+    stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode:{ ideal:facing }, width:{ ideal:3840 }, height:{ ideal:2160 } },
+      audio: false
+    });
+  } catch (err){
+    var m = 'The camera could not start.';
+    if (err && err.name === 'NotAllowedError') m = 'Camera access was refused. Allow it in your browser settings for this site, then try again.';
+    else if (err && err.name === 'NotFoundError') m = 'No camera was found on this device.';
+    else if (err && err.name === 'NotReadableError') m = 'Another app is using the camera. Close it and try again.';
+    $('gateMsg').innerHTML = '<b class="warn">' + m + '</b>';
+    return;
+  }
+  vid.srcObject = stream;
+  vid.classList.toggle('mirror', facing === 'user');
+  try { await vid.play(); } catch(e){}
+  track = stream.getVideoTracks()[0];
+  caps = (track && track.getCapabilities) ? (track.getCapabilities() || {}) : {};
+  camZoom = (caps.zoom && track.getSettings && track.getSettings().zoom) || 1;
+  $('torch').hidden = !caps.torch;
+  var hasZoom = !!caps.zoom;
+  $('zoom').hidden = !hasZoom; $('zoomLab').hidden = !hasZoom;
+  if (hasZoom){
+    $('zoom').min = Math.round((caps.zoom.min||1)*100);
+    $('zoom').max = Math.round((caps.zoom.max||4)*100);
+    $('zoom').value = Math.round(camZoom*100);
+    $('zoomVal').textContent = camZoom.toFixed(1) + '×';
+  }
+  mode = 'live'; vid.classList.add('on'); $('gate').hidden = true;
+  $('srcName').textContent = 'LIVE · ' + facing.toUpperCase();
+  setBars(); resize(); centreGuideIfFresh(); draw();
+}
+async function setZoom(z){
+  if (!track || !caps.zoom) return;
+  z = Math.min(caps.zoom.max, Math.max(caps.zoom.min, z));
+  try { await track.applyConstraints({ advanced:[{ zoom:z }] }); camZoom = z;
+        $('zoom').value = Math.round(z*100); $('zoomVal').textContent = z.toFixed(1)+'×'; } catch(e){}
+}
+$('startCam').addEventListener('click', startCamera);
+$('liveBtn').addEventListener('click', startCamera);
+$('flip').addEventListener('click', function(){
+  facing = (facing === 'environment') ? 'user' : 'environment';
+  startCamera();
+});
+$('torch').addEventListener('click', async function(){
+  if (!track || !caps.torch) return;
+  var on = !this.classList.contains('on');
+  try { await track.applyConstraints({ advanced:[{ torch:on }] }); this.classList.toggle('on', on); }
+  catch(e){ toast('This camera would not switch the torch.'); }
+});
+$('zoom').addEventListener('input', function(){ setZoom(parseInt(this.value,10)/100); });
+
+$('shutter').addEventListener('click', function(){
+  if (mode !== 'live' || !vid.videoWidth) return;
+  var c = document.createElement('canvas');
+  c.width = vid.videoWidth; c.height = vid.videoHeight;
+  var g = c.getContext('2d');
+  if (facing === 'user'){ g.translate(c.width,0); g.scale(-1,1); }   // match the mirrored preview
+  g.drawImage(vid, 0, 0, c.width, c.height);
+  photo = { el:c, w:c.width, h:c.height, name:'CAPTURE' };
+  stopCamera(); mode = 'photo';
+  view.s = 1; view.tx = 0; view.ty = 0;
+  $('srcName').textContent = 'CAPTURE · ' + c.width + '×' + c.height;
+  setBars(); resize();                       // the guide keeps its exact placement
+  toast('Framed and captured.');
+});
+
+/* -------------------------------------------------------------- photo in */
+function loadFile(file){
+  if (!file) return;
+  var url = URL.createObjectURL(file), im = new Image();
+  im.onload = function(){
+    stopCamera(); mode = 'photo';
+    photo = { el:im, w:im.naturalWidth, h:im.naturalHeight, name:(file.name||'PHOTO').toUpperCase() };
+    $('srcName').textContent = photo.name.slice(0,22) + ' · ' + photo.w + '×' + photo.h;
+    view.s = 1; view.tx = 0; view.ty = 0; S.rot = 0;
+    setBars(); resize(); centreGuide(); draw(); remember();
+    toast('Drag the guide onto your subject.');
+  };
+  im.onerror = function(){ toast('That file would not open as an image.'); URL.revokeObjectURL(url); };
+  im.src = url;
+}
+$('pick').addEventListener('change', function(){ loadFile(this.files[0]); this.value=''; });
+$('pickBtn').addEventListener('click', function(){ $('pick').click(); });
+$('pickBtn2').addEventListener('click', function(){ $('pick').click(); });
+
+/* ----------------------------------------------------------------- export */
+function blobOf(c){ return new Promise(function(res){ c.toBlob(res, 'image/jpeg', 0.92); }); }
+async function offer(canvas, filename){
+  var blob = await blobOf(canvas);
+  if (!blob){ toast('That image could not be encoded.'); return; }
+  try {
+    var file = new File([blob], filename, { type:'image/jpeg' });
+    if (navigator.canShare && navigator.canShare({ files:[file] })){
+      await navigator.share({ files:[file] });        // iOS: "Save Image" lands in Photos
+      return;
+    }
+  } catch (e){ if (e && e.name === 'AbortError') return; }
+  var url = URL.createObjectURL(blob), a = document.createElement('a');
+  a.href = url; a.download = filename; document.body.appendChild(a); a.click();
+  setTimeout(function(){ URL.revokeObjectURL(url); a.remove(); }, 1500);
+  toast('Saved to your downloads.');
+}
+function paintGuideOn(k, mapPt, scaleK){
+  var fr = frame(), T = xform(fr), g, i, p;
+  k.lineJoin='round'; k.lineCap='round';
+  if (S.overlay === 'spiral'){
+    g = geo();
+    k.beginPath(); p = mapPt(T.at(g.pts[0])); k.moveTo(p[0],p[1]);
+    for (i=1;i<g.pts.length;i++){ p = mapPt(T.at(g.pts[i])); k.lineTo(p[0],p[1]); }
+    k.strokeStyle='rgba(255,255,255,0.86)'; k.lineWidth=1.4*scaleK; k.stroke();
+    p = mapPt([T.ex,T.ey]);
+    k.beginPath(); k.arc(p[0],p[1],11*scaleK,0,6.3);
+    k.strokeStyle='rgba(224,178,82,0.95)'; k.lineWidth=1.5*scaleK; k.stroke();
+  } else if (S.overlay === 'grid' || S.overlay === 'thirds'){
+    var fracs = (S.overlay === 'grid') ? [1-1/PHI, 1/PHI] : [1/3, 2/3], a, b;
+    k.strokeStyle='rgba(255,255,255,0.3)'; k.lineWidth=1*scaleK;
+    for (i=0;i<fracs.length;i++){
+      var f = fracs[i];
+      a = mapPt([fr.x+f*fr.w, fr.y]); b = mapPt([fr.x+f*fr.w, fr.y+fr.h]);
+      k.beginPath(); k.moveTo(a[0],a[1]); k.lineTo(b[0],b[1]); k.stroke();
+      a = mapPt([fr.x, fr.y+f*fr.h]); b = mapPt([fr.x+fr.w, fr.y+f*fr.h]);
+      k.beginPath(); k.moveTo(a[0],a[1]); k.lineTo(b[0],b[1]); k.stroke();
+    }
+  } else if (S.overlay === 'triangles'){
+    var tl=[fr.x,fr.y], tr=[fr.x+fr.w,fr.y], br=[fr.x+fr.w,fr.y+fr.h], bl=[fr.x,fr.y+fr.h], A,B,C1,C2;
+    if (!S.triFlip){ A=tl; B=br; C1=tr; C2=bl; } else { A=tr; B=bl; C1=tl; C2=br; }
+    k.strokeStyle='rgba(255,255,255,0.38)'; k.lineWidth=1*scaleK;
+    [[A,B],[C1,foot(A,B,C1)],[C2,foot(A,B,C2)]].forEach(function(pair){
+      var m=mapPt(pair[0]), n=mapPt(pair[1]);
+      k.beginPath(); k.moveTo(m[0],m[1]); k.lineTo(n[0],n[1]); k.stroke();
+    });
+  }
+}
+$('save').addEventListener('click', async function(){
+  if (mode !== 'photo' || !photo){ toast('Take a photo first, or open one.'); return; }
+  if (S.overlay !== 'spiral'){ toast('The φ crop comes from the spiral. Pick SPIRAL first.'); return; }
+  var fr = frame(), T = xform(fr), q = phiRectLocal().map(T.at), k = srcPerStagePx(fr);
+  var outW = Math.max(16, Math.round(dist(q[0],q[1])*k));
+  var outH = Math.max(16, Math.round(dist(q[1],q[2])*k));
+  var mid = [ (q[0][0]+q[2][0])/2, (q[0][1]+q[2][1])/2 ];
+  var ic = stageToSrc(mid, fr);
+  var c = document.createElement('canvas'); c.width = outW; c.height = outH;
+  var g = c.getContext('2d');
+  g.fillStyle = '#000'; g.fillRect(0,0,outW,outH);
+  g.save(); g.translate(outW/2, outH/2);
+  g.rotate(-S.rot);                               // crop and straighten in one step
+  g.drawImage(photo.el, -ic[0], -ic[1], photo.w, photo.h);
+  g.restore();
+  await offer(c, 'fibonacci-phi-crop.jpg');
+});
+$('saveFull').addEventListener('click', async function(){
+  if (mode !== 'photo' || !photo){ toast('Take a photo first, or open one.'); return; }
+  var fr = frame();
+  var c = document.createElement('canvas'); c.width = photo.w; c.height = photo.h;
+  var g = c.getContext('2d');
+  g.drawImage(photo.el, 0, 0, photo.w, photo.h);
+  paintGuideOn(g, function(p){ return stageToSrc(p, fr); }, srcPerStagePx(fr));
+  await offer(c, 'fibonacci-frame.jpg');
+});
+
+/* ---------------------------------------------------------------- chrome */
+var OVERLAYS = [['off','OFF'],['grid','PHI GRID'],['spiral','SPIRAL'],['triangles','TRIANGLES'],['thirds','THIRDS']];
+(function(){
   var box = $('picker');
   OVERLAYS.forEach(function(o){
     var b = document.createElement('button');
-    b.type = 'button'; b.className = 'chip'; b.textContent = o[1]; b.dataset.k = o[0];
+    b.type='button'; b.className='chip'; b.textContent=o[1]; b.dataset.k=o[0];
     b.addEventListener('click', function(){
       if (S.overlay === 'triangles' && o[0] === 'triangles') S.triFlip = S.triFlip ? 0 : 1;
       S.overlay = o[0]; syncChips(); draw(); remember();
@@ -564,11 +757,17 @@ var OVERLAYS = [
 function syncChips(){
   var bs = $('picker').children;
   for (var i=0;i<bs.length;i++) bs[i].classList.toggle('on', bs[i].dataset.k === S.overlay);
-  $('turnsChip').textContent = S.overlay === 'spiral'
-    ? 'SPIRAL · ' + fmtTurns(S.turns) + ' TURNS'
+  $('turnsChip').textContent = (S.overlay === 'spiral')
+    ? 'SPIRAL · ' + S.turns + ' TURNS'
     : OVERLAYS.filter(function(o){ return o[0] === S.overlay; })[0][1];
 }
-
+function setBars(){
+  var live = (mode === 'live');
+  $('liveBar').hidden = !live;
+  $('photoBar').hidden = live;
+  $('foot').style.visibility = live ? 'hidden' : '';
+  if (live){ $('gate').hidden = true; }
+}
 $('lock').addEventListener('click', function(){
   S.locked = !S.locked;
   this.classList.toggle('on', S.locked);
@@ -576,207 +775,92 @@ $('lock').addEventListener('click', function(){
   draw(); remember();
 });
 $('adjust').addEventListener('click', openSheet);
+$('turnsChip').addEventListener('click', openSheet);
 $('closeSheet').addEventListener('click', closeSheet);
 $('scrim').addEventListener('click', closeSheet);
 function openSheet(){ syncSheet(); $('sheet').classList.add('open'); $('scrim').classList.add('open'); }
 function closeSheet(){ $('sheet').classList.remove('open'); $('scrim').classList.remove('open'); }
 
-(function buildOrients(){
+(function(){
   var box = $('orients');
   for (var i=0;i<8;i++) (function(i){
-    var b = document.createElement('button'); b.type = 'button';
-    var c = document.createElement('canvas'); c.width = 80; c.height = 80;
-    var s = document.createElement('span');
-    b.appendChild(c); b.appendChild(s); box.appendChild(b);
-    b.addEventListener('click', function(){ S.orient = i; syncSheet(); syncChips(); draw(); remember(); });
+    var b = document.createElement('button'); b.type='button';
+    var c = document.createElement('canvas'); c.width=80; c.height=80;
+    b.appendChild(c); b.appendChild(document.createElement('span')); box.appendChild(b);
+    b.addEventListener('click', function(){ S.orient=i; syncSheet(); syncChips(); draw(); remember(); });
   })(i);
 })();
 function paintOrientTiles(){
   var bs = $('orients').children;
   for (var i=0;i<8;i++){
-    var b = bs[i], c = b.firstChild, g = geoFor(S.turns, i), k = c.getContext('2d');
-    var on = i === S.orient;
+    var b=bs[i], c=b.firstChild, g=geoFor(S.turns,i), k=c.getContext('2d'), on=(i===S.orient);
     b.classList.toggle('on', on);
     b.lastChild.textContent = orientLabel(i).replace('BOTTOM','BOT').replace('-',' ');
     k.clearRect(0,0,80,80);
-    var pad = 10, s = Math.min((80-pad*2)/g.bw, (80-pad*2)/g.bh);   // uniform, always
-    var ox = (80 - g.bw*s)/2 - g.ox*s, oy = (80 - g.bh*s)/2 - g.oy*s;
-    k.beginPath();
-    k.moveTo(ox + g.pts[0][0]*s, oy + g.pts[0][1]*s);
-    for (var j=1;j<g.pts.length;j+=3) k.lineTo(ox + g.pts[j][0]*s, oy + g.pts[j][1]*s);
-    k.strokeStyle = on ? '#E0B252' : 'rgba(245,243,239,0.6)'; k.lineWidth = 1.5; k.stroke();
-    k.beginPath(); k.arc(ox, oy, 2.6, 0, 6.3);
+    var s = Math.min(60/g.bw, 60/g.bh);                 // uniform fit, always
+    var ox = (80-g.bw*s)/2 - g.ox*s, oy = (80-g.bh*s)/2 - g.oy*s;
+    k.beginPath(); k.moveTo(ox+g.pts[0][0]*s, oy+g.pts[0][1]*s);
+    for (var j=1;j<g.pts.length;j+=3) k.lineTo(ox+g.pts[j][0]*s, oy+g.pts[j][1]*s);
+    k.strokeStyle = on ? '#E0B252' : 'rgba(245,243,239,0.6)'; k.lineWidth=1.5; k.stroke();
+    k.beginPath(); k.arc(ox,oy,2.6,0,6.3);
     k.fillStyle = on ? '#E0B252' : 'rgba(245,243,239,0.8)'; k.fill();
   }
 }
-function fmtTurns(t){ return (t % 1 === 0) ? String(t) : String(t); }
 function syncVals(){
-  $('turns').value = S.turns; $('turnsVal').textContent = fmtTurns(S.turns) + '×';
-  $('scale').value = Math.round(S.scale*100); $('scaleVal').textContent = Math.round(S.scale*100) + '%';
+  $('turns').value = S.turns; $('turnsVal').textContent = S.turns + '×';
+  $('scale').value = Math.round(S.scale*100); $('scaleVal').textContent = Math.round(S.scale*100)+'%';
   var d = Math.round(S.rot*180/Math.PI);
   $('rot').value = d; $('rotVal').textContent = d + '°';
   $('orientVal').textContent = orientLabel(S.orient);
 }
 function syncSheet(){ syncVals(); paintOrientTiles(); }
-$('turns').addEventListener('input', function(){ S.turns = parseFloat(this.value); syncSheet(); syncChips(); draw(); remember(); });
-$('scale').addEventListener('input', function(){ S.scale = parseInt(this.value,10)/100; syncSheet(); draw(); remember(); });
-$('rot').addEventListener('input', function(){ S.rot = parseInt(this.value,10)*Math.PI/180; syncSheet(); draw(); remember(); });
+$('turns').addEventListener('input', function(){ S.turns=parseFloat(this.value); syncSheet(); syncChips(); draw(); remember(); });
+$('scale').addEventListener('input', function(){ S.scale=parseInt(this.value,10)/100; syncVals(); draw(); remember(); });
+$('rot').addEventListener('input', function(){ S.rot=parseInt(this.value,10)*Math.PI/180; syncVals(); draw(); remember(); });
 $('reset').addEventListener('click', function(){
-  S.scale = DEF.scale; S.rot = 0; S.orient = 0; S.turns = 2.25;
-  view.s = 1; view.tx = 0; view.ty = 0;
+  S.scale=DEF.scale; S.rot=0; S.orient=0; S.turns=2.25;
+  view.s=1; view.tx=0; view.ty=0;
   centreGuide(); syncSheet(); syncChips(); draw(); remember();
 });
-$('turnsChip').addEventListener('click', openSheet);
-
-var footBtns = document.querySelectorAll('.foot button');
+var footBtns = document.querySelectorAll('#foot button');
 Array.prototype.forEach.call(footBtns, function(b){
   b.addEventListener('click', function(){
     S.view = b.dataset.view;
-    Array.prototype.forEach.call(footBtns, function(x){ x.classList.toggle('on', x === b); });
+    Array.prototype.forEach.call(footBtns, function(x){ x.classList.toggle('on', x===b); });
     draw(); remember();
   });
 });
 
-/* ----------------------------------------------------------- photo load */
-function loadFile(file){
-  if (!file) return;
-  var url = URL.createObjectURL(file), im = new Image();
-  im.onload = function(){
-    photo = { el:im, w:im.naturalWidth, h:im.naturalHeight, name:(file.name || 'PHOTO').toUpperCase() };
-    $('srcName').textContent = photo.name.slice(0,28) + ' · ' + photo.w + '×' + photo.h;
-    view.s = 1; view.tx = 0; view.ty = 0;
-    S.rot = 0;
-    resize();            // sizes the frame first, so the guide can be centred in it
-    centreGuide(); draw(); remember();
-    toast('Photo loaded. Drag the guide onto your subject.');
-  };
-  im.onerror = function(){ toast('That file would not open as an image.'); URL.revokeObjectURL(url); };
-  im.src = url;
-}
-$('shootBtn').addEventListener('click', function(){ $('shoot').click(); });
-$('pickBtn').addEventListener('click', function(){ $('pick').click(); });
-$('shoot').addEventListener('change', function(){ loadFile(this.files[0]); this.value=''; });
-$('pick').addEventListener('change', function(){ loadFile(this.files[0]); this.value=''; });
-['dragenter','dragover'].forEach(function(t){
-  window.addEventListener(t, function(e){ e.preventDefault(); $('drop').classList.add('on'); });
-});
-['dragleave','drop'].forEach(function(t){
-  window.addEventListener(t, function(e){ e.preventDefault(); $('drop').classList.remove('on'); });
-});
-window.addEventListener('drop', function(e){
-  if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0]) loadFile(e.dataTransfer.files[0]);
-});
-
-/* --------------------------------------------------------------- export */
-var downloads = null;
-if (window.claude && window.claude.use){
-  window.claude.use('downloads').then(function(d){
-    downloads = d;
-    if (!d){ $('save').disabled = true; $('saveFull').disabled = true;
-             $('save').textContent = 'Saving unavailable here'; }
-  }).catch(function(){});
-} else { $('save').disabled = true; $('saveFull').disabled = true; }
-
-function paintGuideOn(k, mapPt, scaleK){
-  // redraw the active overlay into an export canvas, using a point mapper
-  var fr = frame(), T = xform(fr), g, i, p;
-  k.lineJoin = 'round'; k.lineCap = 'round';
-  if (S.overlay === 'spiral'){
-    g = geo();
-    k.beginPath(); p = mapPt(T.at(g.pts[0])); k.moveTo(p[0],p[1]);
-    for (i=1;i<g.pts.length;i++){ p = mapPt(T.at(g.pts[i])); k.lineTo(p[0],p[1]); }
-    k.strokeStyle = 'rgba(255,255,255,0.86)'; k.lineWidth = 1.4*scaleK; k.stroke();
-    p = mapPt([T.ex, T.ey]);
-    k.beginPath(); k.arc(p[0],p[1],11*scaleK,0,6.3);
-    k.strokeStyle = 'rgba(224,178,82,0.95)'; k.lineWidth = 1.5*scaleK; k.stroke();
-  } else if (S.overlay === 'grid' || S.overlay === 'thirds'){
-    var fracs = S.overlay === 'grid' ? [1-1/PHI, 1/PHI] : [1/3, 2/3];
-    k.strokeStyle = 'rgba(255,255,255,0.3)'; k.lineWidth = 1*scaleK;
-    for (i=0;i<fracs.length;i++){
-      var f = fracs[i], a, b;
-      a = mapPt([fr.x+f*fr.w, fr.y]); b = mapPt([fr.x+f*fr.w, fr.y+fr.h]);
-      k.beginPath(); k.moveTo(a[0],a[1]); k.lineTo(b[0],b[1]); k.stroke();
-      a = mapPt([fr.x, fr.y+f*fr.h]); b = mapPt([fr.x+fr.w, fr.y+f*fr.h]);
-      k.beginPath(); k.moveTo(a[0],a[1]); k.lineTo(b[0],b[1]); k.stroke();
-    }
-  } else if (S.overlay === 'triangles'){
-    var tl=[fr.x,fr.y], tr2=[fr.x+fr.w,fr.y], br=[fr.x+fr.w,fr.y+fr.h], bl=[fr.x,fr.y+fr.h];
-    var A,B,C1,C2;
-    if (!S.triFlip){ A=tl; B=br; C1=tr2; C2=bl; } else { A=tr2; B=bl; C1=tl; C2=br; }
-    k.strokeStyle = 'rgba(255,255,255,0.38)'; k.lineWidth = 1*scaleK;
-    [[A,B],[C1,foot(A,B,C1)],[C2,foot(A,B,C2)]].forEach(function(pair){
-      var m = mapPt(pair[0]), n = mapPt(pair[1]);
-      k.beginPath(); k.moveTo(m[0],m[1]); k.lineTo(n[0],n[1]); k.stroke();
-    });
-  }
-}
-function blobOf(c){ return new Promise(function(res){ c.toBlob(res, 'image/jpeg', 0.92); }); }
-async function offer(canvas, filename){
-  if (!downloads){ toast('Saving is not available in this view.'); return; }
-  try {
-    var blob = await blobOf(canvas);
-    await downloads.save({ filename: filename, data: blob });
-    toast('Saved.');
-  } catch (err){
-    var code = err && err.code;
-    if (code === 'declined') return;
-    toast(code === 'too_large' ? 'That file is too large to save.' : 'Could not save that file.');
-  }
-}
-$('save').addEventListener('click', async function(){
-  if (!photo) return;
-  if (S.overlay !== 'spiral'){ toast('The φ crop comes from the spiral. Pick SPIRAL first.'); return; }
-  var fr = frame(), T = xform(fr), q = phiRectLocal().map(T.at);
-  var k = imgPerStagePx(fr);
-  var outW = Math.max(16, Math.round(dist(q[0],q[1]) * k));
-  var outH = Math.max(16, Math.round(dist(q[1],q[2]) * k));
-  var mid = [ (q[0][0]+q[2][0])/2, (q[0][1]+q[2][1])/2 ];
-  var ic = stageToImage(mid, fr);
-  var c = document.createElement('canvas'); c.width = outW; c.height = outH;
-  var g = c.getContext('2d');
-  g.fillStyle = '#000'; g.fillRect(0,0,outW,outH);
-  g.save();
-  g.translate(outW/2, outH/2);
-  g.rotate(-S.rot);                              // crop and straighten together
-  g.drawImage(photo.el, -ic[0], -ic[1], photo.w, photo.h);
-  g.restore();
-  await offer(c, 'fibonacci-phi-crop.jpg');
-});
-$('saveFull').addEventListener('click', async function(){
-  if (!photo) return;
-  var fr = frame();
-  var c = document.createElement('canvas'); c.width = photo.w; c.height = photo.h;
-  var g = c.getContext('2d');
-  g.drawImage(photo.el, 0, 0, photo.w, photo.h);
-  var k = imgPerStagePx(fr);
-  paintGuideOn(g, function(p){ return stageToImage(p, fr); }, k);
-  await offer(c, 'fibonacci-frame.jpg');
-});
-
-/* ---------------------------------------------------------------- chrome */
 var toastT = null;
 function toast(msg){
   var el = $('toast'); el.textContent = msg; el.classList.add('on');
-  clearTimeout(toastT); toastT = setTimeout(function(){ el.classList.remove('on'); }, 2400);
+  clearTimeout(toastT); toastT = setTimeout(function(){ el.classList.remove('on'); }, 2600);
 }
+function centreGuideIfFresh(){ if (!(saved && saved.cx !== undefined)) centreGuide(); }
 function resize(){
   var r = $('stageWrap').getBoundingClientRect();
   dpr = Math.min(3, window.devicePixelRatio || 1);
   W = Math.max(1, r.width); H = Math.max(1, r.height);
   cv.width = Math.round(W*dpr); cv.height = Math.round(H*dpr);
-  cv.style.width = W + 'px'; cv.style.height = H + 'px';
   draw();
 }
 window.addEventListener('resize', resize);
-window.addEventListener('orientationchange', function(){ setTimeout(resize, 120); });
+window.addEventListener('orientationchange', function(){ setTimeout(resize, 150); });
+vid.addEventListener('loadedmetadata', resize);
+document.addEventListener('visibilitychange', function(){
+  if (document.hidden && mode === 'live'){ stopCamera(); mode='photo'; if(!photo) photo = sampleScene();
+    setBars(); $('gate').hidden = false; gateMessage(); resize(); }
+});
+document.addEventListener('gesturestart', function(e){ e.preventDefault(); });   // iOS page pinch-zoom
 
 photo = sampleScene();
+gateMessage();
 $('lock').classList.toggle('on', S.locked);
 $('lock').setAttribute('aria-pressed', String(S.locked));
 Array.prototype.forEach.call(footBtns, function(x){ x.classList.toggle('on', x.dataset.view === S.view); });
-syncChips(); syncSheet();
-resize();
-if (!(saved && saved.cx !== undefined)){ centreGuide(); draw(); }
+setBars(); syncChips(); syncSheet(); resize(); centreGuideIfFresh(); draw();
 if (document.fonts && document.fonts.ready) document.fonts.ready.then(resize);
 })();
 </script>
+</body>
+</html>

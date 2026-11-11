@@ -2,10 +2,12 @@
 
 Golden-ratio framing guides over a live viewfinder.
 
-- **`fibonacci-camera.html`** — the live-camera version. One self-contained file.
-  Needs to be served over **https://** (or `localhost`) or the camera stays off.
-- **`index.html`** — a sandboxed build with no live viewfinder. Same guide engine,
-  works on photos you take with the system camera or pick from the library.
+**<https://leisuresuitlissy.github.io/fibonacci-camera/>**
+
+- **`index.html`** — the live-camera version, served at the link above. One
+  self-contained file. Needs **https://** (or `localhost`) or the camera stays off.
+- **`no-camera.html`** — a sandboxed build with no live viewfinder. Same guide
+  engine, works on photos taken with the system camera or picked from the library.
 
 ## Putting it on your phone
 
@@ -13,11 +15,11 @@ The camera API refuses to run on `file://`. Opening the file by double-clicking 
 will show everything except the viewfinder, and the page says so on screen.
 
 **Drag-and-drop host (fastest).** Go to <https://app.netlify.com/drop> and drag
-`fibonacci-camera.html` onto the page. You get an `https://…netlify.app` address in
-a few seconds. Open that on your phone.
+`index.html` onto the page. You get an `https://…netlify.app` address in a few
+seconds. Open that on your phone.
 
 **GitHub Pages.** Put the file in a repo, Settings → Pages → deploy from `main`,
-then open `https://<you>.github.io/<repo>/fibonacci-camera.html`.
+then open `https://<you>.github.io/<repo>/`.
 
 **Cloudflare Pages / Vercel.** Both take a drag-and-drop or a repo and give HTTPS.
 
@@ -32,9 +34,9 @@ From the folder holding the file:
 python3 -m http.server 8731
 ```
 
-Then open <http://localhost:8731/fibonacci-camera.html>. `localhost` counts as a
-secure origin, so the camera works there. That address will **not** work from a
-phone — the phone needs the HTTPS host above.
+Then open <http://localhost:8731/>. `localhost` counts as a secure origin, so the
+camera works there. That address will **not** work from a phone — the phone needs
+the HTTPS host above.
 
 ## Using it
 
