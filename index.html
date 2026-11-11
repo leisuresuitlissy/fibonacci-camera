@@ -8,6 +8,9 @@
 <meta name="apple-mobile-web-app-title" content="Fibonacci">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="theme-color" content="#0B0B0C">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
+<link rel="manifest" href="manifest.webmanifest">
 <meta name="description" content="Golden-ratio framing guides over a live viewfinder.">
 <title>Fibonacci Camera</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=DM+Mono:wght@400;500&display=swap">
@@ -198,7 +201,7 @@ input[type=range]{width:100%;accent-color:var(--gold);margin:0}
     </div>
 
     <div class="lab"><span>SIZE</span><b id="scaleVal">92%</b></div>
-    <input type="range" id="scale" min="25" max="160" step="1" value="92">
+    <input type="range" id="scale" min="25" max="160" step="1" value="100">
     <div class="lab"><span>ROTATION</span><b id="rotVal">0°</b></div>
     <input type="range" id="rot" min="-180" max="180" step="1" value="0">
     <div class="lab" id="zoomLab" hidden><span>CAMERA ZOOM</span><b id="zoomVal">1.0×</b></div>
@@ -231,7 +234,7 @@ var $ = function(id){ return document.getElementById(id); };
 // `growth` is how much the radius multiplies every quarter-turn. At φ this is
 // the golden spiral. Other values are still true logarithmic spirals, just not
 // that one — which is how the proportion changes without anything being stretched.
-var DEF = { overlay:'spiral', turns:2.25, orient:0, scale:0.92, rot:0, cx:0.336, cy:0.303,
+var DEF = { overlay:'spiral', turns:2.25, orient:0, scale:1, rot:0, cx:0.336, cy:0.303,
             locked:false, triFlip:0, view:'guide', growth:PHI };
 var S = {}; for (var k in DEF) S[k] = DEF[k];
 var saved = null;
@@ -336,6 +339,23 @@ function handleOf(T){
 // At the golden growth the crop is an exact φ rectangle: the spiral's own box is
 // 1.565:1 there, not φ, so the rectangle sits a little proud on one axis. At any
 // other growth there is no φ to appeal to, so the crop is the spiral's own box.
+// The crop can reach past the photo — the φ rectangle is taller than the spiral's
+// own box, so a guide filling the frame pushes it over the edge. Shrink it about
+// its centre until it fits: uniform, so the ratio it claims stays true.
+function fitQuadToFrame(q, fr){
+  var cx = (q[0][0]+q[2][0])/2, cy = (q[0][1]+q[2][1])/2, lo = 0.2, hi = 1, mid, i;
+  function inside(f){
+    for (var j=0;j<4;j++){
+      var x = cx + (q[j][0]-cx)*f, y = cy + (q[j][1]-cy)*f;
+      if (x < fr.x || x > fr.x+fr.w || y < fr.y || y > fr.y+fr.h) return false;
+    }
+    return true;
+  }
+  if (inside(1)) return q;
+  for (i=0;i<26;i++){ mid=(lo+hi)/2; if (inside(mid)) lo=mid; else hi=mid; }
+  return q.map(function(p){ return [cx+(p[0]-cx)*lo, cy+(p[1]-cy)*lo]; });
+}
+function cropQuad(fr, T){ return fitQuadToFrame(cropRectLocal().map(T.at), fr); }
 function cropRectLocal(){
   var g = geo(), x, y, w, h;
   if (atPhi()){
@@ -452,8 +472,8 @@ function drawWidget(T){
   for (i=0;i<4;i++) ring(cs[i],4.8,'rgba(255,255,255,0.95)','rgba(11,11,12,0.55)',1);
   ring(h,6.8,'rgba(255,255,255,0.95)','rgba(11,11,12,0.55)',1);
 }
-function drawCropMask(T){
-  var q=cropRectLocal().map(T.at), i;
+function drawCropMask(q){
+  var i;
   ctx.save(); ctx.beginPath(); ctx.rect(0,0,W,H);
   ctx.moveTo(q[0][0],q[0][1]);
   for (i=3;i>=1;i--) ctx.lineTo(q[i][0],q[i][1]);
@@ -477,7 +497,7 @@ function draw(){
   if (mode === 'photo' && photo) drawPhoto(fr);
   if (S.view === 'original' && mode === 'photo'){ frameEdge(fr); updateReadout(fr); return; }
   var T = xform(fr);
-  if (S.view === 'crop' && S.overlay === 'spiral' && mode === 'photo') drawCropMask(T);
+  if (S.view === 'crop' && S.overlay === 'spiral' && mode === 'photo') drawCropMask(cropQuad(fr, T));
   if (S.overlay === 'grid')           drawFrameOverlay(fr, [1 - 1/PHI, 1/PHI]);
   else if (S.overlay === 'thirds')    drawFrameOverlay(fr, [1/3, 2/3]);
   else if (S.overlay === 'triangles') drawTriangles(fr);
@@ -520,7 +540,7 @@ function updateReadout(fr){
   $('gstate').className = 'state grow';
   $('gstate').textContent = orientLabel(S.orient) + ' · ' + Math.round(S.scale*100) + '% · ' +
                             Math.round(S.rot*180/Math.PI) + '°';
-  var T = xform(fr), q = cropRectLocal().map(T.at), k = srcPerStagePx(fr);
+  var T = xform(fr), q = cropQuad(fr, T), k = srcPerStagePx(fr);
   var cw = Math.round(dist(q[0],q[1])*k), ch = Math.round(dist(q[1],q[2])*k), phi = atPhi();
   $('readLeft').textContent = (phi ? 'φ CROP · ' : 'GUIDE CROP · ') + cw + ' × ' + ch + ' px';
   $('readRatio').textContent = phi ? '1 : 1.618'
@@ -766,7 +786,7 @@ function paintGuideOn(k, mapPt, scaleK){
 $('save').addEventListener('click', async function(){
   if (mode !== 'photo' || !photo){ toast('Take a photo first, or open one.'); return; }
   if (S.overlay !== 'spiral'){ toast('The φ crop comes from the spiral. Pick SPIRAL first.'); return; }
-  var fr = frame(), T = xform(fr), q = cropRectLocal().map(T.at), k = srcPerStagePx(fr);
+  var fr = frame(), T = xform(fr), q = cropQuad(fr, T), k = srcPerStagePx(fr);
   var outW = Math.max(16, Math.round(dist(q[0],q[1])*k));
   var outH = Math.max(16, Math.round(dist(q[1],q[2])*k));
   var mid = [ (q[0][0]+q[2][0])/2, (q[0][1]+q[2][1])/2 ];

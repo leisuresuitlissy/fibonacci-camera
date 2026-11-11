@@ -23,8 +23,26 @@ then open `https://<you>.github.io/<repo>/`.
 
 **Cloudflare Pages / Vercel.** Both take a drag-and-drop or a repo and give HTTPS.
 
-Once it is loading over HTTPS, use **Share → Add to Home Screen** on the phone. It
-then opens full-screen with no browser chrome, like an app.
+## Installing it as an app
+
+It installs as a real home-screen app, and GitHub never has to be touched again.
+
+**iPhone.** Open the site in **Safari** (not Chrome — only Safari can install).
+Tap the Share button, scroll down, **Add to Home Screen**. You get the spiral icon
+and it opens full-screen with no browser bar.
+
+**Android.** Open it in Chrome and take the **Install app** prompt, or use the ⋮
+menu → *Install app* / *Add to Home screen*.
+
+There is a `manifest.webmanifest` and a set of PNG icons in the repo, so it
+installs with a proper name and icon rather than a screenshot of the page.
+
+### When an update does not show up
+
+A home-screen app caches hard, and GitHub Pages sets a ten-minute cache on top.
+If a change is missing, open the site with a different query string once —
+`…/fibonacci-camera/?v=2` — which counts as a new URL and fetches fresh. For the
+installed app, remove it from the home screen and add it again.
 
 ### Testing locally
 
