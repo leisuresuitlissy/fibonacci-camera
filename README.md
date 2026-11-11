@@ -53,6 +53,23 @@ the HTTPS host above.
 Rotation grips the cardinals: within 3° of 0/90/180/270 it snaps, so square is
 reachable without fighting it.
 
+### Proportion
+
+The **Proportion** slider sets how much the radius multiplies every quarter-turn.
+At **φ (1.618)** that is the golden spiral. Lower values give a rounder, more open
+curve; higher values a long narrow one. Every value is a true logarithmic spiral —
+the shape changes because it is a *different spiral*, never a stretched one.
+
+**Fit the frame** solves for the proportion whose natural bounding box matches the
+photo's shape, so the spiral fills the frame without distortion.
+
+Turns alone cannot do this: at φ the box only ever alternates between 1.565:1 and
+0.639:1, whichever quarter-turn you stop on.
+
+Away from φ the crop is the spiral's own rectangle and the readout names its real
+ratio, because there is no φ to claim. The labels change from `φ CROP` to
+`GUIDE CROP` to keep that honest.
+
 The lock hides the handles and holds the guide still. It never engages itself.
 
 **Overlays:** off, φ grid (0.382 / 0.618), the spiral, golden triangles, thirds.

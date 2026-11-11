@@ -189,6 +189,14 @@ input[type=range]{width:100%;accent-color:var(--gold);margin:0}
     <div class="orients" id="orients"></div>
     <div class="lab"><span>TURNS</span><b id="turnsVal">2.25×</b></div>
     <input type="range" id="turns" min="1" max="4" step="0.25" value="2.25">
+
+    <div class="lab"><span>PROPORTION</span><b id="growthVal">φ 1.618</b></div>
+    <input type="range" id="growth" min="105" max="260" step="1" value="162">
+    <div class="rowbtns" style="padding-block:10px 0">
+      <button class="ghost" id="fitFrame" type="button" style="flex:1;padding:11px 10px">Fit the frame</button>
+      <button class="ghost" id="goldenBtn" type="button" style="flex:1;padding:11px 10px">Back to φ</button>
+    </div>
+
     <div class="lab"><span>SIZE</span><b id="scaleVal">92%</b></div>
     <input type="range" id="scale" min="25" max="160" step="1" value="92">
     <div class="lab"><span>ROTATION</span><b id="rotVal">0°</b></div>
@@ -202,7 +210,11 @@ input[type=range]{width:100%;accent-color:var(--gold);margin:0}
     <p class="note"><b>Drag inside the guide to move it, a corner to size it, the top handle to rotate it.</b>
       Double-tap steps through the eight orientations. The lock hides the handles and holds everything in place.
       In the viewfinder a pinch zooms the lens. On a photo there is no lens, so two fingers belong to the
-      guide instead: pinch to resize it, twist to rotate it.</p>
+      guide instead: pinch to resize it, twist to rotate it.
+      <br><br><b>Proportion</b> changes how fast the spiral opens out, which is what makes it tall or
+      wide. At φ it is the golden spiral. Anywhere else it is still a true spiral, just a different one —
+      nothing is ever stretched, so the curve stays a curve. <b>Fit the frame</b> finds the proportion
+      whose natural shape matches this photo.</p>
   </div>
 </section>
 
@@ -216,8 +228,11 @@ var PHI = 1.6180339887498949;
 var $ = function(id){ return document.getElementById(id); };
 
 /* ------------------------------------------------------------------ state */
+// `growth` is how much the radius multiplies every quarter-turn. At φ this is
+// the golden spiral. Other values are still true logarithmic spirals, just not
+// that one — which is how the proportion changes without anything being stretched.
 var DEF = { overlay:'spiral', turns:2.25, orient:0, scale:0.92, rot:0, cx:0.336, cy:0.303,
-            locked:false, triFlip:0, view:'guide' };
+            locked:false, triFlip:0, view:'guide', growth:PHI };
 var S = {}; for (var k in DEF) S[k] = DEF[k];
 var saved = null;
 try {
@@ -241,10 +256,10 @@ var ORIENTS = [
 var geoCache = {};
 // Eye at the origin, longer box side normalised to 1. Everything downstream
 // multiplies by ONE scalar, so X and Y can never be scaled apart.
-function geoFor(turns, orient){
-  var key = turns.toFixed(2) + '|' + orient;
+function geoFor(turns, orient, growth){
+  var key = turns.toFixed(2) + '|' + orient + '|' + growth.toFixed(4);
   if (geoCache[key]) return geoCache[key];
-  var o = ORIENTS[orient], b = Math.log(PHI)/(Math.PI/2);
+  var o = ORIENTS[orient], b = Math.log(growth)/(Math.PI/2);
   var thMax = turns*2*Math.PI, N = 700, pts = [], i, th, r, p;
   for (i=0;i<=N;i++){ th = thMax*i/N; r = Math.exp(b*th); pts.push([r*Math.cos(th), r*Math.sin(th)]); }
   if (o.t)  for (i=0;i<pts.length;i++){ p = pts[i]; pts[i] = [p[1], p[0]]; }
@@ -258,10 +273,34 @@ function geoFor(turns, orient){
   for (i=0;i<pts.length;i++) out.pts.push([(pts[i][0]-eye[0])*kk, (pts[i][1]-eye[1])*kk]);
   geoCache[key] = out; return out;
 }
-function geo(){ return geoFor(S.turns, S.orient); }
+function geo(){ return geoFor(S.turns, S.orient, S.growth); }
+function atPhi(){ return Math.abs(S.growth - PHI) < 5e-4; }
 function orientLabel(i){
-  var g = geoFor(S.turns, i), fx = -g.ox/g.bw, fy = -g.oy/g.bh;
+  var g = geoFor(S.turns, i, S.growth), fx = -g.ox/g.bw, fy = -g.oy/g.bh;
   return (fy<0.5?'TOP':'BOTTOM') + '-' + (fx<0.5?'LEFT':'RIGHT') + (g.bw<g.bh?' ↕':' ↔');
+}
+// Cheap box-aspect probe, used to solve for the growth that matches a frame.
+// Only the transpose flag changes the aspect; the mirror flips do not.
+function boxAspect(turns, orient, k){
+  var o = ORIENTS[orient], b = Math.log(k)/(Math.PI/2), thMax = turns*2*Math.PI, N = 240;
+  var mnx=1e9,mxx=-1e9,mny=1e9,mxy=-1e9, i, th, r, x, y, t;
+  for (i=0;i<=N;i++){
+    th = thMax*i/N; r = Math.exp(b*th);
+    x = r*Math.cos(th); y = r*Math.sin(th);
+    if (o.t){ t = x; x = y; y = t; }
+    if(x<mnx)mnx=x; if(x>mxx)mxx=x; if(y<mny)mny=y; if(y>mxy)mxy=y;
+  }
+  return (mxx-mnx)/(mxy-mny);
+}
+// The growth whose natural box matches the photo's shape — so the spiral fills
+// the frame by being the right spiral, not by being squashed into it.
+function growthForFrame(){
+  var fr = frame(), target = fr.w/fr.h, best = null, k, d;
+  for (k = 1.03; k <= 3.0; k += 0.005){
+    d = Math.abs(boxAspect(S.turns, S.orient, k) - target);
+    if (!best || d < best.d) best = { k:k, d:d };
+  }
+  return best.k;
 }
 
 /* ----------------------------------------------------------- frame + maths */
@@ -294,13 +333,17 @@ function handleOf(T){
   if (hx < 16 || hx > W-16 || hy < 16 || hy > H-16){ hx = tm[0] - 34*T.si; hy = tm[1] + 34*T.c; }
   return [hx, hy];
 }
-// Exact φ rectangle inscribing the spiral. The spiral's own box is 1.565:1 at
-// 2.25 turns, not φ, so the rectangle is slightly larger on one axis.
-function phiRectLocal(){
+// At the golden growth the crop is an exact φ rectangle: the spiral's own box is
+// 1.565:1 there, not φ, so the rectangle sits a little proud on one axis. At any
+// other growth there is no φ to appeal to, so the crop is the spiral's own box.
+function cropRectLocal(){
   var g = geo(), x, y, w, h;
-  if (g.bw <= g.bh){ w = g.bw; h = w*PHI; x = g.ox; y = g.oy + (g.bh-h)/2; }
-  else             { h = g.bh; w = h*PHI; y = g.oy; x = g.ox + (g.bw-w)/2; }
-  return [[x,y],[x+w,y],[x+w,y+h],[x,y+h]];
+  if (atPhi()){
+    if (g.bw <= g.bh){ w = g.bw; h = w*PHI; x = g.ox; y = g.oy + (g.bh-h)/2; }
+    else             { h = g.bh; w = h*PHI; y = g.oy; x = g.ox + (g.bw-w)/2; }
+    return [[x,y],[x+w,y],[x+w,y+h],[x,y+h]];
+  }
+  return [[g.ox,g.oy],[g.ox+g.bw,g.oy],[g.ox+g.bw,g.oy+g.bh],[g.ox,g.oy+g.bh]];
 }
 function centreGuide(){
   var fr = frame(), g = geo(), f = baseFit(fr)*S.scale;
@@ -410,7 +453,7 @@ function drawWidget(T){
   ring(h,6.8,'rgba(255,255,255,0.95)','rgba(11,11,12,0.55)',1);
 }
 function drawCropMask(T){
-  var q=phiRectLocal().map(T.at), i;
+  var q=cropRectLocal().map(T.at), i;
   ctx.save(); ctx.beginPath(); ctx.rect(0,0,W,H);
   ctx.moveTo(q[0][0],q[0][1]);
   for (i=3;i>=1;i--) ctx.lineTo(q[i][0],q[i][1]);
@@ -477,10 +520,12 @@ function updateReadout(fr){
   $('gstate').className = 'state grow';
   $('gstate').textContent = orientLabel(S.orient) + ' · ' + Math.round(S.scale*100) + '% · ' +
                             Math.round(S.rot*180/Math.PI) + '°';
-  var T = xform(fr), q = phiRectLocal().map(T.at), k = srcPerStagePx(fr);
-  $('readLeft').textContent = 'φ CROP · ' + Math.round(dist(q[0],q[1])*k) + ' × ' +
-                              Math.round(dist(q[1],q[2])*k) + ' px';
-  $('readRatio').textContent = '1 : 1.618';
+  var T = xform(fr), q = cropRectLocal().map(T.at), k = srcPerStagePx(fr);
+  var cw = Math.round(dist(q[0],q[1])*k), ch = Math.round(dist(q[1],q[2])*k), phi = atPhi();
+  $('readLeft').textContent = (phi ? 'φ CROP · ' : 'GUIDE CROP · ') + cw + ' × ' + ch + ' px';
+  $('readRatio').textContent = phi ? '1 : 1.618'
+    : (cw >= ch ? (cw/ch).toFixed(3) + ' : 1' : '1 : ' + (ch/cw).toFixed(3));
+  $('save').textContent = phi ? 'Save φ crop' : 'Save crop';
 }
 
 /* ------------------------------------------------------------ interaction */
@@ -721,7 +766,7 @@ function paintGuideOn(k, mapPt, scaleK){
 $('save').addEventListener('click', async function(){
   if (mode !== 'photo' || !photo){ toast('Take a photo first, or open one.'); return; }
   if (S.overlay !== 'spiral'){ toast('The φ crop comes from the spiral. Pick SPIRAL first.'); return; }
-  var fr = frame(), T = xform(fr), q = phiRectLocal().map(T.at), k = srcPerStagePx(fr);
+  var fr = frame(), T = xform(fr), q = cropRectLocal().map(T.at), k = srcPerStagePx(fr);
   var outW = Math.max(16, Math.round(dist(q[0],q[1])*k));
   var outH = Math.max(16, Math.round(dist(q[1],q[2])*k));
   var mid = [ (q[0][0]+q[2][0])/2, (q[0][1]+q[2][1])/2 ];
@@ -798,7 +843,7 @@ function closeSheet(){ $('sheet').classList.remove('open'); $('scrim').classList
 function paintOrientTiles(){
   var bs = $('orients').children;
   for (var i=0;i<8;i++){
-    var b=bs[i], c=b.firstChild, g=geoFor(S.turns,i), k=c.getContext('2d'), on=(i===S.orient);
+    var b=bs[i], c=b.firstChild, g=geoFor(S.turns,i,S.growth), k=c.getContext('2d'), on=(i===S.orient);
     b.classList.toggle('on', on);
     b.lastChild.textContent = orientLabel(i).replace('BOTTOM','BOT').replace('-',' ');
     k.clearRect(0,0,80,80);
@@ -817,13 +862,26 @@ function syncVals(){
   var d = Math.round(S.rot*180/Math.PI);
   $('rot').value = d; $('rotVal').textContent = d + '°';
   $('orientVal').textContent = orientLabel(S.orient);
+  $('growth').value = Math.round(S.growth*100);
+  $('growthVal').textContent = atPhi() ? 'φ 1.618' : S.growth.toFixed(3);
 }
 function syncSheet(){ syncVals(); paintOrientTiles(); }
 $('turns').addEventListener('input', function(){ S.turns=parseFloat(this.value); syncSheet(); syncChips(); draw(); remember(); });
 $('scale').addEventListener('input', function(){ S.scale=parseInt(this.value,10)/100; syncVals(); draw(); remember(); });
 $('rot').addEventListener('input', function(){ S.rot=parseInt(this.value,10)*Math.PI/180; syncVals(); draw(); remember(); });
+$('growth').addEventListener('input', function(){
+  S.growth = parseInt(this.value,10)/100; syncVals(); draw(); remember();
+});
+$('goldenBtn').addEventListener('click', function(){
+  S.growth = PHI; syncSheet(); draw(); remember();
+});
+$('fitFrame').addEventListener('click', function(){
+  S.growth = growthForFrame();
+  centreGuide(); syncSheet(); draw(); remember();
+  toast('Spiral shaped to this frame · growth ' + S.growth.toFixed(3));
+});
 $('reset').addEventListener('click', function(){
-  S.scale=DEF.scale; S.rot=0; S.orient=0; S.turns=2.25;
+  S.scale=DEF.scale; S.rot=0; S.orient=0; S.turns=2.25; S.growth=PHI;
   view.s=1; view.tx=0; view.ty=0;
   centreGuide(); syncSheet(); syncChips(); draw(); remember();
 });
