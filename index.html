@@ -201,7 +201,8 @@ input[type=range]{width:100%;accent-color:var(--gold);margin:0}
     </div>
     <p class="note"><b>Drag inside the guide to move it, a corner to size it, the top handle to rotate it.</b>
       Double-tap steps through the eight orientations. The lock hides the handles and holds everything in place.
-      In the viewfinder a pinch zooms the lens. On a photo there is no lens, so a pinch resizes the guide.</p>
+      In the viewfinder a pinch zooms the lens. On a photo there is no lens, so two fingers belong to the
+      guide instead: pinch to resize it, twist to rotate it.</p>
   </div>
 </section>
 
@@ -307,6 +308,13 @@ function centreGuide(){
   S.cy = ((fr.h - g.bh*f)/2 - g.oy*f)/fr.h;
 }
 function dist(a,b){ var dx=a[0]-b[0], dy=a[1]-b[1]; return Math.sqrt(dx*dx+dy*dy); }
+// Wrap to (-180, 180] and give the cardinals a little grip, so square is reachable.
+var CARDINALS = [0, 90, -90, 180, -180];
+function detent(rad){
+  var deg = ((rad*180/Math.PI + 180) % 360 + 360) % 360 - 180;
+  for (var i=0;i<CARDINALS.length;i++) if (Math.abs(deg - CARDINALS[i]) < 3) deg = CARDINALS[i];
+  return deg * Math.PI / 180;
+}
 function inPoly(p, poly){
   var hit = false;
   for (var i=0, j=poly.length-1; i<poly.length; j=i++){
@@ -484,7 +492,7 @@ cv.addEventListener('pointerdown', function(e){
   if (nPtr === 2){
     var ks = Object.keys(ptrs), a = ptrs[ks[0]], b = ptrs[ks[1]];
     gest = 'pinch';
-    grab = { d:dist(a,b), z:camZoom, gs:S.scale };
+    grab = { d:dist(a,b), z:camZoom, gs:S.scale, gr:S.rot, a0:Math.atan2(b[1]-a[1], b[0]-a[0]) };
     if (mode === 'photo' && S.overlay === 'spiral' && S.locked) pulseLock();
     return;
   }
@@ -515,6 +523,7 @@ cv.addEventListener('pointermove', function(e){
     if (mode === 'live'){ setZoom(grab.z * ratio); return; }
     if (S.overlay !== 'spiral' || S.locked) return;
     S.scale = Math.max(0.25, Math.min(1.6, grab.gs * ratio));
+    S.rot = detent(grab.gr + (Math.atan2(b[1]-a[1], b[0]-a[0]) - grab.a0));
     syncVals(); draw(); return;
   }
   if (gest === 'move'){
@@ -529,11 +538,8 @@ cv.addEventListener('pointermove', function(e){
   }
   if (gest === 'rotate'){
     T = xform(fr);
-    var deg = (grab.r0 + (Math.atan2(p[1]-T.ey, p[0]-T.ex) - grab.a0))*180/Math.PI;
-    deg = ((deg+180)%360+360)%360 - 180;
-    var near=[0,90,-90,180,-180];
-    for (var i=0;i<near.length;i++) if (Math.abs(deg-near[i]) < 3) deg = near[i];
-    S.rot = deg*Math.PI/180; syncVals(); draw(); return;
+    S.rot = detent(grab.r0 + (Math.atan2(p[1]-T.ey, p[0]-T.ex) - grab.a0));
+    syncVals(); draw(); return;
   }
 });
 

@@ -165,7 +165,7 @@ input[type=range]{width:100%;accent-color:var(--gold);margin:0}
       <button class="ghost" id="saveFull" type="button" style="flex:1">Save full frame</button>
     </div>
 
-    <p class="note"><b>Pinch to resize the guide.</b> Drag inside it to move it, a corner to size it precisely, the top handle to rotate it. Double-tap to step through the eight orientations. The lock hides the handles and holds everything where it is.</p>
+    <p class="note"><b>Pinch to resize the guide, twist to rotate it.</b> Drag inside it to move it, a corner to size it precisely, the top handle to rotate it precisely. Double-tap to step through the eight orientations. The lock hides the handles and holds everything where it is.</p>
   </div>
 </section>
 
@@ -277,6 +277,13 @@ function centreGuide(){
   S.cy = ((fr.h - g.bh*f)/2 - g.oy*f) / fr.h;
 }
 function dist(a,b){ var dx=a[0]-b[0], dy=a[1]-b[1]; return Math.sqrt(dx*dx+dy*dy); }
+// Wrap to (-180, 180] and give the cardinals a little grip, so square is reachable.
+var CARDINALS = [0, 90, -90, 180, -180];
+function detent(rad){
+  var deg = ((rad*180/Math.PI + 180) % 360 + 360) % 360 - 180;
+  for (var i=0;i<CARDINALS.length;i++) if (Math.abs(deg - CARDINALS[i]) < 3) deg = CARDINALS[i];
+  return deg * Math.PI / 180;
+}
 function inPoly(p, poly){
   var hit = false;
   for (var i=0, j=poly.length-1; i<poly.length; j=i++){
@@ -467,7 +474,7 @@ cv.addEventListener('pointerdown', function(e){
   if (nPtr === 2){
     var ks = Object.keys(ptrs), a = ptrs[ks[0]], b = ptrs[ks[1]];
     mode = 'pinch';
-    grab = { d: dist(a,b), gs: S.scale };
+    grab = { d: dist(a,b), gs: S.scale, gr: S.rot, a0: Math.atan2(b[1]-a[1], b[0]-a[0]) };
     if (S.overlay === 'spiral' && S.locked){
       var lk = $('lock'); lk.classList.remove('pulse'); void lk.offsetWidth; lk.classList.add('pulse');
     }
@@ -500,6 +507,7 @@ cv.addEventListener('pointermove', function(e){
     // There is no lens in this build, so a pinch resizes the guide, not the photo.
     if (S.overlay !== 'spiral' || S.locked) return;
     S.scale = Math.max(0.25, Math.min(1.6, grab.gs * (dist(a,b) / grab.d)));
+    S.rot = detent(grab.gr + (Math.atan2(b[1]-a[1], b[0]-a[0]) - grab.a0));
     syncVals(); draw(); return;
   }
   var p = ptrs[e.pointerId];
@@ -515,13 +523,7 @@ cv.addEventListener('pointermove', function(e){
   }
   if (mode === 'rotate'){
     T = xform(fr);
-    var a1 = Math.atan2(p[1]-T.ey, p[0]-T.ex);
-    var r = grab.r0 + (a1 - grab.a0);
-    var deg = r * 180 / Math.PI;
-    deg = ((deg + 180) % 360 + 360) % 360 - 180;
-    var near = [0,90,-90,180,-180];                      // soft detent on the cardinals
-    for (var i=0;i<near.length;i++) if (Math.abs(deg - near[i]) < 3) deg = near[i];
-    S.rot = deg * Math.PI / 180;
+    S.rot = detent(grab.r0 + (Math.atan2(p[1]-T.ey, p[0]-T.ex) - grab.a0));
     syncVals(); draw(); return;
   }
 });

@@ -42,11 +42,16 @@ the HTTPS host above.
 
 | Gesture | What it does |
 |---|---|
-| Pinch | Zooms the camera (where the lens supports it), or the photo once taken |
+| Pinch, in the viewfinder | Zooms the lens, where the lens supports it |
+| Pinch, on a photo | Resizes the guide — no lens to zoom once the shot is taken |
+| Twist two fingers, on a photo | Rotates the guide |
 | Drag inside the guide | Moves it — put the eye on your subject |
 | Drag a corner | Sizes it, uniformly only |
 | Drag the top handle | Rotates it, pivoting on the eye |
 | Double-tap | Steps through the eight orientations |
+
+Rotation grips the cardinals: within 3° of 0/90/180/270 it snaps, so square is
+reachable without fighting it.
 
 The lock hides the handles and holds the guide still. It never engages itself.
 
