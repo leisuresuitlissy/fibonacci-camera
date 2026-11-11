@@ -201,7 +201,7 @@ input[type=range]{width:100%;accent-color:var(--gold);margin:0}
     </div>
     <p class="note"><b>Drag inside the guide to move it, a corner to size it, the top handle to rotate it.</b>
       Double-tap steps through the eight orientations. The lock hides the handles and holds everything in place.
-      Pinch zooms the camera where the lens supports it, and the photo once you have taken one.</p>
+      In the viewfinder a pinch zooms the lens. On a photo there is no lens, so a pinch resizes the guide.</p>
   </div>
 </section>
 
@@ -484,7 +484,8 @@ cv.addEventListener('pointerdown', function(e){
   if (nPtr === 2){
     var ks = Object.keys(ptrs), a = ptrs[ks[0]], b = ptrs[ks[1]];
     gest = 'pinch';
-    grab = { d:dist(a,b), s:view.s, z:camZoom, mx:(a[0]+b[0])/2, my:(a[1]+b[1])/2, tx:view.tx, ty:view.ty };
+    grab = { d:dist(a,b), z:camZoom, gs:S.scale };
+    if (mode === 'photo' && S.overlay === 'spiral' && S.locked) pulseLock();
     return;
   }
   if (nPtr !== 1) return;
@@ -499,7 +500,6 @@ cv.addEventListener('pointerdown', function(e){
     if (inPoly(p,cs)){ gest='move'; grab={ px:p[0], py:p[1], cx:S.cx, cy:S.cy, fr:fr }; return; }
   }
   if (S.overlay === 'spiral' && S.locked && inPoly(p, cornersOf(T))) pulseLock();
-  if (mode === 'photo' && view.s > 1){ gest='pan'; grab={ px:p[0], py:p[1], tx:view.tx, ty:view.ty }; }
 });
 
 cv.addEventListener('pointermove', function(e){
@@ -510,12 +510,12 @@ cv.addEventListener('pointermove', function(e){
   if (gest === 'pinch'){
     var ks = Object.keys(ptrs); if (ks.length < 2) return;
     var a = ptrs[ks[0]], b = ptrs[ks[1]], ratio = dist(a,b)/grab.d;
+    // In the viewfinder a pinch zooms the lens, as it does in every camera.
+    // On a still there is no lens to zoom, so the pinch belongs to the guide.
     if (mode === 'live'){ setZoom(grab.z * ratio); return; }
-    view.s = Math.min(6, Math.max(1, grab.s*ratio));
-    var mx=(a[0]+b[0])/2, my=(a[1]+b[1])/2;
-    view.tx = grab.tx + (mx-grab.mx); view.ty = grab.ty + (my-grab.my);
-    if (view.s <= 1.001){ view.s=1; view.tx=0; view.ty=0; }
-    draw(); return;
+    if (S.overlay !== 'spiral' || S.locked) return;
+    S.scale = Math.max(0.25, Math.min(1.6, grab.gs * ratio));
+    syncVals(); draw(); return;
   }
   if (gest === 'move'){
     S.cx = Math.max(-0.2, Math.min(1.2, grab.cx + (p[0]-grab.px)/grab.fr.w));
@@ -535,7 +535,6 @@ cv.addEventListener('pointermove', function(e){
     for (var i=0;i<near.length;i++) if (Math.abs(deg-near[i]) < 3) deg = near[i];
     S.rot = deg*Math.PI/180; syncVals(); draw(); return;
   }
-  if (gest === 'pan'){ view.tx = grab.tx+(p[0]-grab.px); view.ty = grab.ty+(p[1]-grab.py); draw(); return; }
 });
 
 function endPtr(e){
