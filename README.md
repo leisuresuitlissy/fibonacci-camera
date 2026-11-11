@@ -71,7 +71,27 @@ the HTTPS host above.
 Rotation grips the cardinals: within 3° of 0/90/180/270 it snaps, so square is
 reachable without fighting it.
 
+### Edges
+
+The guide **cannot leave the frame**. Drag it and it stops at the edge; push a
+corner outward and the pinned edge holds while the free one keeps going, so the
+spiral *reshapes* rather than overflowing — the way dragging a crop corner behaves.
+Rotated, it stops without reshaping, because a rotated box has no independent
+"this edge is the width" to pin.
+
+`Edges: held` / `Edges: free` in the Adjust sheet turns that off if you want the
+spiral's tail running off the frame.
+
+The crop stays inside the photo regardless, even with edges free: you cannot crop
+pixels that are not there.
+
 ### Proportion
+
+By default the guide **fills the frame edge to edge**. It does that by taking the
+proportion whose natural shape matches the frame, which also means the default is
+not exactly φ — **Back to φ** restores the true golden spiral in one tap. Changing
+size or proportion by hand switches the fill behaviour off; **Fill the frame**
+switches it back on.
 
 The **Proportion** slider sets how much the radius multiplies every quarter-turn.
 At **φ (1.618)** that is the golden spiral. Lower values give a rounder, more open

@@ -85,6 +85,7 @@ header{display:flex;align-items:center;gap:10px;padding-block:10px;flex:0 0 auto
   padding:14px 10px;font-size:14px;font-weight:600;font-family:var(--ui);cursor:pointer;white-space:nowrap}
 .ghost{flex:0 0 auto;border:1px solid var(--line);background:var(--elev);color:var(--text);border-radius:14px;
   padding:14px 16px;font-size:13px;font-weight:500;font-family:var(--ui);cursor:pointer;white-space:nowrap}
+.ghost.on{border-color:rgba(224,178,82,.8);color:var(--gold);background:rgba(224,178,82,.14)}
 #shutter{width:72px;height:72px;border-radius:50%;border:2px solid rgba(255,255,255,.95);
   background:transparent;padding:4px;cursor:pointer;flex:0 0 auto}
 #shutter i{display:block;width:100%;height:100%;border-radius:50%;background:#fff}
@@ -196,8 +197,9 @@ input[type=range]{width:100%;accent-color:var(--gold);margin:0}
     <div class="lab"><span>PROPORTION</span><b id="growthVal">φ 1.618</b></div>
     <input type="range" id="growth" min="105" max="260" step="1" value="162">
     <div class="rowbtns" style="padding-block:10px 0">
-      <button class="ghost" id="fitFrame" type="button" style="flex:1;padding:11px 10px">Fit the frame</button>
+      <button class="ghost" id="fitFrame" type="button" style="flex:1;padding:11px 10px">Fill the frame</button>
       <button class="ghost" id="goldenBtn" type="button" style="flex:1;padding:11px 10px">Back to φ</button>
+      <button class="ghost on" id="bindBtn" type="button" style="flex:1;padding:11px 10px">Edges: held</button>
     </div>
 
     <div class="lab"><span>SIZE</span><b id="scaleVal">92%</b></div>
@@ -235,14 +237,17 @@ var $ = function(id){ return document.getElementById(id); };
 // the golden spiral. Other values are still true logarithmic spirals, just not
 // that one — which is how the proportion changes without anything being stretched.
 var DEF = { overlay:'spiral', turns:2.25, orient:0, scale:1, rot:0, cx:0.336, cy:0.303,
-            locked:false, triFlip:0, view:'guide', growth:PHI };
+            locked:false, triFlip:0, view:'guide', growth:PHI, fill:true, bind:true };
+// Bump this when a default changes, or saved settings keep overriding the new one.
+var STORE = 'fibcam.v2';
 var S = {}; for (var k in DEF) S[k] = DEF[k];
 var saved = null;
 try {
-  saved = JSON.parse(localStorage.getItem('fibcam') || 'null');
+  saved = JSON.parse(localStorage.getItem(STORE) || 'null');
   if (saved) for (var k2 in DEF) if (saved[k2] !== undefined && typeof saved[k2] === typeof DEF[k2]) S[k2] = saved[k2];
+  localStorage.removeItem('fibcam');                        // retire the unversioned key
 } catch (e) {}
-function remember(){ try { localStorage.setItem('fibcam', JSON.stringify(S)); } catch(e){} }
+function remember(){ try { localStorage.setItem(STORE, JSON.stringify(S)); } catch(e){} }
 
 var mode = 'photo';                 // 'photo' | 'live'
 var photo = null;                   // {el,w,h,name}
@@ -297,13 +302,21 @@ function boxAspect(turns, orient, k){
 }
 // The growth whose natural box matches the photo's shape — so the spiral fills
 // the frame by being the right spiral, not by being squashed into it.
-function growthForFrame(){
-  var fr = frame(), target = fr.w/fr.h, best = null, k, d;
+function growthForAspect(target){
+  var best = null, k, d;
   for (k = 1.03; k <= 3.0; k += 0.005){
     d = Math.abs(boxAspect(S.turns, S.orient, k) - target);
     if (!best || d < best.d) best = { k:k, d:d };
   }
   return best.k;
+}
+function growthForFrame(){ var fr = frame(); return growthForAspect(fr.w/fr.h); }
+// Edge to edge: the spiral whose own shape is this frame's shape, at full size.
+function applyFill(){
+  var fr = frame();
+  S.growth = growthForAspect(fr.w/fr.h);
+  S.scale = 1;
+  centreGuide();
 }
 
 /* ----------------------------------------------------------- frame + maths */
@@ -371,6 +384,66 @@ function centreGuide(){
   S.cy = ((fr.h - g.bh*f)/2 - g.oy*f)/fr.h;
 }
 function dist(a,b){ var dx=a[0]-b[0], dy=a[1]-b[1]; return Math.sqrt(dx*dx+dy*dy); }
+
+/* ------- keeping the guide inside the frame, the way a crop stays inside ---- */
+function boxCornersAt(s, fr){
+  var g = geo(), c = Math.cos(S.rot), si = Math.sin(S.rot);
+  var k = baseFit(fr)*s, ex = fr.x + S.cx*fr.w, ey = fr.y + S.cy*fr.h, out = [], i, p;
+  var box = [[g.ox,g.oy],[g.ox+g.bw,g.oy],[g.ox+g.bw,g.oy+g.bh],[g.ox,g.oy+g.bh]];
+  for (i=0;i<4;i++){ p = box[i]; out.push([ex + p[0]*k*c - p[1]*k*si, ey + p[0]*k*si + p[1]*k*c]); }
+  return out;
+}
+function insideFrame(pts, fr){
+  for (var i=0;i<4;i++){
+    if (pts[i][0] < fr.x-0.6 || pts[i][0] > fr.x+fr.w+0.6) return false;
+    if (pts[i][1] < fr.y-0.6 || pts[i][1] > fr.y+fr.h+0.6) return false;
+  }
+  return true;
+}
+function clampPos(fr){
+  var pts = boxCornersAt(S.scale, fr), mnx=1e9,mxx=-1e9,mny=1e9,mxy=-1e9, dx=0, dy=0, i, p;
+  for (i=0;i<4;i++){ p = pts[i];
+    if(p[0]<mnx)mnx=p[0]; if(p[0]>mxx)mxx=p[0]; if(p[1]<mny)mny=p[1]; if(p[1]>mxy)mxy=p[1]; }
+  if (mxx-mnx <= fr.w){ if (mnx < fr.x) dx = fr.x-mnx; else if (mxx > fr.x+fr.w) dx = fr.x+fr.w-mxx; }
+  if (mxy-mny <= fr.h){ if (mny < fr.y) dy = fr.y-mny; else if (mxy > fr.y+fr.h) dy = fr.y+fr.h-mxy; }
+  S.cx += dx/fr.w; S.cy += dy/fr.h;
+}
+// Biggest scale up to `want` whose box still fits, nudging position as it goes.
+function cappedScale(want, fr){
+  var cx=S.cx, cy=S.cy, sc=S.scale, lo=0.25, hi=want, m, i, ok;
+  S.scale = want; clampPos(fr);
+  ok = insideFrame(boxCornersAt(want, fr), fr);
+  S.cx=cx; S.cy=cy; S.scale=sc;
+  if (ok) return want;
+  for (i=0;i<20;i++){
+    m = (lo+hi)/2;
+    S.cx=cx; S.cy=cy; S.scale=m; clampPos(fr);
+    if (insideFrame(boxCornersAt(m, fr), fr)) lo=m; else hi=m;
+    S.cx=cx; S.cy=cy; S.scale=sc;
+  }
+  return lo;
+}
+// Resizing stops at the frame. Unrotated, pushing further reshapes the spiral the
+// way dragging a crop corner does: the pinned edge holds, the free one keeps going.
+function applySize(want, fr){
+  want = Math.max(0.25, Math.min(1.6, want));
+  if (!S.bind){ S.scale = want; return; }
+  if (Math.abs(S.rot) > 1e-6){ S.scale = cappedScale(want, fr); clampPos(fr); return; }
+  var g = geo(), base = baseFit(fr);
+  var wantW = g.bw*base*want, wantH = g.bh*base*want;
+  var fx = -g.ox/g.bw, fy = -g.oy/g.bh;
+  var ex = S.cx*fr.w, ey = S.cy*fr.h;
+  var maxW = Math.max(8, Math.min(ex/Math.max(fx,1e-4), (fr.w-ex)/Math.max(1-fx,1e-4)));
+  var maxH = Math.max(8, Math.min(ey/Math.max(fy,1e-4), (fr.h-ey)/Math.max(1-fy,1e-4)));
+  var w = Math.min(wantW, maxW), h = Math.min(wantH, maxH);
+  if (w >= wantW-0.5 && h >= wantH-0.5){ S.scale = want; return; }   // nothing pinned yet
+  S.growth = growthForAspect(w/h);                                   // an edge is holding
+  S.fill = false;
+  var g2 = geo(), base2 = baseFit(fr);
+  S.scale = Math.max(0.25, Math.min(1.6, w/(g2.bw*base2)));
+  clampPos(fr);
+}
+function reBind(){ if (!S.bind) return; var fr = frame(); S.scale = cappedScale(S.scale, fr); clampPos(fr); }
 // Wrap to (-180, 180] and give the cardinals a little grip, so square is reachable.
 var CARDINALS = [0, 90, -90, 180, -180];
 function detent(rad){
@@ -587,23 +660,27 @@ cv.addEventListener('pointermove', function(e){
     // On a still there is no lens to zoom, so the pinch belongs to the guide.
     if (mode === 'live'){ setZoom(grab.z * ratio); return; }
     if (S.overlay !== 'spiral' || S.locked) return;
-    S.scale = Math.max(0.25, Math.min(1.6, grab.gs * ratio));
     S.rot = detent(grab.gr + (Math.atan2(b[1]-a[1], b[0]-a[0]) - grab.a0));
+    S.fill = false;
+    applySize(grab.gs * ratio, fr);
     syncVals(); draw(); return;
   }
   if (gest === 'move'){
     S.cx = Math.max(-0.2, Math.min(1.2, grab.cx + (p[0]-grab.px)/grab.fr.w));
     S.cy = Math.max(-0.2, Math.min(1.2, grab.cy + (p[1]-grab.py)/grab.fr.h));
+    if (S.bind) clampPos(grab.fr);
     draw(); return;
   }
   if (gest === 'scale'){
     T = xform(fr);
-    S.scale = Math.max(0.25, Math.min(1.6, grab.s0*(dist(p,[T.ex,T.ey])/grab.d0)));
+    S.fill = false;
+    applySize(grab.s0*(dist(p,[T.ex,T.ey])/grab.d0), fr);
     syncVals(); draw(); return;
   }
   if (gest === 'rotate'){
     T = xform(fr);
     S.rot = detent(grab.r0 + (Math.atan2(p[1]-T.ey, p[0]-T.ex) - grab.a0));
+    reBind();
     syncVals(); draw(); return;
   }
 });
@@ -679,7 +756,7 @@ async function startCamera(){
   }
   mode = 'live'; vid.classList.add('on'); $('gate').hidden = true;
   $('srcName').textContent = 'LIVE · ' + facing.toUpperCase();
-  setBars(); resize(); centreGuideIfFresh(); draw();
+  setBars(); resize(); reframe(true); draw();
 }
 async function setZoom(z){
   if (!track || !caps.zoom) return;
@@ -725,7 +802,7 @@ function loadFile(file){
     photo = { el:im, w:im.naturalWidth, h:im.naturalHeight, name:(file.name||'PHOTO').toUpperCase() };
     $('srcName').textContent = photo.name.slice(0,22) + ' · ' + photo.w + '×' + photo.h;
     view.s = 1; view.tx = 0; view.ty = 0; S.rot = 0;
-    setBars(); resize(); centreGuide(); draw(); remember();
+    setBars(); resize(); reframe(true); draw(); remember();
     toast('Drag the guide onto your subject.');
   };
   im.onerror = function(){ toast('That file would not open as an image.'); URL.revokeObjectURL(url); };
@@ -857,7 +934,10 @@ function closeSheet(){ $('sheet').classList.remove('open'); $('scrim').classList
     var b = document.createElement('button'); b.type='button';
     var c = document.createElement('canvas'); c.width=80; c.height=80;
     b.appendChild(c); b.appendChild(document.createElement('span')); box.appendChild(b);
-    b.addEventListener('click', function(){ S.orient=i; syncSheet(); syncChips(); draw(); remember(); });
+    b.addEventListener('click', function(){
+      S.orient=i; if (S.fill) applyFill(); else reBind();
+      syncSheet(); syncChips(); draw(); remember();
+    });
   })(i);
 })();
 function paintOrientTiles(){
@@ -884,26 +964,42 @@ function syncVals(){
   $('orientVal').textContent = orientLabel(S.orient);
   $('growth').value = Math.round(S.growth*100);
   $('growthVal').textContent = atPhi() ? 'φ 1.618' : S.growth.toFixed(3);
+  $('bindBtn').textContent = S.bind ? 'Edges: held' : 'Edges: free';
+  $('bindBtn').classList.toggle('on', S.bind);
 }
 function syncSheet(){ syncVals(); paintOrientTiles(); }
-$('turns').addEventListener('input', function(){ S.turns=parseFloat(this.value); syncSheet(); syncChips(); draw(); remember(); });
-$('scale').addEventListener('input', function(){ S.scale=parseInt(this.value,10)/100; syncVals(); draw(); remember(); });
-$('rot').addEventListener('input', function(){ S.rot=parseInt(this.value,10)*Math.PI/180; syncVals(); draw(); remember(); });
+$('turns').addEventListener('input', function(){
+  S.turns=parseFloat(this.value);
+  if (S.fill) applyFill(); else reBind();
+  syncSheet(); syncChips(); draw(); remember();
+});
+$('scale').addEventListener('input', function(){
+  S.fill = false; applySize(parseInt(this.value,10)/100, frame());
+  syncVals(); draw(); remember();
+});
+$('rot').addEventListener('input', function(){
+  S.rot=parseInt(this.value,10)*Math.PI/180; reBind(); syncVals(); draw(); remember();
+});
 $('growth').addEventListener('input', function(){
-  S.growth = parseInt(this.value,10)/100; syncVals(); draw(); remember();
+  S.growth = parseInt(this.value,10)/100; S.fill = false; reBind();
+  syncVals(); draw(); remember();
 });
 $('goldenBtn').addEventListener('click', function(){
-  S.growth = PHI; syncSheet(); draw(); remember();
+  S.growth = PHI; S.fill = false; reBind(); syncSheet(); draw(); remember();
+  toast('Back to the golden spiral');
 });
 $('fitFrame').addEventListener('click', function(){
-  S.growth = growthForFrame();
-  centreGuide(); syncSheet(); draw(); remember();
-  toast('Spiral shaped to this frame · growth ' + S.growth.toFixed(3));
+  S.fill = true; applyFill(); syncSheet(); draw(); remember();
+  toast('Edge to edge · growth ' + S.growth.toFixed(3));
+});
+$('bindBtn').addEventListener('click', function(){
+  S.bind = !S.bind; if (S.bind) reBind();
+  syncVals(); draw(); remember();
 });
 $('reset').addEventListener('click', function(){
-  S.scale=DEF.scale; S.rot=0; S.orient=0; S.turns=2.25; S.growth=PHI;
+  S.rot=0; S.orient=0; S.turns=2.25; S.fill=true; S.bind=true;
   view.s=1; view.tx=0; view.ty=0;
-  centreGuide(); syncSheet(); syncChips(); draw(); remember();
+  applyFill(); syncSheet(); syncChips(); draw(); remember();
 });
 var footBtns = document.querySelectorAll('#foot button');
 Array.prototype.forEach.call(footBtns, function(b){
@@ -919,12 +1015,17 @@ function toast(msg){
   var el = $('toast'); el.textContent = msg; el.classList.add('on');
   clearTimeout(toastT); toastT = setTimeout(function(){ el.classList.remove('on'); }, 2600);
 }
-function centreGuideIfFresh(){ if (!(saved && saved.cx !== undefined)) centreGuide(); }
+// `fresh` means the frame now holds something else, so the old position is moot.
+function reframe(fresh){
+  if (S.fill) applyFill();
+  else { if (fresh) centreGuide(); reBind(); }
+}
 function resize(){
   var r = $('stageWrap').getBoundingClientRect();
   dpr = Math.min(3, window.devicePixelRatio || 1);
   W = Math.max(1, r.width); H = Math.max(1, r.height);
   cv.width = Math.round(W*dpr); cv.height = Math.round(H*dpr);
+  if (W > 1 && H > 1) reframe(false);          // the frame's shape may have changed
   draw();
 }
 window.addEventListener('resize', resize);
@@ -941,7 +1042,7 @@ gateMessage();
 $('lock').classList.toggle('on', S.locked);
 $('lock').setAttribute('aria-pressed', String(S.locked));
 Array.prototype.forEach.call(footBtns, function(x){ x.classList.toggle('on', x.dataset.view === S.view); });
-setBars(); syncChips(); syncSheet(); resize(); centreGuideIfFresh(); draw();
+setBars(); syncChips(); syncSheet(); resize(); reframe(!(saved && saved.cx !== undefined)); syncSheet(); draw();
 if (document.fonts && document.fonts.ready) document.fonts.ready.then(resize);
 })();
 </script>
