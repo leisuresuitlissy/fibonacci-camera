@@ -87,11 +87,18 @@ pixels that are not there.
 
 ### Proportion
 
-By default the guide **fills the frame edge to edge**. It does that by taking the
-proportion whose natural shape matches the frame, which also means the default is
-not exactly φ — **Back to φ** restores the true golden spiral in one tap. Changing
-size or proportion by hand switches the fill behaviour off; **Fill the frame**
-switches it back on.
+**The default is the real golden spiral, spanning the frame top to bottom.**
+On a frame narrower than the spiral's own 0.639 box — most phone cameras — the
+curve reaches past the left and right edges, which is what a golden spiral does
+in a tall frame. It is not stretched or reshaped to fit.
+
+Two fit buttons in the Adjust sheet:
+
+- **Full height · φ** — the default. True φ, spanning top to bottom.
+- **All four edges** — reshapes the spiral to the frame's proportion so it touches
+  every side. It is no longer φ, and the readout says so.
+
+Changing size or proportion by hand drops out of both; either button re-engages.
 
 The **Proportion** slider sets how much the radius multiplies every quarter-turn.
 At **φ (1.618)** that is the golden spiral. Lower values give a rounder, more open

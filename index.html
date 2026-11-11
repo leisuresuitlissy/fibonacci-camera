@@ -197,13 +197,16 @@ input[type=range]{width:100%;accent-color:var(--gold);margin:0}
     <div class="lab"><span>PROPORTION</span><b id="growthVal">φ 1.618</b></div>
     <input type="range" id="growth" min="105" max="260" step="1" value="162">
     <div class="rowbtns" style="padding-block:10px 0">
-      <button class="ghost" id="fitFrame" type="button" style="flex:1;padding:11px 10px">Fill the frame</button>
+      <button class="ghost on" id="fitHeight" type="button" style="flex:1;padding:11px 10px">Full height · φ</button>
+      <button class="ghost" id="fitFrame" type="button" style="flex:1;padding:11px 10px">All four edges</button>
+    </div>
+    <div class="rowbtns" style="padding-block:8px 0">
       <button class="ghost" id="goldenBtn" type="button" style="flex:1;padding:11px 10px">Back to φ</button>
       <button class="ghost on" id="bindBtn" type="button" style="flex:1;padding:11px 10px">Edges: held</button>
     </div>
 
     <div class="lab"><span>SIZE</span><b id="scaleVal">92%</b></div>
-    <input type="range" id="scale" min="25" max="160" step="1" value="100">
+    <input type="range" id="scale" min="25" max="250" step="1" value="100">
     <div class="lab"><span>ROTATION</span><b id="rotVal">0°</b></div>
     <input type="range" id="rot" min="-180" max="180" step="1" value="0">
     <div class="lab" id="zoomLab" hidden><span>CAMERA ZOOM</span><b id="zoomVal">1.0×</b></div>
@@ -237,9 +240,10 @@ var $ = function(id){ return document.getElementById(id); };
 // the golden spiral. Other values are still true logarithmic spirals, just not
 // that one — which is how the proportion changes without anything being stretched.
 var DEF = { overlay:'spiral', turns:2.25, orient:0, scale:1, rot:0, cx:0.336, cy:0.303,
-            locked:false, triFlip:0, view:'guide', growth:PHI, fill:true, bind:true };
+            locked:false, triFlip:0, view:'guide', growth:PHI, fit:'height', bind:true };
 // Bump this when a default changes, or saved settings keep overriding the new one.
-var STORE = 'fibcam.v2';
+var STORE = 'fibcam.v3';
+var SMIN = 0.25, SMAX = 2.5;      // a narrow frame needs over 1.0 to reach full height
 var S = {}; for (var k in DEF) S[k] = DEF[k];
 var saved = null;
 try {
@@ -311,11 +315,20 @@ function growthForAspect(target){
   return best.k;
 }
 function growthForFrame(){ var fr = frame(); return growthForAspect(fr.w/fr.h); }
-// Edge to edge: the spiral whose own shape is this frame's shape, at full size.
-function applyFill(){
-  var fr = frame();
-  S.growth = growthForAspect(fr.w/fr.h);
-  S.scale = 1;
+// 'height' keeps the real golden spiral and sizes it so the curve spans the frame
+// top to bottom; on a frame narrower than the spiral's own 0.639 box it reaches past
+// the sides, which is what a golden spiral does. 'frame' instead reshapes the spiral
+// to the frame's proportion so it touches all four edges, and is no longer φ.
+function applyFit(){
+  var fr = frame(), g, base;
+  if (S.fit === 'frame'){
+    S.growth = growthForAspect(fr.w/fr.h);
+    S.scale = 1;
+  } else if (S.fit === 'height'){
+    S.growth = PHI;
+    g = geo(); base = baseFit(fr);
+    S.scale = Math.max(SMIN, Math.min(SMAX, fr.h / (g.bh * base)));
+  } else return;
   centreGuide();
 }
 
@@ -410,7 +423,7 @@ function clampPos(fr){
 }
 // Biggest scale up to `want` whose box still fits, nudging position as it goes.
 function cappedScale(want, fr){
-  var cx=S.cx, cy=S.cy, sc=S.scale, lo=0.25, hi=want, m, i, ok;
+  var cx=S.cx, cy=S.cy, sc=S.scale, lo=SMIN, hi=want, m, i, ok;
   S.scale = want; clampPos(fr);
   ok = insideFrame(boxCornersAt(want, fr), fr);
   S.cx=cx; S.cy=cy; S.scale=sc;
@@ -426,7 +439,7 @@ function cappedScale(want, fr){
 // Resizing stops at the frame. Unrotated, pushing further reshapes the spiral the
 // way dragging a crop corner does: the pinned edge holds, the free one keeps going.
 function applySize(want, fr){
-  want = Math.max(0.25, Math.min(1.6, want));
+  want = Math.max(SMIN, Math.min(SMAX, want));
   if (!S.bind){ S.scale = want; return; }
   if (Math.abs(S.rot) > 1e-6){ S.scale = cappedScale(want, fr); clampPos(fr); return; }
   var g = geo(), base = baseFit(fr);
@@ -438,9 +451,9 @@ function applySize(want, fr){
   var w = Math.min(wantW, maxW), h = Math.min(wantH, maxH);
   if (w >= wantW-0.5 && h >= wantH-0.5){ S.scale = want; return; }   // nothing pinned yet
   S.growth = growthForAspect(w/h);                                   // an edge is holding
-  S.fill = false;
+  S.fit = 'manual';
   var g2 = geo(), base2 = baseFit(fr);
-  S.scale = Math.max(0.25, Math.min(1.6, w/(g2.bw*base2)));
+  S.scale = Math.max(SMIN, Math.min(SMAX, w/(g2.bw*base2)));
   clampPos(fr);
 }
 function reBind(){ if (!S.bind) return; var fr = frame(); S.scale = cappedScale(S.scale, fr); clampPos(fr); }
@@ -661,7 +674,7 @@ cv.addEventListener('pointermove', function(e){
     if (mode === 'live'){ setZoom(grab.z * ratio); return; }
     if (S.overlay !== 'spiral' || S.locked) return;
     S.rot = detent(grab.gr + (Math.atan2(b[1]-a[1], b[0]-a[0]) - grab.a0));
-    S.fill = false;
+    S.fit = 'manual';
     applySize(grab.gs * ratio, fr);
     syncVals(); draw(); return;
   }
@@ -673,7 +686,7 @@ cv.addEventListener('pointermove', function(e){
   }
   if (gest === 'scale'){
     T = xform(fr);
-    S.fill = false;
+    S.fit = 'manual';
     applySize(grab.s0*(dist(p,[T.ex,T.ey])/grab.d0), fr);
     syncVals(); draw(); return;
   }
@@ -935,7 +948,7 @@ function closeSheet(){ $('sheet').classList.remove('open'); $('scrim').classList
     var c = document.createElement('canvas'); c.width=80; c.height=80;
     b.appendChild(c); b.appendChild(document.createElement('span')); box.appendChild(b);
     b.addEventListener('click', function(){
-      S.orient=i; if (S.fill) applyFill(); else reBind();
+      S.orient=i; if (S.fit !== 'manual') applyFit(); else reBind();
       syncSheet(); syncChips(); draw(); remember();
     });
   })(i);
@@ -966,40 +979,46 @@ function syncVals(){
   $('growthVal').textContent = atPhi() ? 'φ 1.618' : S.growth.toFixed(3);
   $('bindBtn').textContent = S.bind ? 'Edges: held' : 'Edges: free';
   $('bindBtn').classList.toggle('on', S.bind);
+  $('fitHeight').classList.toggle('on', S.fit === 'height');
+  $('fitFrame').classList.toggle('on', S.fit === 'frame');
 }
 function syncSheet(){ syncVals(); paintOrientTiles(); }
 $('turns').addEventListener('input', function(){
   S.turns=parseFloat(this.value);
-  if (S.fill) applyFill(); else reBind();
+  if (S.fit !== 'manual') applyFit(); else reBind();
   syncSheet(); syncChips(); draw(); remember();
 });
 $('scale').addEventListener('input', function(){
-  S.fill = false; applySize(parseInt(this.value,10)/100, frame());
+  S.fit = 'manual'; applySize(parseInt(this.value,10)/100, frame());
   syncVals(); draw(); remember();
 });
 $('rot').addEventListener('input', function(){
   S.rot=parseInt(this.value,10)*Math.PI/180; reBind(); syncVals(); draw(); remember();
 });
 $('growth').addEventListener('input', function(){
-  S.growth = parseInt(this.value,10)/100; S.fill = false; reBind();
+  S.growth = parseInt(this.value,10)/100; S.fit = 'manual'; reBind();
   syncVals(); draw(); remember();
 });
 $('goldenBtn').addEventListener('click', function(){
-  S.growth = PHI; S.fill = false; reBind(); syncSheet(); draw(); remember();
+  S.growth = PHI; S.fit = 'manual'; reBind(); syncSheet(); draw(); remember();
   toast('Back to the golden spiral');
 });
+$('fitHeight').addEventListener('click', function(){
+  S.fit = 'height'; applyFit(); syncSheet(); draw(); remember();
+  toast('Golden spiral, top to bottom');
+});
 $('fitFrame').addEventListener('click', function(){
-  S.fill = true; applyFill(); syncSheet(); draw(); remember();
-  toast('Edge to edge · growth ' + S.growth.toFixed(3));
+  S.fit = 'frame'; applyFit(); syncSheet(); draw(); remember();
+  toast('All four edges · growth ' + S.growth.toFixed(3) + ', no longer φ');
 });
 $('bindBtn').addEventListener('click', function(){
   S.bind = !S.bind; if (S.bind) reBind();
   syncVals(); draw(); remember();
 });
 $('reset').addEventListener('click', function(){
-  S.rot=0; S.orient=0; S.turns=2.25; S.fill=true; S.bind=true;
+  S.rot=0; S.orient=0; S.turns=2.25; S.fit='height'; S.bind=true;
   view.s=1; view.tx=0; view.ty=0;
-  applyFill(); syncSheet(); syncChips(); draw(); remember();
+  applyFit(); syncSheet(); syncChips(); draw(); remember();
 });
 var footBtns = document.querySelectorAll('#foot button');
 Array.prototype.forEach.call(footBtns, function(b){
@@ -1017,7 +1036,7 @@ function toast(msg){
 }
 // `fresh` means the frame now holds something else, so the old position is moot.
 function reframe(fresh){
-  if (S.fill) applyFill();
+  if (S.fit !== 'manual') applyFit();
   else { if (fresh) centreGuide(); reBind(); }
 }
 function resize(){
