@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Fibonacci Camera — scan to open</title>
+<style>
+:root{
+  --base:#0B0B0C; --surface:#16161A; --line:#2E2E36;
+  --text:#F5F3EF; --muted:#A3A09A; --gold:#E0B252;
+  --ui:'Inter',system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;
+  --mono:ui-monospace,'SF Mono',Menlo,monospace;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--base);color:var(--text);font-family:var(--ui);
+  min-height:100vh;display:flex;flex-direction:column;align-items:center;
+  justify-content:center;gap:28px;padding:40px 24px}
+h1{margin:0;font-size:19px;font-weight:600;letter-spacing:.2px;text-align:center}
+h1 small{display:block;font-family:var(--mono);font-size:10px;letter-spacing:1.3px;
+  color:var(--muted);font-weight:400;margin-top:7px;text-transform:uppercase}
+.row{display:flex;gap:26px;flex-wrap:wrap;justify-content:center}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:18px;
+  padding:22px;display:flex;flex-direction:column;align-items:center;gap:14px;max-width:330px}
+.card img{display:block;width:260px;height:260px;image-rendering:pixelated;
+  background:#fff;border-radius:10px;padding:10px}
+.name{font-size:14px;font-weight:600;color:var(--gold)}
+.what{font-size:12px;line-height:1.5;color:var(--muted);text-align:center;margin:0}
+.url{font-family:var(--mono);font-size:9.5px;color:var(--muted);word-break:break-all;
+  text-align:center;line-height:1.5;margin:0}
+footer{font-size:11.5px;color:var(--muted);text-align:center;max-width:46ch;line-height:1.6}
+footer b{color:var(--text);font-weight:500}
+@media (max-width:420px){ .card img{width:220px;height:220px} }
+</style>
+</head>
+<body>
+  <h1>Fibonacci Camera<small>Point your phone's camera at one</small></h1>
+
+  <div class="row">
+    <div class="card">
+      <img src="app.png" alt="QR code linking to the Fibonacci Camera web app">
+      <div class="name">The app</div>
+      <p class="what">Live viewfinder with the guide drawn over it. Open in <b>Safari</b>,
+        then Share → Add to Home Screen.</p>
+      <p class="url">leisuresuitlissy.github.io/fibonacci-camera/?v=4</p>
+    </div>
+
+    <div class="card">
+      <img src="artifact.png" alt="QR code linking to the sandboxed Claude artifact build">
+      <div class="name">The artifact</div>
+      <p class="what">Same guide engine without the live viewfinder. Works on photos you
+        take or pick. Private to your Claude account.</p>
+      <p class="url">claude.ai/artifact/QNNBidB5K3YFBALNyfVE2f</p>
+    </div>
+  </div>
+
+  <footer>The <b>?v=4</b> on the first link forces a fresh download past anything your
+    phone has cached. Once it has loaded, the plain address works fine.</footer>
+</body>
+</html>
