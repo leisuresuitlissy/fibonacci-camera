@@ -10,6 +10,7 @@ import android.graphics.Shader
 import android.os.Build
 import android.graphics.Matrix
 import android.graphics.Paint
+import android.graphics.DashPathEffect
 import android.graphics.Path
 import android.graphics.PointF
 import android.graphics.RectF
@@ -17,6 +18,7 @@ import android.view.MotionEvent
 import android.view.ScaleGestureDetector
 import android.view.View
 import kotlin.math.abs
+import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.hypot
 import kotlin.math.max
@@ -47,6 +49,55 @@ class CropView(ctx: Context) : View(ctx) {
     private var artShader: RuntimeShader? = null
     private var artShaderMode: ArtMode? = null
     private val artPaint = Paint(Paint.FILTER_BITMAP_FLAG)
+
+    // ---- second exposure: centre in base-bitmap px, width as a fraction of base width, rotation in degrees
+    var second: Bitmap? = null
+        set(v) { field = v; comboDirty = true; invalidate() }
+    var blend = Blend.SCREEN
+        set(v) { field = v; comboDirty = true; invalidate() }
+    var strength = 0.6f
+        set(v) { field = v; comboDirty = true; invalidate() }
+    var s2x = 0f; var s2y = 0f; var s2w = 1f; var s2r = 0f
+    /** While true, gestures move, scale and turn the second photo instead of the crop. */
+    var editingSecond = false
+        set(v) { field = v; mode = Mode.NONE; invalidate() }
+    var onSecondChange: (() -> Unit)? = null
+    private var combo: Bitmap? = null
+    private var comboDirty = true
+    private val s2m = Matrix()
+    private val outline = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE; color = 0xE6E0B252.toInt()
+        strokeWidth = 1.4f * resources.displayMetrics.density
+        pathEffect = DashPathEffect(floatArrayOf(6f * resources.displayMetrics.density, 4f * resources.displayMetrics.density), 0f)
+    }
+
+    /** Fit the second photo to cover the base, centred and level. */
+    fun resetSecond() {
+        val t = second ?: return
+        s2x = bw / 2; s2y = bh / 2; s2r = 0f
+        s2w = max(1f, (bh / t.height) * t.width / bw)
+        comboDirty = true; invalidate(); onSecondChange?.invoke()
+    }
+
+    private fun secondMatrix(t: Bitmap): Matrix {
+        val g = s2w * bw / t.width
+        s2m.reset(); s2m.postTranslate(-t.width / 2f, -t.height / 2f); s2m.postScale(g, g); s2m.postRotate(s2r); s2m.postTranslate(s2x, s2y)
+        return s2m
+    }
+
+    /** The two photos already combined, at display size, so crop, guides and art all act on the pair. */
+    private fun picture(b: Bitmap): Bitmap {
+        val t = second ?: return b
+        var out = combo
+        if (out == null || out.width != b.width || out.height != b.height) { out = Bitmap.createBitmap(b.width, b.height, Bitmap.Config.ARGB_8888); combo = out; comboDirty = true }
+        if (comboDirty) {
+            val cv = Canvas(out!!)
+            cv.drawBitmap(b, 0f, 0f, null)
+            cv.drawBitmap(t, secondMatrix(t), blend.paint(strength))
+            comboDirty = false
+        }
+        return out!!
+    }
 
     private val d = resources.displayMetrics.density
     private val painter = GuidePainter(d)
@@ -112,7 +163,8 @@ class CropView(ctx: Context) : View(ctx) {
         if (k <= 0f || width == 0) return
         m.reset(); m.postScale(k, k); m.postTranslate(ox, oy)
         val q = corners().map { toScreen(it) }
-        if (!drawArt(c, b, q)) c.drawBitmap(b, m, bmpPaint)
+        val pic = picture(b)
+        if (!drawArt(c, pic, q)) c.drawBitmap(pic, m, bmpPaint)
         // dim everything outside the crop
         path.reset(); path.fillType = Path.FillType.EVEN_ODD
         path.addRect(0f, 0f, width.toFloat(), height.toFloat(), Path.Direction.CW)
@@ -126,7 +178,18 @@ class CropView(ctx: Context) : View(ctx) {
         c.clipRect(-w / 2, -h / 2, w / 2, h / 2)
         painter.draw(c, RectF(-w / 2, -h / 2, w / 2, h / 2), guide, quadrant, triFlip, trueSpiral = true)
         c.restore()
-        for (p in q) { c.drawCircle(p.x, p.y, 6 * d, handle); c.drawCircle(p.x, p.y, 6 * d, handleEdge) }
+        if (editingSecond && second != null) {
+            second?.let { t ->
+                // outline of the second photo, so you can see what you're moving
+                val pts = floatArrayOf(0f, 0f, t.width.toFloat(), 0f, t.width.toFloat(), t.height.toFloat(), 0f, t.height.toFloat())
+                secondMatrix(t).mapPoints(pts)
+                path.reset(); path.moveTo(ox + pts[0] * k, oy + pts[1] * k)
+                for (i in 1..3) path.lineTo(ox + pts[i * 2] * k, oy + pts[i * 2 + 1] * k)
+                path.close(); c.drawPath(path, outline)
+            }
+        } else {
+            for (p in q) { c.drawCircle(p.x, p.y, 6 * d, handle); c.drawCircle(p.x, p.y, 6 * d, handleEdge) }
+        }
     }
 
     private fun drawArt(c: Canvas, b: Bitmap, q: List<PointF>): Boolean {
@@ -177,9 +240,52 @@ class CropView(ctx: Context) : View(ctx) {
         changed()
     }
 
+    // two-finger state for the second photo
+    private var g0Dist = 0f; private var g0Ang = 0f; private var g0W = 1f; private var g0R = 0f
+    private var g0Cx = 0f; private var g0Cy = 0f; private var g0X = 0f; private var g0Y = 0f
+    private var twoFinger = false
+
+    private fun secondTouch(e: MotionEvent): Boolean {
+        when (e.actionMasked) {
+            MotionEvent.ACTION_DOWN -> { lx = e.x; ly = e.y; twoFinger = false }
+            MotionEvent.ACTION_POINTER_DOWN -> if (e.pointerCount == 2) {
+                twoFinger = true
+                g0Dist = hypot(e.getX(1) - e.getX(0), e.getY(1) - e.getY(0)).coerceAtLeast(1f)
+                g0Ang = Math.toDegrees(atan2((e.getY(1) - e.getY(0)).toDouble(), (e.getX(1) - e.getX(0)).toDouble())).toFloat()
+                g0W = s2w; g0R = s2r; g0X = s2x; g0Y = s2y
+                g0Cx = (e.getX(0) + e.getX(1)) / 2; g0Cy = (e.getY(0) + e.getY(1)) / 2
+            }
+            MotionEvent.ACTION_MOVE -> {
+                if (twoFinger && e.pointerCount >= 2) {
+                    val dist = hypot(e.getX(1) - e.getX(0), e.getY(1) - e.getY(0))
+                    val ang = Math.toDegrees(atan2((e.getY(1) - e.getY(0)).toDouble(), (e.getX(1) - e.getX(0)).toDouble())).toFloat()
+                    val mx = (e.getX(0) + e.getX(1)) / 2; val my = (e.getY(0) + e.getY(1)) / 2
+                    s2w = (g0W * dist / g0Dist).coerceIn(0.1f, 6f)
+                    var r = g0R + (ang - g0Ang)
+                    while (r > 180f) r -= 360f; while (r < -180f) r += 360f
+                    s2r = if (abs(r) < 1.5f) 0f else r              // sticks at level
+                    s2x = g0X + (mx - g0Cx) / k; s2y = g0Y + (my - g0Cy) / k
+                    comboDirty = true; invalidate(); onSecondChange?.invoke()
+                } else if (!twoFinger && e.pointerCount == 1) {
+                    s2x += (e.x - lx) / k; s2y += (e.y - ly) / k
+                    lx = e.x; ly = e.y
+                    comboDirty = true; invalidate(); onSecondChange?.invoke()
+                }
+            }
+            MotionEvent.ACTION_POINTER_UP -> if (e.pointerCount <= 2) {
+                // carry on with one finger from wherever the remaining finger is
+                val keep = if (e.actionIndex == 0) 1 else 0
+                lx = e.getX(keep); ly = e.getY(keep); twoFinger = false
+            }
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> twoFinger = false
+        }
+        return true
+    }
+
     @SuppressLint("ClickableViewAccessibility")
     override fun onTouchEvent(e: MotionEvent): Boolean {
         if (bmp == null) return false
+        if (editingSecond && second != null) return secondTouch(e)
         scaler.onTouchEvent(e)
         when (e.actionMasked) {
             MotionEvent.ACTION_DOWN -> {

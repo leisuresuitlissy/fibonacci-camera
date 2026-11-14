@@ -73,6 +73,12 @@ class CropActivity : ComponentActivity() {
     private lateinit var artRow: LinearLayout
     private lateinit var paramRow: LinearLayout
     private lateinit var artSlider: SeekBar
+    private lateinit var blendLayer: LinearLayout
+    private lateinit var blendActions: LinearLayout
+    private lateinit var blendRow: LinearLayout
+    private lateinit var blendValue: TextView
+    private lateinit var blendSlider: SeekBar
+    private var secondUri: Uri? = null
     private var tab = "CROP"
     private var recipe = Recipe(ArtMode.OFF, FloatArray(4), (Math.random() * 1000).toFloat())
     private var artParam = 0
@@ -81,6 +87,10 @@ class CropActivity : ComponentActivity() {
     private var portrait = true
     private var sample = 1
     private var busy = false
+
+    private val pickSecond = registerForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+        if (uri != null) loadSecond(uri, restoring = null)
+    }
 
     private val pick = registerForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
         if (uri != null) { startActivity(Intent(this, CropActivity::class.java).setData(uri).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)); finish() }
@@ -101,7 +111,7 @@ class CropActivity : ComponentActivity() {
                 portrait = b.height >= b.width
                 Recipe.decode(prefs.getString("art:$src", null))?.let { if (Art.supported) recipe = it }
                 crop.recipe = recipe
-                crop.post { if (!restore()) applyRatio(reset = true); applyTab(); applyArtUi(); note(null) }
+                crop.post { if (!restore()) applyRatio(reset = true); applyTab(); applyArtUi(); applyBlendUi(); note(null); restoreSecond() }
             }
         }
     }
@@ -132,14 +142,14 @@ class CropActivity : ComponentActivity() {
         val top = row().apply { setPadding(dpi(12f), dpi(8f), dpi(12f), dpi(8f)) }
         top.addView(chip("‹ CAMERA", false) { finish() })
         val t = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dpi(12f), 0, 0, 0) }
-        t.addView(label("Crop a copy", 15f, cText, Typeface.DEFAULT_BOLD))
+        t.addView(label("Edit a copy", 15f, cText, Typeface.DEFAULT_BOLD))
         t.addView(label("ORIGINAL IS NEVER CHANGED", 9.5f, cMuted, mono, 0.1f).apply { setPadding(0, dpi(3f), 0, 0) })
         top.addView(t, LinearLayout.LayoutParams(0, wrap, 1f))
         top.addView(chip("OTHER PHOTO", false) { pick.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) })
         root.addView(top, LinearLayout.LayoutParams(match, wrap))
 
         val stage = FrameLayout(this).apply { setBackgroundColor(Color.BLACK) }
-        crop = CropView(this).apply { onChange = { syncReadout() } }
+        crop = CropView(this).apply { onChange = { syncReadout() }; onSecondChange = { rememberSecond() } }
         stage.addView(crop, FrameLayout.LayoutParams(match, match))
         noteView = label("", 12f, cGold, medium).apply {
             background = rounded(alpha(cBase, 0.85f), alpha(cGold, 0.8f)); setPadding(dpi(14f), dpi(9f), dpi(14f), dpi(9f)); visibility = View.GONE
@@ -179,6 +189,25 @@ class CropActivity : ComponentActivity() {
         }
         artLayer.addView(artSlider, LinearLayout.LayoutParams(match, dpi(36f)).apply { leftMargin = dpi(4f); rightMargin = dpi(4f) })
         layers.addView(artLayer, FrameLayout.LayoutParams(match, match))
+
+        blendLayer = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(0, dpi(6f), 0, 0) }
+        blendActions = row(); blendLayer.addView(blendActions, LinearLayout.LayoutParams(match, dpi(48f)))
+        blendRow = row(); blendLayer.addView(blendRow, LinearLayout.LayoutParams(match, dpi(48f)))
+        val bHead = row()
+        bHead.addView(label("BLEND STRENGTH", 10f, cMuted, mono, 0.13f)); bHead.addView(View(this), LinearLayout.LayoutParams(0, 1, 1f))
+        blendValue = label("60%", 11f, cGold, mono); bHead.addView(blendValue)
+        blendLayer.addView(bHead, LinearLayout.LayoutParams(match, dpi(22f)))
+        blendSlider = SeekBar(this).apply {
+            max = 100
+            progressTintList = ColorStateList.valueOf(cGold); progressBackgroundTintList = ColorStateList.valueOf(cLine); thumbTintList = ColorStateList.valueOf(Color.WHITE)
+            setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(sb: SeekBar, v: Int, fromUser: Boolean) { if (fromUser) { crop.strength = v / 100f; blendValue.text = "$v%"; rememberSecond() } }
+                override fun onStartTrackingTouch(sb: SeekBar) {}
+                override fun onStopTrackingTouch(sb: SeekBar) {}
+            })
+        }
+        blendLayer.addView(blendSlider, LinearLayout.LayoutParams(match, dpi(32f)).apply { leftMargin = dpi(4f); rightMargin = dpi(4f) })
+        layers.addView(blendLayer, FrameLayout.LayoutParams(match, match))
         root.addView(layers, LinearLayout.LayoutParams(match, dpi(160f)))
 
         val bar = row().apply { setPadding(dpi(16f), dpi(8f), dpi(16f), dpi(12f)) }
@@ -197,17 +226,84 @@ class CropActivity : ComponentActivity() {
 
     private fun applyTab() {
         tabRow.removeAllViews()
-        for ((key, text) in listOf("CROP" to "CROP", "ART" to ("ART" + if (recipe.mode != ArtMode.OFF) " · " + recipe.mode.label else ""))) {
+        val tabs = listOf("CROP" to "CROP", "ART" to ("ART" + if (recipe.mode != ArtMode.OFF) " · " + recipe.mode.label else ""),
+            "BLEND" to (if (secondUri != null) "BLEND · " + crop.blend.label.uppercase(Locale.US) else "DOUBLE"))
+        for ((key, text) in tabs) {
             val on = key == tab
             tabRow.addView(label(text, 11f, if (on) cGold else cMuted, medium, 0.06f).apply {
-                gravity = Gravity.CENTER; maxLines = 1
+                gravity = Gravity.CENTER; maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END
                 background = if (on) rounded(alpha(cGold, 0.14f), alpha(cGold, 0.7f), 10f) else rounded(Color.TRANSPARENT, cLine, 10f)
                 setPadding(dpi(6f), dpi(8f), dpi(6f), dpi(8f))
                 setOnClickListener { tab = key; applyTab() }
-            }, LinearLayout.LayoutParams(0, wrap, 1f).apply { if (key == "ART") leftMargin = dpi(6f) })
+            }, LinearLayout.LayoutParams(0, wrap, 1f).apply { if (key != "CROP") leftMargin = dpi(6f) })
         }
         cropLayer.visibility = if (tab == "CROP") View.VISIBLE else View.GONE
         artLayer.visibility = if (tab == "ART") View.VISIBLE else View.GONE
+        blendLayer.visibility = if (tab == "BLEND") View.VISIBLE else View.GONE
+        crop.editingSecond = tab == "BLEND"          // in Blend, your fingers move the second photo; elsewhere, the crop
+    }
+
+    // ------------------------------------------------------------- double exposure
+    private fun applyBlendUi() {
+        blendActions.removeAllViews(); blendRow.removeAllViews()
+        if (secondUri == null) {
+            blendActions.addView(chip("+ ADD SECOND PHOTO", true) { pickSecond.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) })
+            blendRow.addView(label("Lay another photo over this one, then crop and style the pair.", 11.5f, cMuted))
+            blendSlider.visibility = View.INVISIBLE
+            (blendValue.parent as View).visibility = View.INVISIBLE
+            return
+        }
+        blendActions.addView(chip("REPLACE", false) { pickSecond.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) })
+        blendActions.addView(chip("FIT", false) { crop.resetSecond() }, LinearLayout.LayoutParams(wrap, wrap).apply { leftMargin = dpi(8f) })
+        blendActions.addView(chip("REMOVE", false) { removeSecond() }, LinearLayout.LayoutParams(wrap, wrap).apply { leftMargin = dpi(8f) })
+        blendActions.addView(View(this), LinearLayout.LayoutParams(0, 1, 1f))
+        blendActions.addView(label("DRAG · PINCH · TWIST", 9f, cMuted, mono, 0.1f))
+        for (b in Blend.values()) {
+            blendRow.addView(chip(b.label.uppercase(Locale.US), b == crop.blend) { crop.blend = b; rememberSecond(); applyBlendUi(); applyTab() },
+                LinearLayout.LayoutParams(wrap, wrap).apply { rightMargin = dpi(8f) })
+        }
+        blendSlider.visibility = View.VISIBLE
+        (blendValue.parent as View).visibility = View.VISIBLE
+        blendSlider.progress = (crop.strength * 100).roundToInt()
+        blendValue.text = "${(crop.strength * 100).roundToInt()}%"
+    }
+
+    /** [restoring] carries a remembered placement; null means fit it fresh. */
+    private fun loadSecond(uri: Uri, restoring: List<String>?) {
+        note("Adding the second photo…")
+        io.execute {
+            val t = runCatching { Exposure.decode(contentResolver, uri, maxLong = 1800) }.getOrNull()
+            runOnUiThread {
+                if (t == null) { note(if (restoring != null) null else "That photo couldn’t be opened."); if (restoring != null) prefs.edit().remove("dbl:$src").apply(); return@runOnUiThread }
+                secondUri = uri
+                crop.second = t
+                if (restoring != null && restoring.size >= 7) {
+                    crop.blend = runCatching { Blend.valueOf(restoring[1]) }.getOrDefault(Blend.SCREEN)
+                    crop.strength = restoring[2].toFloat()
+                    crop.s2x = restoring[3].toFloat() * crop.bw; crop.s2y = restoring[4].toFloat() * crop.bh
+                    crop.s2w = restoring[5].toFloat(); crop.s2r = restoring[6].toFloat()
+                    crop.second = t
+                } else crop.resetSecond()
+                rememberSecond(); applyBlendUi(); applyTab(); note(null)
+            }
+        }
+    }
+
+    private fun removeSecond() {
+        secondUri = null; crop.second = null
+        prefs.edit().remove("dbl:$src").apply()
+        applyBlendUi(); applyTab()
+    }
+
+    private fun rememberSecond() {
+        val u = secondUri ?: return
+        val c = crop
+        prefs.edit().putString("dbl:$src", listOf(u, c.blend.name, c.strength, c.s2x / c.bw, c.s2y / c.bh, c.s2w, c.s2r).joinToString("|")).apply()
+    }
+
+    private fun restoreSecond() {
+        val p = prefs.getString("dbl:$src", null)?.split("|") ?: return
+        runCatching { loadSecond(Uri.parse(p[0]), p) }
     }
 
     private fun applyArtUi() {
@@ -327,10 +423,11 @@ class CropActivity : ComponentActivity() {
     }
 
     // ------------------------------------------------------------- decode + save
-    private fun decode(uri: Uri, display: Boolean, forceSample: Int = 0): Bitmap {
+    private fun decode(uri: Uri, display: Boolean, forceSample: Int = 0, mutable: Boolean = false): Bitmap {
         val source = ImageDecoder.createSource(contentResolver, uri)
         return ImageDecoder.decodeBitmap(source) { decoder, info, _ ->
             decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
+            decoder.isMutableRequired = mutable
             if (display) {
                 val long = max(info.size.width, info.size.height)
                 var s = 1; while (long / (s * 2) >= 1800) s *= 2
@@ -345,12 +442,20 @@ class CropActivity : ComponentActivity() {
         busy = true; note("Saving a copy…"); remember()
         val cx = crop.cx; val cy = crop.cy; val cw = crop.cw; val ch = crop.ch; val deg = Math.toDegrees(crop.theta.toDouble()).toFloat()
         val r = recipe.copy(values = recipe.values.copyOf())
-        val tag = (if (ratio == "PHI") "phi" else ratio.replace(":", "x").lowercase(Locale.US)) +
+        val dbl = secondUri?.let { u -> arrayOf(u.toString(), crop.blend.name, crop.strength, crop.s2x, crop.s2y, crop.s2w, crop.s2r) }
+        val tag = (if (dbl != null) "double_" else "") + (if (ratio == "PHI") "phi" else ratio.replace(":", "x").lowercase(Locale.US)) +
             (if (r.mode != ArtMode.OFF && Art.supported) "_" + r.mode.fileTag else "")
         io.execute {
             val result = runCatching {
-                val full = try { decode(src, display = false) } catch (e: OutOfMemoryError) { decode(src, display = false, forceSample = 2) }
+                var full = try { decode(src, display = false, mutable = dbl != null) } catch (e: OutOfMemoryError) { decode(src, display = false, forceSample = 2, mutable = dbl != null) }
                 val f = full.width.toFloat() / view.width
+                if (dbl != null) {
+                    // the pair first, at full size, exactly as placed on screen; then crop, then art
+                    val top = Exposure.decode(contentResolver, Uri.parse(dbl[0] as String), maxLong = max(full.width, full.height))
+                    full = Exposure.placeOnto(full, top, (dbl[3] as Float) * f, (dbl[4] as Float) * f, dbl[5] as Float, dbl[6] as Float,
+                        Blend.valueOf(dbl[1] as String), dbl[2] as Float)
+                    top.recycle()
+                }
                 val ow = (cw * f).roundToInt().coerceAtLeast(16); val oh = (ch * f).roundToInt().coerceAtLeast(16)
                 var out = Bitmap.createBitmap(ow, oh, Bitmap.Config.ARGB_8888)
                 Canvas(out).apply {

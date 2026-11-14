@@ -108,6 +108,14 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
     private lateinit var evValue: TextView
     private lateinit var evSlider: SeekBar
     private lateinit var zoomRow: LinearLayout
+    private lateinit var camLayer: FrameLayout
+    private lateinit var ghost: ImageView
+    private lateinit var exposureTag: TextView
+    private lateinit var doubleBtn: IconButton
+    private lateinit var blendLayer: LinearLayout
+    private lateinit var blendRow: LinearLayout
+    private lateinit var blendValue: TextView
+    private lateinit var blendSlider: SeekBar
 
     // ---- state
     private val prefs by lazy { getSharedPreferences("fibcam", Context.MODE_PRIVATE) }
@@ -124,6 +132,12 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
     private var artParam = 0
     private var liveSeed = (Math.random() * 1000).toFloat()
     private var liveShader: RuntimeShader? = null
+    // double exposure
+    private var double = false
+    private var firstUri: Uri? = null
+    private var ghostBmp: Bitmap? = null
+    private var blend = Blend.SCREEN
+    private var blendStrength = 0.6f
     private var evIndex = 0
     private var evMin = 0
     private var evMax = 0
@@ -154,6 +168,10 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
         if (uri != null) openCrop(uri)
     }
 
+    private val pickFirst = registerForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+        if (uri != null) setFirst(uri)
+    }
+
     private val askCamera = registerForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
         if (ok) startCamera() else gate("Camera access was refused. Allow it in Settings → Apps → Fibonacci → Permissions.")
     }
@@ -170,6 +188,11 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
         if (!Art.supported) art = ArtMode.OFF
         artValues = Art.loadValues(prefs, art)
         lastUri = prefs.getString("lastUri", null)?.let { Uri.parse(it) }
+        double = prefs.getBoolean("double", false)
+        firstUri = prefs.getString("firstUri", null)?.let { Uri.parse(it) }
+        blend = runCatching { Blend.valueOf(prefs.getString("blend", Blend.SCREEN.name)!!) }.getOrDefault(Blend.SCREEN)
+        blendStrength = prefs.getFloat("blendStrength", 0.6f)
+        if (layer == "BLEND" && !double) layer = "COMPOSE"
         setContentView(buildUi())
         sensors = getSystemService(Context.SENSOR_SERVICE) as SensorManager
         orientation = object : OrientationEventListener(this) {
@@ -180,7 +203,8 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
             }
         }
         overlay.squareGuide = art == ArtMode.HOLGA
-        applyGuide(); applyArtUi(); applyLayer(); syncCoachBtn(); syncFlashBtn()
+        applyGuide(); applyArtUi(); applyBlendUi(); applyLayer(); syncCoachBtn(); syncFlashBtn(); syncDoubleBtn()
+        firstUri?.let { if (double) loadFirst(it) }
         loadThumb()
         checkForUpdate()
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) startCamera()
@@ -209,7 +233,9 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
     private fun save() {
         prefs.edit().putString("guide", guide.name).putInt("quadrant", quadrant)
             .putBoolean("triFlip", triFlip).putBoolean("coach", coach)
-            .putString("layer", layer).putString("art", art.name).apply()
+            .putString("layer", layer).putString("art", art.name)
+            .putBoolean("double", double).putString("firstUri", firstUri?.toString())
+            .putString("blend", blend.name).putFloat("blendStrength", blendStrength).apply()
     }
 
     // =========================================================== UI helpers
@@ -280,6 +306,8 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
             else hintUntil = SystemClock.uptimeMillis() + 4000
             save(); syncCoachBtn(); updateHud(); overlay.invalidate()
         }.apply { contentDescription = "Coaching" }
+        doubleBtn = iconButton(IconButton.Icon.DOUBLE, 40f) { toggleDouble() }.apply { contentDescription = "Double exposure" }
+        top.addView(doubleBtn, (doubleBtn.layoutParams as LinearLayout.LayoutParams).apply { rightMargin = dpi(8f) })
         top.addView(coachBtn)
         flashBtn = iconButton(IconButton.Icon.FLASH_OFF, 40f) { cycleFlash() }.apply { contentDescription = "Flash" }
         top.addView(flashBtn, (flashBtn.layoutParams as LinearLayout.LayoutParams).apply { leftMargin = dpi(8f) })
@@ -291,13 +319,23 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
             scaleType = PreviewView.ScaleType.FIT_CENTER
             implementationMode = PreviewView.ImplementationMode.COMPATIBLE   // a TextureView, so art modes can be applied live
         }
-        stage.addView(preview, lp(match, match))
+        camLayer = FrameLayout(this)
+        camLayer.addView(preview, lp(match, match))
+        ghost = ImageView(this).apply { scaleType = ImageView.ScaleType.CENTER_CROP; visibility = View.GONE }
+        camLayer.addView(ghost, lp(0, 0))
+        stage.addView(camLayer, lp(match, match))
         overlay = OverlayView(this).also { it.listener = this }
         stage.addView(overlay, lp(match, match))
         hud = FrameLayout(this)
         stage.addView(hud, lp(0, 0))
         pill = label("", 14f, cText, medium).apply { setPadding(dpi(16f), dpi(9f), dpi(16f), dpi(9f)); visibility = View.GONE }
         hud.addView(pill, lp(wrap, wrap, Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply { topMargin = dpi(12f) })
+        exposureTag = label("", 10.5f, cGold, mono, 0.1f).apply {
+            setPadding(dpi(10f), dpi(6f), dpi(10f), dpi(6f)); visibility = View.GONE
+            background = rounded(withAlpha(cBase, 0.7f), withAlpha(cGold, 0.6f))
+            setOnClickListener { discardFirst() }
+        }
+        hud.addView(exposureTag, lp(wrap, wrap, Gravity.BOTTOM or Gravity.START).apply { leftMargin = dpi(12f); bottomMargin = dpi(12f) })
         gateMsg = label("", 14f, cMuted).apply { gravity = Gravity.CENTER; setPadding(dpi(32f), 0, dpi(32f), 0); visibility = View.GONE }
         stage.addView(gateMsg, lp(match, match))
         stage.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> layoutFrame() }
@@ -339,6 +377,16 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
         evFoot.addView(spacer()); evFoot.addView(label("+2", 11f, cMuted, mono))
         exposureLayer.addView(evFoot, LinearLayout.LayoutParams(match, dpi(34f)))
         layers.addView(exposureLayer, lp(match, match))
+
+        blendLayer = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        blendRow = hrow(); blendLayer.addView(blendRow, LinearLayout.LayoutParams(match, dpi(48f)))
+        val bHead = hrow()
+        bHead.addView(label("STRENGTH", 10f, cMuted, mono, 0.13f)); bHead.addView(spacer())
+        blendValue = label("60%", 12f, cGold, mono); bHead.addView(blendValue)
+        blendLayer.addView(bHead, LinearLayout.LayoutParams(match, dpi(24f)))
+        blendSlider = slider { v -> blendStrength = v / 100f; blendValue.text = "$v%"; applyGhost(); save() }
+        blendLayer.addView(blendSlider, LinearLayout.LayoutParams(match, dpi(32f)).apply { leftMargin = dpi(4f); rightMargin = dpi(4f) })
+        layers.addView(blendLayer, lp(match, match))
         root.addView(layers, LinearLayout.LayoutParams(match, dpi(104f)))
 
         // zoom, then the shutter bar
@@ -368,7 +416,7 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
             background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(cElev); setStroke(dpi(1f), cLine) }
             contentDescription = "Import a photo"
             translationX = -dp(84f)
-            setOnClickListener { pickFromLibrary() }
+            setOnClickListener { if (double) pickFirst.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) else pickFromLibrary() }
         }
         bar.addView(importBtn, lp(dpi(48f), dpi(48f), Gravity.CENTER))
         val flip = IconButton(this, IconButton.Icon.FLIP, cText).apply {
@@ -393,7 +441,8 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
         if (overlay.frame.left == l && overlay.frame.top == t && overlay.frame.width() == fw && overlay.frame.height() == fh) return
         overlay.frame.set(l, t, l + fw, t + fh)
         (hud.layoutParams as FrameLayout.LayoutParams).apply { width = fw.roundToInt(); height = fh.roundToInt(); leftMargin = l.roundToInt(); topMargin = t.roundToInt() }
-        hud.post { hud.requestLayout() }
+        (ghost.layoutParams as FrameLayout.LayoutParams).apply { width = fw.roundToInt(); height = fh.roundToInt(); leftMargin = l.roundToInt(); topMargin = t.roundToInt() }
+        hud.post { hud.requestLayout(); ghost.requestLayout() }
         overlay.invalidate()
         applyLiveArt()
     }
@@ -402,11 +451,12 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
     private fun applyLayer() {
         tabRow.removeAllViews()
         val evText = if (evIndex == 0) "" else " · " + String.format(Locale.US, "%+.1f", evIndex * evStep)
-        val tabs = listOf("COMPOSE" to "COMPOSE", "ART" to ("ART" + if (art != ArtMode.OFF) " · " + art.label else ""), "EXPOSURE" to ("EXPOSURE$evText"))
+        val tabs = mutableListOf("COMPOSE" to "COMPOSE", "ART" to ("ART" + if (art != ArtMode.OFF) " · " + art.label else ""), "EXPOSURE" to ("EXPOSURE$evText"))
+        if (double) tabs.add("BLEND" to "BLEND")
         for ((key, text) in tabs) {
             val on = key == layer
             val t = label(text, 11f, if (on) cGold else cMuted, medium, 0.06f).apply {
-                gravity = Gravity.CENTER; maxLines = 1
+                gravity = Gravity.CENTER; maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END
                 background = if (on) rounded(withAlpha(cGold, 0.14f), withAlpha(cGold, 0.7f), 10f) else rounded(Color.TRANSPARENT, cLine, 10f)
                 setPadding(dpi(6f), dpi(8f), dpi(6f), dpi(8f))
                 setOnClickListener { layer = key; save(); applyLayer() }
@@ -416,6 +466,65 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
         composeLayer.visibility = if (layer == "COMPOSE") View.VISIBLE else View.GONE
         artLayer.visibility = if (layer == "ART") View.VISIBLE else View.GONE
         exposureLayer.visibility = if (layer == "EXPOSURE") View.VISIBLE else View.GONE
+        blendLayer.visibility = if (layer == "BLEND") View.VISIBLE else View.GONE
+    }
+
+    // ---- double exposure
+    private fun syncDoubleBtn() {
+        doubleBtn.tint = if (double) cGold else cMuted
+        (doubleBtn.background as GradientDrawable).setColor(if (double) withAlpha(cGold, 0.18f) else cElev)
+        doubleBtn.invalidate()
+        exposureTag.visibility = if (double) View.VISIBLE else View.GONE
+        exposureTag.text = if (firstUri == null) "EXPOSURE 1 OF 2" else "EXPOSURE 2 OF 2  ✕"
+    }
+
+    private fun toggleDouble() {
+        double = !double
+        if (double) { layer = "BLEND"; firstUri?.let { loadFirst(it) } }
+        else { if (layer == "BLEND") layer = "COMPOSE"; ghostBmp = null }
+        save(); syncDoubleBtn(); applyGhost(); applyLayer()
+    }
+
+    private fun applyBlendUi() {
+        blendRow.removeAllViews()
+        for (b in Blend.values()) {
+            blendRow.addView(chip(b.label.uppercase(Locale.US), b == blend) { blend = b; save(); applyBlendUi(); applyGhost() },
+                LinearLayout.LayoutParams(wrap, wrap).apply { rightMargin = dpi(8f) })
+        }
+        blendSlider.progress = (blendStrength * 100).roundToInt()
+        blendValue.text = "${(blendStrength * 100).roundToInt()}%"
+    }
+
+    /** The first exposure floats over the live picture with the chosen blend, so you compose the pair. */
+    private fun applyGhost() {
+        val b = ghostBmp
+        if (!double || b == null) { ghost.visibility = View.GONE; ghost.setImageDrawable(null); return }
+        ghost.setImageBitmap(b)
+        ghost.setLayerType(View.LAYER_TYPE_HARDWARE, blend.paint(blendStrength))
+        ghost.visibility = View.VISIBLE
+    }
+
+    private fun setFirst(uri: Uri) {
+        firstUri = uri
+        prefs.edit().putString("firstUri", uri.toString()).apply()
+        syncDoubleBtn(); loadFirst(uri)
+    }
+
+    private fun loadFirst(uri: Uri) {
+        saveExecutor.execute {
+            val b = runCatching { Exposure.decode(contentResolver, uri, maxLong = 2048) }.getOrNull()
+            runOnUiThread {
+                if (b == null) { Toast.makeText(this, "Couldn't open that photo.", Toast.LENGTH_SHORT).show(); discardFirst(); return@runOnUiThread }
+                ghostBmp = b; applyGhost()
+            }
+        }
+    }
+
+    private fun discardFirst() {
+        if (firstUri == null) return
+        firstUri = null; ghostBmp = null
+        prefs.edit().remove("firstUri").apply()
+        syncDoubleBtn(); applyGhost()
     }
 
     private fun syncCoachBtn() {
@@ -549,13 +658,13 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
     /** The art mode runs on the preview itself, so the viewfinder shows the finished look. */
     private fun applyLiveArt() {
         if (!::preview.isInitialized) return
-        if (!Art.supported || art == ArtMode.OFF || overlay.frame.isEmpty) { if (Build.VERSION.SDK_INT >= 31) preview.setRenderEffect(null); liveShader = null; return }
+        if (!Art.supported || art == ArtMode.OFF || overlay.frame.isEmpty) { if (Build.VERSION.SDK_INT >= 31) camLayer.setRenderEffect(null); liveShader = null; return }
         if (Build.VERSION.SDK_INT < 33) return
         val sh = liveShader?.takeIf { it === liveFor(art) } ?: Art.newShader(art).also { liveShader = it; liveMode = art }
-        if (sh == null) { preview.setRenderEffect(null); return }
+        if (sh == null) { camLayer.setRenderEffect(null); return }
         val f = overlay.frame
         Art.setUniforms(sh, artValues, f.left, f.top, f.width(), f.height(), liveSeed)
-        preview.setRenderEffect(RenderEffect.createRuntimeShaderEffect(sh, "content"))
+        camLayer.setRenderEffect(RenderEffect.createRuntimeShaderEffect(sh, "content"))   // live picture and first exposure together
     }
     private var liveMode: ArtMode? = null
     private fun liveFor(m: ArtMode): RuntimeShader? = if (liveMode == m) liveShader else null
@@ -803,12 +912,21 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
         }
         // The art look at the moment of the shot. The original is saved as-is; the look becomes a copy.
         val recipe = if (Art.supported && art != ArtMode.OFF) Recipe(art, artValues.copyOf(), liveSeed) else null
+        val first = if (double) firstUri else null
+        val takingFirst = double && first == null
+        val blendNow = blend; val strengthNow = blendStrength
         val opts = ImageCapture.OutputFileOptions.Builder(contentResolver, MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values).build()
         cap.takePicture(opts, ContextCompat.getMainExecutor(this), object : ImageCapture.OnImageSavedCallback {
             override fun onImageSaved(out: ImageCapture.OutputFileResults) {
                 val uri = out.savedUri ?: return
                 lastUri = uri
                 prefs.edit().putString("lastUri", uri.toString()).putString("thumbUri", uri.toString()).apply()
+                if (takingFirst) { setFirst(uri); loadThumb(); return }           // exposure 1: kept as-is, now floats over the live view
+                if (first != null) {                                               // exposure 2: original kept, the pair saved as a copy
+                    saveDouble(first, uri, name, blendNow, strengthNow, recipe)
+                    firstUri = null; ghostBmp = null; prefs.edit().remove("firstUri").apply(); syncDoubleBtn(); applyGhost()
+                    loadThumb(); return
+                }
                 if (recipe != null) {
                     prefs.edit().putString("art:$uri", recipe.encode()).apply()   // the editor reopens with this look
                     saveArtCopy(uri, name, recipe)
@@ -820,6 +938,36 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
                 Toast.makeText(this@MainActivity, "Couldn't save: ${e.message}", Toast.LENGTH_SHORT).show()
             }
         })
+    }
+
+    private fun saveDouble(first: Uri, second: Uri, name: String, b: Blend, strength: Float, r: Recipe?) {
+        saveExecutor.execute {
+            val res = runCatching {
+                val base = Exposure.decode(contentResolver, second, mutable = true)
+                val top = Exposure.decode(contentResolver, first, maxLong = maxOf(base.width, base.height))
+                var out = Exposure.coverOnto(base, top, b, strength)
+                top.recycle()
+                if (r != null && Build.VERSION.SDK_INT >= 33) { val styled = Art.finish(Art.render(out, r), r.mode); if (styled !== out) { out.recycle(); out = styled } }
+                val values = ContentValues().apply {
+                    put(MediaStore.MediaColumns.DISPLAY_NAME, "${name}_double" + (if (r != null) "_${r.mode.fileTag}" else ""))
+                    put(MediaStore.MediaColumns.MIME_TYPE, "image/jpeg")
+                    put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/Fibonacci Camera")
+                    put(MediaStore.MediaColumns.IS_PENDING, 1)
+                }
+                val dest = contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values) ?: error("no destination")
+                contentResolver.openOutputStream(dest).use { os -> out.compress(Bitmap.CompressFormat.JPEG, 95, os!!) }
+                contentResolver.update(dest, ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING, 0) }, null, null)
+                out.recycle()
+                dest
+            }
+            runOnUiThread {
+                res.onSuccess { dest ->
+                    lastUri = dest
+                    prefs.edit().putString("lastUri", dest.toString()).putString("thumbUri", dest.toString()).apply(); loadThumb()
+                    Toast.makeText(this, "Double exposure saved · both originals kept", Toast.LENGTH_SHORT).show()
+                }.onFailure { Toast.makeText(this, "Saved both originals; combining them failed: ${it.message}", Toast.LENGTH_LONG).show() }
+            }
+        }
     }
 
     private fun saveArtCopy(original: Uri, name: String, r: Recipe) {
