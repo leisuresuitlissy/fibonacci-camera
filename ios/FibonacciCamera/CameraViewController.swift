@@ -71,6 +71,10 @@ final class TileView: UIControl {
 
 final class CameraViewController: UIViewController, PHPickerViewControllerDelegate {
     private let cam = Camera()
+    private let tracker = Tracker()
+    private let haptic = UIImpactFeedbackGenerator(style: .medium)
+    private var subject: CGPoint?          // the tapped subject, followed silently (screen points)
+    private var aligned = false
     private let d = UserDefaults.standard
 
     // views
@@ -139,7 +143,12 @@ final class CameraViewController: UIViewController, PHPickerViewControllerDelega
         buildUi()
         applyGuide(); applyArtUi(); applyBlendUi(); applyLayer(); syncFlash(); syncDouble(); applyGhost()
 
-        cam.onFrame = { [weak self] pb in self?.live.push(pb) }
+        cam.onFrame = { [weak self] pb in
+            guard let self else { return }
+            self.live.push(pb)
+            let st = self.tracker.process(pb)
+            DispatchQueue.main.async { self.onTrack(st) }
+        }
         cam.onReady = { [weak self] z, evr in self?.cameraReady(z, evr) }
         Camera.requestAccess { [weak self] ok in
             guard let self else { return }
@@ -467,12 +476,31 @@ final class CameraViewController: UIViewController, PHPickerViewControllerDelega
     }
 
     private func flipCamera() {
-        front.toggle(); cam.start(front: front)
+        front.toggle(); tracker.clear(); aligned = false; cam.start(front: front)
     }
 
     private func tapFocus(_ p: CGPoint) {
         let fr = live.frameRect
-        cam.focus(at: CGPoint(x: (p.x - fr.minX) / fr.width, y: (p.y - fr.minY) / fr.height))
+        let n = CGPoint(x: (p.x - fr.minX) / fr.width, y: (p.y - fr.minY) / fr.height)
+        cam.focus(at: n)
+        tracker.target(n); aligned = false; haptic.prepare()      // the tap also names the subject to follow
+    }
+
+    /**
+     * The subject is followed without anything on screen; when it lands on a guide's business end
+     * (the spiral's eye, a power point, an intersection) the phone buzzes once. Moving well off re-arms it.
+     */
+    private func onTrack(_ st: Tracker.State?) {
+        let fr = overlay.guideFrame
+        guard let st, !st.lost, !fr.isEmpty else { subject = nil; aligned = false; return }
+        let lf = live.frameRect
+        let p = CGPoint(x: lf.minX + st.nx * lf.width, y: lf.minY + st.ny * lf.height)
+        subject = p
+        guard let best = Geo.goals(guide, fr, quadrant: quadrant, triFlip: triFlip).min(by: { hypot($0.x - p.x, $0.y - p.y) < hypot($1.x - p.x, $1.y - p.y) }) else { aligned = false; return }
+        let d = hypot(best.x - p.x, best.y - p.y)
+        let r = max(14, 0.045 * min(fr.width, fr.height))
+        if !aligned && d < r { aligned = true; haptic.impactOccurred(); haptic.prepare() }
+        else if aligned && d > r * 1.8 { aligned = false }
     }
 
     private func pinch(_ s: CGFloat) { setZoom(zoomDisplay * s) }

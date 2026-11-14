@@ -94,3 +94,21 @@ enum Geo {
         return (CGPoint(x: left - s.ox * u, y: top - s.oy * u), u)
     }
 }
+
+extension Geo {
+    /** The business end of each guide: where a subject should land, in screen points. */
+    static func goals(_ guide: Guide, _ fr: CGRect, quadrant: Int, triFlip: Bool) -> [CGPoint] {
+        let tl = CGPoint(x: fr.minX, y: fr.minY), tr = CGPoint(x: fr.maxX, y: fr.minY)
+        let br = CGPoint(x: fr.maxX, y: fr.maxY), bl = CGPoint(x: fr.minX, y: fr.maxY)
+        func grid(_ fs: [CGFloat]) -> [CGPoint] { fs.flatMap { a in fs.map { b in CGPoint(x: fr.minX + a * fr.width, y: fr.minY + b * fr.height) } } }
+        switch guide {
+        case .spiral: return [shootSpiral(Spiral.of(quadrant), fr).eye]
+        case .thirds: return grid([CGFloat(1) / 3, CGFloat(2) / 3])
+        case .phiGrid: return grid([CGFloat(1 - 1 / PHI), CGFloat(1 / PHI)])
+        case .triangles: return triFlip ? [footOf(tr, bl, tl), footOf(tr, bl, br)] : [footOf(tl, br, tr), footOf(tl, br, bl)]
+        case .dynamic: return [footOf(tr, bl, tl), footOf(tr, bl, br), footOf(tl, br, tr), footOf(tl, br, bl)]
+        case .centre: return [CGPoint(x: fr.midX, y: fr.midY)]
+        default: return []
+        }
+    }
+}

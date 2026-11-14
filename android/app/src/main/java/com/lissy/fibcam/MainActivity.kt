@@ -304,8 +304,7 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
         top.addView(updateBtn, LinearLayout.LayoutParams(wrap, wrap).apply { rightMargin = dpi(8f) })
         coachBtn = iconButton(IconButton.Icon.COACH, 40f) {
             coach = !coach
-            if (!coach) { tracker.clear(); trackState = null; overlay.target = null; aligned = false }
-            else hintUntil = SystemClock.uptimeMillis() + 4000
+            if (coach) hintUntil = SystemClock.uptimeMillis() + 4000
             save(); syncCoachBtn(); updateHud(); overlay.invalidate()
         }.apply { contentDescription = "Coaching" }
         doubleBtn = iconButton(IconButton.Icon.DOUBLE, 40f) { toggleDouble() }.apply { contentDescription = "Double exposure" }
@@ -834,10 +833,11 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
         val fr = overlay.frame
         if (!fr.contains(sx, sy)) return
         overlay.showFocus(sx, sy)
-        if (coach) {
-            // Coach mode: the tap also names the subject to follow. Tapping it again lets it go.
+        run {
+            // The tap names the subject to follow, so the phone can buzz when it lands on the guide.
+            // In Coach, tapping the marked subject again lets it go; without Coach there's nothing to tap, so a tap always re-aims.
             val cur = overlay.target
-            if (cur != null && trackState?.lost != true && Geo.dist(cur, PointF(sx, sy)) < dp(28f)) {
+            if (coach && cur != null && trackState?.lost != true && Geo.dist(cur, PointF(sx, sy)) < dp(28f)) {
                 tracker.clear(); trackState = null; overlay.target = null; aligned = false; overlay.invalidate(); updateHud()
             } else {
                 var nx = (sx - fr.left) / fr.width(); val ny = (sy - fr.top) / fr.height()
@@ -903,8 +903,15 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
         if (!::hud.isInitialized) return
         overlay.coach = coach
         if (!coach) {
-            // Normal shooting: just the guide. No target, no status, nothing to judge.
-            pill.visibility = View.GONE; overlay.goal = null; aligned = false; overlay.aligned = false
+            // Normal shooting: just the guide on screen. The tapped subject is followed silently, and
+            // the phone buzzes once when it lands on a guide point (eye, power point, intersection).
+            pill.visibility = View.GONE; overlay.goal = null; overlay.aligned = false
+            val fr = overlay.guideFrame; val st = trackState; val p = overlay.target
+            if (st == null || p == null || st.lost || fr.isEmpty) { aligned = false; return }
+            val best = Geo.goals(guide, fr, quadrant, triFlip, align).minByOrNull { Geo.dist(p, it) } ?: run { aligned = false; return }
+            val d = Geo.dist(p, best)
+            val r = max(dp(14f), 0.045f * min(fr.width(), fr.height()))
+            if (!aligned && d < r) { aligned = true; buzz() } else if (aligned && d > r * 1.8f) aligned = false
             return
         }
         val fr = overlay.guideFrame
