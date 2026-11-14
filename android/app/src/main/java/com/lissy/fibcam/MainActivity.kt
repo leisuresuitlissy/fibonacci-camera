@@ -90,6 +90,7 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
     private lateinit var overlay: OverlayView
     private lateinit var hud: FrameLayout
     private lateinit var pill: TextView
+    private lateinit var nice: TextView
     private lateinit var sourceTxt: TextView
     private lateinit var coachBtn: IconButton
     private lateinit var flashBtn: IconButton
@@ -331,6 +332,11 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
         stage.addView(hud, lp(0, 0))
         pill = label("", 14f, cText, medium).apply { setPadding(dpi(16f), dpi(9f), dpi(16f), dpi(9f)); visibility = View.GONE }
         hud.addView(pill, lp(wrap, wrap, Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply { topMargin = dpi(12f) })
+        nice = label("Nice", 13f, cGold, medium, 0.04f).apply {
+            setPadding(dpi(14f), dpi(7f), dpi(14f), dpi(7f)); visibility = View.GONE
+            background = rounded(0xD93C2E14.toInt(), withAlpha(cGold, 0.85f))
+        }
+        hud.addView(nice, lp(wrap, wrap, Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply { topMargin = dpi(12f) })
         exposureTag = label("", 10.5f, cGold, mono, 0.1f).apply {
             setPadding(dpi(10f), dpi(6f), dpi(10f), dpi(6f)); visibility = View.GONE
             background = rounded(withAlpha(cBase, 0.7f), withAlpha(cGold, 0.6f))
@@ -879,6 +885,13 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
         overlay.invalidate()
     }
 
+    /** A brief "Nice" when the subject lands; never shown while the subject is lost. */
+    private fun showNice() {
+        nice.animate().cancel()
+        nice.alpha = 1f; nice.visibility = View.VISIBLE
+        nice.animate().alpha(0f).setStartDelay(900).setDuration(350).withEndAction { nice.visibility = View.GONE }.start()
+    }
+
     private fun buzz() {
         val fb = if (Build.VERSION.SDK_INT >= 30) HapticFeedbackConstants.CONFIRM else HapticFeedbackConstants.VIRTUAL_KEY
         overlay.performHapticFeedback(fb)
@@ -907,23 +920,26 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
             // the phone buzzes once when it lands on a guide point (eye, power point, intersection).
             pill.visibility = View.GONE; overlay.goal = null; overlay.aligned = false
             val fr = overlay.guideFrame; val st = trackState; val p = overlay.target
-            if (st == null || p == null || st.lost || fr.isEmpty) { aligned = false; return }
-            val best = Geo.goals(guide, fr, quadrant, triFlip, align).minByOrNull { Geo.dist(p, it) } ?: run { aligned = false; return }
+            if (st == null || p == null || st.lost || fr.isEmpty) {
+                aligned = false
+                if (st?.lost == true && nice.visibility == View.VISIBLE) { nice.animate().cancel(); nice.visibility = View.GONE }
+                return
+            }
+            val best = Geo.nearestGoal(guide, fr, quadrant, triFlip, p, align) ?: run { aligned = false; return }
             val d = Geo.dist(p, best)
             val r = max(dp(14f), 0.045f * min(fr.width(), fr.height()))
-            if (!aligned && d < r) { aligned = true; buzz() } else if (aligned && d > r * 1.8f) aligned = false
+            if (!aligned && d < r) { aligned = true; buzz(); showNice() } else if (aligned && d > r * 1.8f) aligned = false
             return
         }
         val fr = overlay.guideFrame
         val st = trackState
-        val goals = if (fr.isEmpty) emptyList() else Geo.goals(guide, fr, quadrant, triFlip, align)
         val text: String
         var on = false
         val p = overlay.target
         if (st == null || p == null) { text = "Tap your subject"; overlay.goal = null }
         else if (st.lost) { text = "Tap your subject again"; overlay.goal = null }
         else {
-            val best = goals.minByOrNull { Geo.dist(p, it) }
+            val best = Geo.nearestGoal(guide, fr, quadrant, triFlip, p, align)
             overlay.goal = best
             if (best == null) { text = "Pick a guide to aim for"; aligned = false }
             else {

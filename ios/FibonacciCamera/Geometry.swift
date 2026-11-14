@@ -112,3 +112,30 @@ extension Geo {
         }
     }
 }
+
+extension Geo {
+    /**
+     * Where the subject at p should go for this guide: the nearest point that counts as "lined up".
+     * Points for most guides; the nearest spot on a diagonal for Diagonals; the thirds of the 4:5 crop for the marks.
+     */
+    static func nearestGoal(_ guide: Guide, _ fr: CGRect, quadrant: Int, triFlip: Bool, p: CGPoint) -> CGPoint? {
+        guard !fr.isEmpty else { return nil }
+        func d(_ a: CGPoint) -> CGFloat { hypot(a.x - p.x, a.y - p.y) }
+        if guide == .diagonals {
+            let starts: [(CGPoint, CGFloat, CGFloat)] = [(CGPoint(x: fr.minX, y: fr.minY), 1, 1), (CGPoint(x: fr.maxX, y: fr.minY), -1, 1),
+                                                         (CGPoint(x: fr.minX, y: fr.maxY), 1, -1), (CGPoint(x: fr.maxX, y: fr.maxY), -1, -1)]
+            return starts.map { (a, dx, dy) -> CGPoint in
+                let b = exit(a, dx, dy, fr)
+                let vx = b.x - a.x, vy = b.y - a.y
+                let t = min(1, max(0, ((p.x - a.x) * vx + (p.y - a.y) * vy) / (vx * vx + vy * vy)))
+                return CGPoint(x: a.x + vx * t, y: a.y + vy * t)
+            }.min { d($0) < d($1) }
+        }
+        let pts: [CGPoint]
+        if guide == .marks {
+            let h = min(fr.width * 1.25, fr.height)
+            pts = goals(.thirds, CGRect(x: fr.minX, y: fr.minY + (fr.height - h) / 2, width: fr.width, height: h), quadrant: quadrant, triFlip: triFlip)
+        } else { pts = goals(guide, fr, quadrant: quadrant, triFlip: triFlip) }
+        return pts.min { d($0) < d($1) }
+    }
+}

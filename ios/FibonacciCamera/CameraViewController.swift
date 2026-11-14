@@ -100,6 +100,7 @@ final class CameraViewController: UIViewController, PHPickerViewControllerDelega
     private let exposureTag = UIButton()
     private let gate = Style.label("", Style.medium(14), Style.text)
     private let whiteout = UIView()
+    private let nice = Style.label("Nice", Style.medium(13), Style.gold)
 
     // state
     private var guide = Guide.spiral
@@ -219,6 +220,10 @@ final class CameraViewController: UIViewController, PHPickerViewControllerDelega
         exposureTag.layer.borderColor = Style.gold.withAlphaComponent(0.6).cgColor; exposureTag.layer.borderWidth = 1; exposureTag.layer.cornerRadius = 14
         exposureTag.addAction(UIAction { [weak self] _ in self?.discardFirst() }, for: .touchUpInside)
         stage.addSubview(exposureTag)
+        nice.textAlignment = .center; nice.backgroundColor = UIColor(red: 0.24, green: 0.18, blue: 0.08, alpha: 0.85)
+        nice.layer.cornerRadius = 15; nice.layer.borderWidth = 1; nice.layer.borderColor = Style.gold.withAlphaComponent(0.85).cgColor
+        nice.clipsToBounds = true; nice.alpha = 0; nice.isUserInteractionEnabled = false
+        stage.addSubview(nice)
         whiteout.backgroundColor = .white; whiteout.alpha = 0; whiteout.isUserInteractionEnabled = false; pin(whiteout, to: stage)
         gate.numberOfLines = 0; gate.textAlignment = .center; gate.isHidden = true
         gate.translatesAutoresizingMaskIntoConstraints = false; stage.addSubview(gate)
@@ -300,6 +305,7 @@ final class CameraViewController: UIViewController, PHPickerViewControllerDelega
         overlay.frameRect = fr
         exposureTag.sizeToFit()
         exposureTag.frame.origin = CGPoint(x: fr.minX + 12, y: fr.maxY - exposureTag.bounds.height - 12)
+        nice.frame = CGRect(x: fr.midX - 34, y: fr.minY + 12, width: 68, height: 30)
     }
 
     // ============================================================ layers
@@ -492,14 +498,18 @@ final class CameraViewController: UIViewController, PHPickerViewControllerDelega
      */
     private func onTrack(_ st: Tracker.State?) {
         let fr = overlay.guideFrame
-        guard let st, !st.lost, !fr.isEmpty else { subject = nil; aligned = false; return }
+        guard let st, !st.lost, !fr.isEmpty else {
+            subject = nil; aligned = false
+            if st?.lost == true { nice.layer.removeAllAnimations(); nice.alpha = 0 }   // never "Nice" while lost
+            return
+        }
         let lf = live.frameRect
         let p = CGPoint(x: lf.minX + st.nx * lf.width, y: lf.minY + st.ny * lf.height)
         subject = p
-        guard let best = Geo.goals(guide, fr, quadrant: quadrant, triFlip: triFlip).min(by: { hypot($0.x - p.x, $0.y - p.y) < hypot($1.x - p.x, $1.y - p.y) }) else { aligned = false; return }
+        guard let best = Geo.nearestGoal(guide, fr, quadrant: quadrant, triFlip: triFlip, p: p) else { aligned = false; return }
         let d = hypot(best.x - p.x, best.y - p.y)
         let r = max(14, 0.045 * min(fr.width, fr.height))
-        if !aligned && d < r { aligned = true; haptic.impactOccurred(); haptic.prepare() }
+        if !aligned && d < r { aligned = true; haptic.impactOccurred(); haptic.prepare(); showNice() }
         else if aligned && d > r * 1.8 { aligned = false }
     }
 
@@ -586,6 +596,11 @@ final class CameraViewController: UIViewController, PHPickerViewControllerDelega
                 if top != nil { self.toast("Double exposure saved · both originals kept") }
             }
         }
+    }
+
+    private func showNice() {
+        nice.layer.removeAllAnimations(); nice.alpha = 1
+        UIView.animate(withDuration: 0.35, delay: 0.9, options: [.beginFromCurrentState]) { self.nice.alpha = 0 }
     }
 
     private func toast(_ s: String) {

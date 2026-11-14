@@ -128,6 +128,31 @@ object Geo {
 
     fun dist(a: PointF, b: PointF) = hypot(a.x - b.x, a.y - b.y)
 
+    /**
+     * Where the subject at [p] should go for this guide: the nearest point that counts as "lined up".
+     * Points for most guides (eye, power points, intersections); the nearest spot on a diagonal for
+     * Diagonals; the thirds of the 4:5 crop for the crop marks. Null for no guide.
+     */
+    fun nearestGoal(guide: Guide, fr: RectF, quadrant: Int, triFlip: Boolean, p: PointF, align: Int = 1): PointF? {
+        if (fr.isEmpty) return null
+        if (guide == Guide.DIAGONALS) {
+            val starts = listOf(PointF(fr.left, fr.top) to (1f to 1f), PointF(fr.right, fr.top) to (-1f to 1f),
+                PointF(fr.left, fr.bottom) to (1f to -1f), PointF(fr.right, fr.bottom) to (-1f to -1f))
+            return starts.map { (a, d) ->
+                val b = exit(a, d.first, d.second, fr)
+                val vx = b.x - a.x; val vy = b.y - a.y
+                val t = (((p.x - a.x) * vx + (p.y - a.y) * vy) / (vx * vx + vy * vy)).coerceIn(0f, 1f)
+                PointF(a.x + vx * t, a.y + vy * t)
+            }.minByOrNull { dist(it, p) }
+        }
+        val pts = if (guide == Guide.MARKS) {
+            val h = min(fr.width() * 1.25f, fr.height()); val top = fr.top + (fr.height() - h) / 2
+            val box = RectF(fr.left, top, fr.right, top + h)
+            goals(Guide.THIRDS, box, quadrant, triFlip, align)
+        } else goals(guide, fr, quadrant, triFlip, align)
+        return pts.minByOrNull { dist(it, p) }
+    }
+
     /** Degrees off level from a gravity vector, portrait or landscape; null when pointing at floor/sky. */
     fun levelOff(gx: Float, gy: Float, gz: Float): Float? {
         if (abs(gz) > 7f) return null
