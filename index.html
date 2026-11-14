@@ -126,33 +126,6 @@ input[type=range]{width:100%;accent-color:var(--gold);margin:0}
   color:var(--text);font-size:12px;padding:10px 16px;border-radius:999px;z-index:40;opacity:0;
   transition:opacity .2s;pointer-events:none;max-width:86%;text-align:center}
 #toast.on{opacity:1}
-/* ---- live HUD: exposure row, zoom chips, aligned pill, coach card */
-#hud{position:absolute;pointer-events:none;left:0;top:0;width:0;height:0}
-#hud[hidden]{display:none}
-.expo{position:absolute;left:12px;right:12px;top:10px;display:flex;justify-content:space-between;gap:10px;
-  font-family:var(--mono);font-size:11px;letter-spacing:.4px;color:rgba(245,243,239,.78);text-shadow:0 1px 3px rgba(0,0,0,.7)}
-.expo #expoR{color:var(--gold)}
-.zchips{position:absolute;bottom:12px;left:50%;transform:translateX(-50%);display:flex;gap:2px;padding:4px;
-  border-radius:999px;background:rgba(11,11,12,.6);pointer-events:auto}
-.zchips[hidden]{display:none}
-.zchips button{border:0;background:transparent;color:var(--text);font-family:var(--mono);font-size:12px;
-  min-width:38px;height:30px;border-radius:999px;cursor:pointer;padding:0 8px}
-.zchips button.on{background:rgba(245,243,239,.16);color:var(--gold)}
-.apill{position:absolute;left:12px;bottom:14px;display:inline-flex;align-items:center;gap:7px;padding:6px 11px;
-  border-radius:999px;font-family:var(--mono);font-size:10.5px;letter-spacing:1.2px;
-  background:rgba(11,11,12,.55);border:1px solid rgba(245,243,239,.25);color:var(--muted)}
-.apill i{width:6px;height:6px;border-radius:50%;background:currentColor;display:block}
-.apill.on{background:rgba(224,178,82,.18);border-color:rgba(224,178,82,.85);color:var(--gold)}
-.apill[hidden]{display:none}
-.coach{position:absolute;left:12px;right:12px;bottom:58px;padding:11px 14px 12px;border-radius:14px;
-  background:rgba(11,11,12,.62);border:1px solid rgba(245,243,239,.22);backdrop-filter:blur(4px)}
-.coach.on{background:rgba(60,46,20,.62);border-color:rgba(224,178,82,.8)}
-.coach[hidden]{display:none}
-.coach b{display:flex;align-items:center;gap:7px;font-family:var(--mono);font-size:10.5px;letter-spacing:1.4px;
-  font-weight:500;color:var(--muted)}
-.coach.on b{color:var(--gold)}
-.coach b i{width:6px;height:6px;border-radius:50%;background:currentColor;display:block}
-.coach span{display:block;margin-top:5px;font-size:14px;line-height:1.4;color:var(--text)}
 @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
 </style>
 </head>
@@ -162,9 +135,6 @@ input[type=range]{width:100%;accent-color:var(--gold);margin:0}
   <header class="gutter">
     <div class="brand grow">Fibonacci Camera<small id="srcName">SAMPLE SCENE</small></div>
     <button class="chip on" id="turnsChip" type="button">SPIRAL · 2.25 TURNS</button>
-    <button class="icobtn" id="coachBtn" type="button" aria-label="Coaching" aria-pressed="false">
-      <svg viewBox="0 0 24 24"><path d="M4 5h16v11H9l-5 4z"/><path d="M8 9h8M8 12h5"/></svg>
-    </button>
     <button class="icobtn" id="torch" type="button" aria-label="Torch" hidden>
       <svg viewBox="0 0 24 24"><path d="M9 2h6l-1 7h4l-8 13 1-9H7z"/></svg>
     </button>
@@ -173,12 +143,6 @@ input[type=range]{width:100%;accent-color:var(--gold);margin:0}
   <div id="stageWrap">
     <video id="vid" playsinline muted autoplay></video>
     <canvas id="ov"></canvas>
-    <div id="hud" hidden>
-      <div class="expo"><span id="expoL"></span><span id="expoR"></span></div>
-      <div class="coach" id="coachCard" hidden><b><i></i><em id="coachT" style="font-style:normal"></em></b><span id="coachS"></span></div>
-      <div class="apill" id="alignPill" hidden><i></i><span id="alignTxt">ALIGNED</span></div>
-      <div class="zchips" id="zchips" hidden></div>
-    </div>
     <div id="gate">
       <button class="primary" id="startCam" type="button" style="padding:14px 22px">Start the live viewfinder</button>
       <p id="gateMsg">The guide draws over the live camera. Your browser will ask for camera access first.</p>
@@ -277,7 +241,7 @@ var $ = function(id){ return document.getElementById(id); };
 // the golden spiral. Other values are still true logarithmic spirals, just not
 // that one — which is how the proportion changes without anything being stretched.
 var DEF = { overlay:'spiral', turns:2.25, orient:0, scale:1, rot:0, cx:0.336, cy:0.303,
-            locked:false, triFlip:0, view:'guide', growth:PHI, fit:'height', bind:true, stretch:true, coach:false };
+            locked:false, triFlip:0, view:'guide', growth:PHI, fit:'height', bind:true, stretch:true };
 // Bump this when a default changes, or saved settings keep overriding the new one.
 var STORE = 'fibcam.v4';
 var SMIN = 0.25, SMAX = 2.5;      // a narrow frame needs over 1.0 to reach full height
@@ -356,10 +320,9 @@ function growthForFrame(){ var fr = frame(); return growthForAspect(fr.w/fr.h); 
 // top to bottom; on a frame narrower than the spiral's own 0.639 box it reaches past
 // the sides, which is what a golden spiral does. 'frame' instead reshapes the spiral
 // to the frame's proportion so it touches all four edges, and is no longer φ.
-// `keepPos` sizes the guide but leaves the eye where the user put it.
-function applyFit(keepPos){
+function applyFit(){
   var fr = frame(), g, base;
-  if (S.stretch){ S.scale = 1; if (keepPos) reBind(); else centreGuide(); return; }   // scale 1 already is the frame
+  if (S.stretch){ S.scale = 1; centreGuide(); return; }   // scale 1 already is the frame
   if (S.fit === 'frame'){
     S.growth = growthForAspect(fr.w/fr.h);
     S.scale = 1;
@@ -368,7 +331,7 @@ function applyFit(keepPos){
     g = geo(); base = baseFit(fr);
     S.scale = Math.max(SMIN, Math.min(SMAX, fr.h / (g.bh * base)));
   } else return;
-  if (keepPos) reBind(); else centreGuide();
+  centreGuide();
 }
 
 /* ----------------------------------------------------------- frame + maths */
@@ -441,11 +404,10 @@ function cropRectLocal(){
   }
   return [[g.ox,g.oy],[g.ox+g.bw,g.oy],[g.ox+g.bw,g.oy+g.bh],[g.ox,g.oy+g.bh]];
 }
-// Per-axis, so a stretched box is centred by the scales it is actually drawn with.
 function centreGuide(){
-  var fr = frame(), g = geo(), f = fitScales(fr);
-  S.cx = ((fr.w - g.bw*f.sx)/2 - g.ox*f.sx)/fr.w;
-  S.cy = ((fr.h - g.bh*f.sy)/2 - g.oy*f.sy)/fr.h;
+  var fr = frame(), g = geo(), f = baseFit(fr)*S.scale;
+  S.cx = ((fr.w - g.bw*f)/2 - g.ox*f)/fr.w;
+  S.cy = ((fr.h - g.bh*f)/2 - g.oy*f)/fr.h;
 }
 function dist(a,b){ var dx=a[0]-b[0], dy=a[1]-b[1]; return Math.sqrt(dx*dx+dy*dy); }
 
@@ -649,8 +611,6 @@ function draw(){
     ring([T.ex,T.ey], 2.5, 'rgba(224,178,82,1)', null, 0);
   }
   frameEdge(fr); updateReadout(fr);
-  if (mode === 'live') drawTarget(fr);
-  updateHud(fr);
 }
 function frameEdge(fr){
   ctx.strokeStyle='rgba(255,255,255,0.10)'; ctx.lineWidth=1;
@@ -692,7 +652,7 @@ function updateReadout(fr){
 }
 
 /* ------------------------------------------------------------ interaction */
-var ptrs = {}, nPtr = 0, gest = null, grab = null, lastTap = 0, downPt = null, moved = false, tapTimer = 0;
+var ptrs = {}, nPtr = 0, gest = null, grab = null, lastTap = 0, downPt = null, moved = false;
 function stagePt(e){ var r = cv.getBoundingClientRect(); return [e.clientX-r.left, e.clientY-r.top]; }
 
 cv.addEventListener('pointerdown', function(e){
@@ -759,17 +719,10 @@ function endPtr(e){
   if (e.pointerId in ptrs){ delete ptrs[e.pointerId]; nPtr = Math.max(0, nPtr-1); }
   if (nPtr === 0){
     if (!moved && downPt){
-      var now = Date.now(), tapAt = downPt, wasHandle = (gest === 'scale' || gest === 'rotate');
-      clearTimeout(tapTimer);
+      var now = Date.now();
       if (now - lastTap < 340 && S.overlay === 'spiral' && !S.locked){
-        S.orient = (S.orient+1)%8;
-        if (S.fit !== 'manual') applyFit(true); else reBind();       // same as the sheet's tiles, minus the recentre
-        syncSheet(); syncChips(); draw(); remember(); lastTap = 0;
-      } else {
-        lastTap = now;
-        // A single tap in the viewfinder names the subject. Wait out the double-tap window first.
-        if (mode === 'live' && !wasHandle) tapTimer = setTimeout(function(){ onSubjectTap(tapAt); }, 320);
-      }
+        S.orient = (S.orient+1)%8; syncSheet(); syncChips(); draw(); remember(); lastTap = 0;
+      } else lastTap = now;
     }
     gest = null; grab = null; remember();
   } else if (nPtr === 1 && gest === 'pinch'){ gest = null; grab = null; }
@@ -777,189 +730,6 @@ function endPtr(e){
 cv.addEventListener('pointerup', endPtr);
 cv.addEventListener('pointercancel', endPtr);
 function pulseLock(){ var el=$('lock'); el.animate([{transform:'scale(1)'},{transform:'scale(1.18)'},{transform:'scale(1)'}],{duration:320}); }
-
-/* ------------------------------------------- subject tracking + coaching */
-// Tap the subject; a small patch around it is followed frame to frame on a
-// low-res copy of the feed (zero-mean SAD, so exposure shifts don't throw it).
-// No model, no network: it follows whatever you tapped, trees included.
-var trk = { on:false, lost:false, u:0, v:0, tpl:null, w:0, h:0, cv:null, cx:null, bad:0, raf:0, n:0, aligned:false, score:0 };
-var TW = 192, PR = 7, PN = (2*PR+1)*(2*PR+1), SR = 14;
-function trkGray(){
-  var vw = vid.videoWidth, vh = vid.videoHeight; if (!vw || !vh) return null;
-  var w = TW, h = Math.max(24, Math.round(TW*vh/vw));
-  if (!trk.cv){ trk.cv = document.createElement('canvas'); }
-  if (trk.cv.width !== w || trk.cv.height !== h){ trk.cv.width = w; trk.cv.height = h; trk.cx = trk.cv.getContext('2d', { willReadFrequently:true }); }
-  trk.cx.drawImage(vid, 0, 0, w, h);
-  var d = trk.cx.getImageData(0, 0, w, h).data, g = new Float32Array(w*h);
-  for (var i = 0, j = 0; j < g.length; i += 4, j++) g[j] = d[i]*0.299 + d[i+1]*0.587 + d[i+2]*0.114;
-  trk.w = w; trk.h = h; return g;
-}
-function patchAt(g, x, y){
-  var p = new Float32Array(PN), k = 0, s = 0, dx, dy, w = trk.w;
-  for (dy = -PR; dy <= PR; dy++) for (dx = -PR; dx <= PR; dx++){ var v = g[(y+dy)*w + (x+dx)]; p[k++] = v; s += v; }
-  s /= PN; for (k = 0; k < PN; k++) p[k] -= s;
-  return p;
-}
-function trkStep(){
-  var g = trkGray(); if (!g || !trk.tpl) return;
-  var w = trk.w, h = trk.h, best = 1e9, bx = trk.u, by = trk.v, x, y, dx, dy, k, s, m, sad, t = trk.tpl;
-  var r = trk.lost ? SR*2 : SR;
-  var x0 = Math.max(PR, trk.u - r), x1 = Math.min(w-PR-1, trk.u + r);
-  var y0 = Math.max(PR, trk.v - r), y1 = Math.min(h-PR-1, trk.v + r);
-  for (y = y0; y <= y1; y++) for (x = x0; x <= x1; x++){
-    m = 0;
-    for (dy = -PR; dy <= PR; dy++){ var row = (y+dy)*w; for (dx = -PR; dx <= PR; dx++) m += g[row + x + dx]; }
-    m /= PN; sad = 0; k = 0;
-    for (dy = -PR; dy <= PR && sad < best*PN; dy++){ var row2 = (y+dy)*w; for (dx = -PR; dx <= PR; dx++){ s = g[row2 + x + dx] - m - t[k++]; sad += s < 0 ? -s : s; } }
-    sad /= PN;
-    if (sad < best){ best = sad; bx = x; by = y; }
-  }
-  trk.score = best;
-  if (best < 16){
-    trk.u = bx; trk.v = by; trk.bad = 0; trk.lost = false;
-    var cur = patchAt(g, bx, by);                    // drift slowly with the subject's look
-    for (k = 0; k < PN; k++) t[k] = t[k]*0.92 + cur[k]*0.08;
-  } else if (++trk.bad > 8) trk.lost = true;
-}
-function trkLoop(){
-  if (mode !== 'live' || !trk.on){ trk.raf = 0; return; }
-  if ((trk.n++ & 1) === 0) trkStep();
-  draw();
-  trk.raf = requestAnimationFrame(trkLoop);
-}
-function clearTarget(){ trk.on = false; trk.lost = false; trk.tpl = null; trk.aligned = false; if (trk.raf){ cancelAnimationFrame(trk.raf); trk.raf = 0; } }
-// stage point <-> normalised feed position (front camera preview is mirrored)
-function stageToFeed(p, fr){ var nx = (p[0]-fr.x)/fr.w, ny = (p[1]-fr.y)/fr.h; if (facing === 'user') nx = 1-nx; return [nx, ny]; }
-function feedToStage(nx, ny, fr){ if (facing === 'user') nx = 1-nx; return [fr.x + nx*fr.w, fr.y + ny*fr.h]; }
-function targetStage(fr){ return feedToStage(trk.u/trk.w, trk.v/trk.h, fr); }
-function onSubjectTap(p){
-  if (mode !== 'live') return;
-  var fr = frame();
-  if (trk.on && !trk.lost && dist(p, targetStage(fr)) < 28){ clearTarget(); draw(); return; }   // tap the marker to drop it
-  var n = stageToFeed(p, fr); if (n[0] < 0 || n[0] > 1 || n[1] < 0 || n[1] > 1) return;
-  var g = trkGray(); if (!g) return;
-  trk.u = Math.max(PR, Math.min(trk.w-PR-1, Math.round(n[0]*trk.w)));
-  trk.v = Math.max(PR, Math.min(trk.h-PR-1, Math.round(n[1]*trk.h)));
-  trk.tpl = patchAt(g, trk.u, trk.v); trk.on = true; trk.lost = false; trk.bad = 0; trk.aligned = false;
-  // Focus where you tapped, where the camera allows it (Chrome on Android, mostly).
-  if (track && caps.pointsOfInterest){ try { track.applyConstraints({ advanced:[{ pointsOfInterest:[{ x:n[0], y:n[1] }] }] }).catch(function(){}); } catch(e){} }
-  if (!trk.raf) trk.raf = requestAnimationFrame(trkLoop);
-  draw();
-}
-// Where the subject should sit for the current guide.
-function goalsFor(fr){
-  if (S.overlay === 'spiral'){ var T = xform(fr); return [[T.ex, T.ey]]; }
-  var fs = S.overlay === 'grid' ? [1-1/PHI, 1/PHI] : S.overlay === 'thirds' ? [1/3, 2/3] : null, out = [], i, j;
-  if (fs){ for (i=0;i<2;i++) for (j=0;j<2;j++) out.push([fr.x+fs[i]*fr.w, fr.y+fs[j]*fr.h]); return out; }
-  if (S.overlay === 'triangles'){
-    var tl=[fr.x,fr.y], tr=[fr.x+fr.w,fr.y], br=[fr.x+fr.w,fr.y+fr.h], bl=[fr.x,fr.y+fr.h];
-    return S.triFlip ? [foot(tr,bl,tl), foot(tr,bl,br)] : [foot(tl,br,tr), foot(tl,br,bl)];
-  }
-  return [];
-}
-function alignRadius(fr){ return Math.max(14, 0.045*Math.min(fr.w, fr.h)); }
-function buzz(){ try { if (navigator.vibrate) navigator.vibrate(S.coach ? [22, 70, 22] : 28); } catch(e){} }
-var level = { dev:null, ok:false };
-function onMotion(e){
-  var g = e.accelerationIncludingGravity; if (!g || g.x == null) return;
-  if (Math.abs(g.z) > 7){ level.dev = null; return; }          // pointing at the floor or sky: level means nothing
-  var dev = Math.abs(Math.atan2(g.x, g.y) * 180/Math.PI); if (dev > 90) dev = 180 - dev;
-  if (Math.abs(g.x) > Math.abs(g.y)){ dev = Math.abs(Math.atan2(g.y, g.x) * 180/Math.PI); if (dev > 90) dev = 180 - dev; }   // landscape
-  level.dev = level.dev == null ? dev : level.dev*0.8 + dev*0.2;
-}
-window.addEventListener('devicemotion', onMotion);
-function drawTarget(fr){
-  if (!trk.on) return;
-  var p = targetStage(fr), on = trk.aligned && !trk.lost;
-  ctx.save();
-  if (trk.lost) ctx.setLineDash([4,4]);
-  ring(p, 17, null, on ? 'rgba(224,178,82,0.95)' : 'rgba(255,255,255,0.85)', 1.5);
-  ctx.setLineDash([]);
-  ctx.strokeStyle = on ? 'rgba(224,178,82,0.95)' : 'rgba(255,255,255,0.85)'; ctx.lineWidth = 1.5;
-  seg([p[0]-24,p[1]],[p[0]-19,p[1]]); seg([p[0]+19,p[1]],[p[0]+24,p[1]]);
-  seg([p[0],p[1]-24],[p[0],p[1]-19]); seg([p[0],p[1]+19],[p[0],p[1]+24]);
-  ctx.restore();
-}
-function coachLine(fr, p, goal){
-  var dx = (p[0]-goal[0])/fr.w, dy = (p[1]-goal[1])/fr.h, out = [];
-  // Subject right of the goal: turn the camera right, which slides the scene left.
-  if (Math.abs(dx) > 0.015) out.push((dx > 0 ? 'Pan right' : 'Pan left') + (Math.abs(dx) < 0.08 ? ' a touch' : ''));
-  if (Math.abs(dy) > 0.015) out.push((dy > 0 ? 'tilt down' : 'tilt up') + (Math.abs(dy) < 0.08 ? ' a touch' : ''));
-  var s = out.join(' · '); return s.charAt(0).toUpperCase() + s.slice(1);
-}
-function levelBit(){ if (level.dev == null) return ''; return level.dev < 1.5 ? ' · level' : ' · ' + level.dev.toFixed(0) + '° off level'; }
-var hintUntil = 0;
-function updateHud(fr){
-  var hud = $('hud'), live = (mode === 'live');
-  hud.hidden = !live; if (!live) return;
-  hud.style.left = fr.x + 'px'; hud.style.top = fr.y + 'px'; hud.style.width = fr.w + 'px'; hud.style.height = fr.h + 'px';
-  $('expoR').textContent = S.overlay !== 'spiral' ? '' : (S.stretch ? 'STRETCHED' : (atPhi() ? 'φ 1.618' : 'GROWTH ' + S.growth.toFixed(3)));
-  var pill = $('alignPill'), card = $('coachCard'), goals = goalsFor(fr), state, title, line;
-  if (!trk.on){ state = 'none'; }
-  else if (trk.lost){ state = 'lost'; }
-  else {
-    var p = targetStage(fr), best = null, i, d;
-    for (i = 0; i < goals.length; i++){ d = dist(p, goals[i]); if (!best || d < best.d) best = { d:d, g:goals[i] }; }
-    var r = alignRadius(fr);
-    if (!best){ state = 'noguide'; trk.aligned = false; }
-    else {
-      if (!trk.aligned && best.d < r){ trk.aligned = true; buzz(); }
-      else if (trk.aligned && best.d > r*1.8) trk.aligned = false;
-      state = trk.aligned ? 'aligned' : (best.d < r*3 ? 'close' : 'far');
-      line = trk.aligned ? null : coachLine(fr, p, best.g);
-    }
-  }
-  var where = S.overlay === 'spiral' ? 'on the eye' : 'on a power point';
-  if (state === 'none'){ title = 'TAP YOUR SUBJECT'; line = 'Tap what the photo is about. It buzzes when the subject lands ' + where + '.'; }
-  else if (state === 'lost'){ title = 'LOST IT'; line = 'Tap the subject again.'; }
-  else if (state === 'noguide'){ title = 'NO TARGET'; line = 'Pick a guide to aim for.'; }
-  else if (state === 'aligned'){ title = 'ALIGNED'; line = 'Subject ' + where + levelBit(); }
-  else { title = state === 'close' ? 'ALMOST' : 'MOVE'; line = (line || 'Hold there') + levelBit(); }
-  card.hidden = !S.coach; card.classList.toggle('on', state === 'aligned');
-  $('coachT').textContent = title; $('coachS').textContent = line;
-  var showPill = !S.coach && (state !== 'none' || Date.now() < hintUntil);
-  pill.hidden = !showPill; pill.classList.toggle('on', state === 'aligned');
-  $('alignTxt').textContent = state === 'aligned' ? 'ALIGNED' : state === 'lost' ? 'LOST' : state === 'none' ? 'TAP SUBJECT' : state === 'noguide' ? 'NO GUIDE' : 'TARGET';
-}
-// Exposure: shown only where the camera reports it. Phones don't expose aperture
-// to the web at all, and Chrome often only reports shutter/ISO once they're set,
-// so the row falls back to what is always true — resolution and frame rate.
-var expoTimer = 0;
-function pollExposure(){
-  if (!track || mode !== 'live') return;
-  var s = {}; try { s = track.getSettings() || {}; } catch(e){}
-  var parts = [];
-  if (s.exposureTime){ var sec = s.exposureTime/10000; parts.push(sec >= 1 ? sec.toFixed(1)+'s' : '1/' + Math.round(1/sec)); }
-  if (s.iso) parts.push('ISO ' + Math.round(s.iso));
-  if (!parts.length && s.width) parts.push(Math.max(s.width,s.height) + '×' + Math.min(s.width,s.height) + (s.frameRate ? ' · ' + Math.round(s.frameRate) + 'fps' : ''));
-  if (camZoom && caps.zoom) parts.push(camZoom.toFixed(1) + '×');
-  $('expoL').textContent = parts.join('   ');
-}
-function buildZoomChips(){
-  var box = $('zchips'); box.innerHTML = '';
-  if (!caps.zoom){ box.hidden = true; return; }
-  var mn = caps.zoom.min || 1, mx = caps.zoom.max || 1;
-  var zs = [0.5, 0.6, 1, 2, 3, 5, 10].filter(function(z){ return z >= mn - 0.01 && z <= mx + 0.01; });
-  if (zs.indexOf(0.5) >= 0 && zs.indexOf(0.6) >= 0) zs.splice(zs.indexOf(0.6), 1);
-  if (zs.length < 2){ box.hidden = true; return; }
-  zs.forEach(function(z){
-    var b = document.createElement('button'); b.type = 'button'; b.dataset.z = z;
-    b.textContent = z < 1 ? String(z).replace('0.', '.') : z + '×';
-    b.addEventListener('click', function(){ setZoom(z); });
-    box.appendChild(b);
-  });
-  box.hidden = false; syncZoomChips();
-}
-function syncZoomChips(){
-  var bs = $('zchips').children, bi = -1, bd = 1e9, i;
-  for (i = 0; i < bs.length; i++){ var d = Math.abs(parseFloat(bs[i].dataset.z) - camZoom); if (d < bd){ bd = d; bi = i; } }
-  for (i = 0; i < bs.length; i++) bs[i].classList.toggle('on', i === bi && bd < 0.15);
-}
-if (location.hash === '#debug') window.__fibcam = { trk:trk, frame:frame, xform:xform, level:level, S:S, onSubjectTap:onSubjectTap };
-$('coachBtn').addEventListener('click', function(){
-  S.coach = !S.coach; this.classList.toggle('on', S.coach); this.setAttribute('aria-pressed', String(S.coach));
-  remember(); draw();
-});
 
 /* ----------------------------------------------------------------- camera */
 function camSupported(){ return !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia); }
@@ -980,14 +750,11 @@ function gateMessage(){
   return true;
 }
 function stopCamera(){
-  clearTarget(); clearInterval(expoTimer); expoTimer = 0;
   if (stream){ stream.getTracks().forEach(function(t){ t.stop(); }); stream = null; track = null; caps = {}; }
   vid.classList.remove('on');
 }
 async function startCamera(){
   if (!gateMessage()) return;
-  // iOS asks before handing over motion data (for the level readout); it has to be asked inside the tap.
-  try { if (window.DeviceMotionEvent && DeviceMotionEvent.requestPermission) DeviceMotionEvent.requestPermission().catch(function(){}); } catch(e){}
   try {
     stopCamera();
     stream = await navigator.mediaDevices.getUserMedia({
@@ -1017,8 +784,7 @@ async function startCamera(){
     $('zoom').value = Math.round(camZoom*100);
     $('zoomVal').textContent = camZoom.toFixed(1) + '×';
   }
-  buildZoomChips(); expoTimer = setInterval(pollExposure, 700); hintUntil = Date.now() + 4000;
-  mode = 'live'; vid.classList.add('on'); $('gate').hidden = true; pollExposure();
+  mode = 'live'; vid.classList.add('on'); $('gate').hidden = true;
   $('srcName').textContent = 'LIVE · ' + facing.toUpperCase();
   setBars(); resize(); reframe(true); draw();
 }
@@ -1026,7 +792,7 @@ async function setZoom(z){
   if (!track || !caps.zoom) return;
   z = Math.min(caps.zoom.max, Math.max(caps.zoom.min, z));
   try { await track.applyConstraints({ advanced:[{ zoom:z }] }); camZoom = z;
-        $('zoom').value = Math.round(z*100); $('zoomVal').textContent = z.toFixed(1)+'×'; syncZoomChips(); pollExposure(); } catch(e){}
+        $('zoom').value = Math.round(z*100); $('zoomVal').textContent = z.toFixed(1)+'×'; } catch(e){}
 }
 $('startCam').addEventListener('click', startCamera);
 $('liveBtn').addEventListener('click', startCamera);
@@ -1296,7 +1062,7 @@ function toast(msg){
 }
 // `fresh` means the frame now holds something else, so the old position is moot.
 function reframe(fresh){
-  if (S.fit !== 'manual') applyFit(!fresh);
+  if (S.fit !== 'manual') applyFit();
   else { if (fresh) centreGuide(); reBind(); }
 }
 function resize(){
@@ -1319,7 +1085,6 @@ document.addEventListener('gesturestart', function(e){ e.preventDefault(); });  
 photo = sampleScene();
 gateMessage();
 $('lock').classList.toggle('on', S.locked);
-$('coachBtn').classList.toggle('on', S.coach); $('coachBtn').setAttribute('aria-pressed', String(S.coach));
 $('lock').setAttribute('aria-pressed', String(S.locked));
 Array.prototype.forEach.call(footBtns, function(x){ x.classList.toggle('on', x.dataset.view === S.view); });
 setBars(); syncChips(); syncSheet(); resize(); reframe(!(saved && saved.cx !== undefined)); syncSheet(); draw();
