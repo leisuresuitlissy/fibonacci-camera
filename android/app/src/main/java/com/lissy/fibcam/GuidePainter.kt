@@ -20,14 +20,16 @@ class GuidePainter(private val d: Float) {
     private val ring = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = 1.5f * d; color = gold }
     private val dot = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL; color = gold }
     private val dashed = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = 1f * d; color = white; alpha = 150; pathEffect = DashPathEffect(floatArrayOf(6 * d, 5 * d), 0f) }
+    private val box = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = 1f * d; color = gold; alpha = 120; pathEffect = DashPathEffect(floatArrayOf(5 * d, 5 * d), 0f) }
     private val path = Path()
 
-    fun draw(c: Canvas, fr: RectF, guide: Guide, quadrant: Int, triFlip: Boolean, trueSpiral: Boolean) {
+    /** [trueSpiral]: Crop screen (largest fit inside the box). Otherwise Shoot (full height, [align]ed). */
+    fun draw(c: Canvas, fr: RectF, guide: Guide, quadrant: Int, triFlip: Boolean, trueSpiral: Boolean, align: Int = 1) {
         when (guide) {
             Guide.OFF -> {}
             Guide.THIRDS -> grid(c, fr, floatArrayOf(1 / 3f, 2 / 3f))
             Guide.PHI_GRID -> grid(c, fr, floatArrayOf((1 - 1 / PHI).toFloat(), (1 / PHI).toFloat()))
-            Guide.SPIRAL -> spiral(c, fr, quadrant, trueSpiral)
+            Guide.SPIRAL -> spiral(c, fr, quadrant, trueSpiral, align)
             Guide.TRIANGLES -> triangles(c, fr, triFlip)
             Guide.DIAGONALS -> diagonals(c, fr)
             Guide.DYNAMIC -> dynamic(c, fr)
@@ -48,11 +50,14 @@ class GuidePainter(private val d: Float) {
         for (a in fs) for (b in fs) power(c, PointF(fr.left + a * fr.width(), fr.top + b * fr.height()))
     }
 
-    private fun spiral(c: Canvas, fr: RectF, quadrant: Int, trueSpiral: Boolean) {
+    private fun spiral(c: Canvas, fr: RectF, quadrant: Int, trueSpiral: Boolean, align: Int) {
         val s = Spiral.of(quadrant, wide = trueSpiral && fr.width() > fr.height())
         val eye: PointF; val sx: Float; val sy: Float
         if (trueSpiral) { val (e, u) = Geo.phiEye(s, fr); eye = e; sx = u; sy = u }
-        else { eye = Geo.spiralEye(s, fr); sx = fr.width() / s.bw; sy = fr.height() / s.bh }
+        else {
+            val (e, u, left) = Geo.shootSpiral(s, fr, align); eye = e; sx = u; sy = u
+            c.drawRect(left, fr.top + 0.5f * d, left + s.bw * u, fr.bottom - 0.5f * d, box)   // the spiral's own box
+        }
         path.reset()
         val p = s.pts
         path.moveTo(eye.x + p[0] * sx, eye.y + p[1] * sy)

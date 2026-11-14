@@ -27,6 +27,7 @@ class OverlayView @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? =
     var guide = Guide.SPIRAL
     var quadrant = 0
     var triFlip = false
+    var align = 1
     /** Tracked subject in screen px, or null. */
     var target: PointF? = null
     var targetLost = false
@@ -58,7 +59,7 @@ class OverlayView @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? =
     override fun onDraw(c: Canvas) {
         if (frame.isEmpty) return
         c.drawRect(frame, edge)
-        painter.draw(c, frame, guide, quadrant, triFlip, trueSpiral = false)   // viewfinder: stretched to the frame
+        painter.draw(c, frame, guide, quadrant, triFlip, trueSpiral = false, align = align)   // true φ, full height
         drawTarget(c)
     }
 

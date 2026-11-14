@@ -16,10 +16,6 @@ import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
-import android.hardware.camera2.CameraCaptureSession
-import android.hardware.camera2.CaptureRequest
-import android.hardware.camera2.CaptureResult
-import android.hardware.camera2.TotalCaptureResult
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -43,9 +39,6 @@ import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.annotation.OptIn
-import androidx.camera.camera2.interop.Camera2Interop
-import androidx.camera.camera2.interop.ExperimentalCamera2Interop
 import androidx.camera.core.Camera
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.FocusMeteringAction
@@ -90,8 +83,6 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
     private lateinit var preview: PreviewView
     private lateinit var overlay: OverlayView
     private lateinit var hud: FrameLayout
-    private lateinit var expoL: TextView
-    private lateinit var expoR: TextView
     private lateinit var pill: TextView
     private lateinit var coachCard: LinearLayout
     private lateinit var coachT: TextView
@@ -111,6 +102,7 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
     private var guide = Guide.SPIRAL
     private var quadrant = 0
     private var triFlip = false
+    private var align = 1                 // 0 left, 1 centre, 2 right
     private var coach = false
     private var front = false
     private var flashMode = ImageCapture.FLASH_MODE_OFF
@@ -129,8 +121,6 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
     private var zoomMin = 1f
     private var zoomMax = 1f
     private var chipsFor = ""
-    @Volatile private var lastExpoAt = 0L
-    private var expoText = ""
 
     private var level: Float? = null
     private var deviceRot = 0
@@ -151,6 +141,7 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
         guide = runCatching { Guide.valueOf(prefs.getString("guide", Guide.SPIRAL.name)!!) }.getOrDefault(Guide.SPIRAL)
         quadrant = prefs.getInt("quadrant", 0)
         triFlip = prefs.getBoolean("triFlip", false)
+        align = prefs.getInt("align", 1)
         coach = prefs.getBoolean("coach", false)
         lastUri = prefs.getString("lastUri", null)?.let { Uri.parse(it) }
         setContentView(buildUi())
@@ -189,7 +180,7 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
 
     private fun save() {
         prefs.edit().putString("guide", guide.name).putInt("quadrant", quadrant)
-            .putBoolean("triFlip", triFlip).putBoolean("coach", coach).apply()
+            .putBoolean("triFlip", triFlip).putInt("align", align).putBoolean("coach", coach).apply()
     }
 
     // =========================================================== UI
@@ -250,21 +241,17 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
         stage.addView(overlay, lp(match, match))
         hud = FrameLayout(this)
         stage.addView(hud, lp(0, 0))
-        expoL = label("", 11f, withAlpha(cText, 0.8f), mono, 0.03f).apply { setShadowLayer(dp(3f), 0f, dp(1f), 0xAA000000.toInt()) }
-        hud.addView(expoL, lp(wrap, wrap, Gravity.TOP or Gravity.START).apply { leftMargin = dpi(12f); topMargin = dpi(10f) })
-        expoR = label("", 11f, cGold, mono, 0.03f).apply { setShadowLayer(dp(3f), 0f, dp(1f), 0xAA000000.toInt()) }
-        hud.addView(expoR, lp(wrap, wrap, Gravity.TOP or Gravity.END).apply { rightMargin = dpi(12f); topMargin = dpi(10f) })
         pill = label("TAP SUBJECT", 10.5f, cMuted, mono, 0.12f).apply {
             setPadding(dpi(11f), dpi(7f), dpi(11f), dpi(7f)); visibility = View.GONE
         }
-        hud.addView(pill, lp(wrap, wrap, Gravity.BOTTOM or Gravity.START).apply { leftMargin = dpi(12f); bottomMargin = dpi(60f) })
+        hud.addView(pill, lp(wrap, wrap, Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply { topMargin = dpi(12f) })
         coachCard = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL; setPadding(dpi(14f), dpi(11f), dpi(14f), dpi(12f)); visibility = View.GONE
         }
         coachT = label("", 10.5f, cMuted, mono, 0.14f)
         coachS = label("", 14f, cText).apply { setPadding(0, dpi(6f), 0, 0); setLineSpacing(0f, 1.15f) }
         coachCard.addView(coachT); coachCard.addView(coachS)
-        hud.addView(coachCard, lp(match, wrap, Gravity.BOTTOM).apply { leftMargin = dpi(12f); rightMargin = dpi(12f); bottomMargin = dpi(58f) })
+        hud.addView(coachCard, lp(match, wrap, Gravity.TOP).apply { leftMargin = dpi(12f); rightMargin = dpi(12f); topMargin = dpi(12f) })
         zoomRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL; background = rounded(withAlpha(cBase, 0.6f)); setPadding(dpi(4f), dpi(4f), dpi(4f), dpi(4f)); visibility = View.GONE
         }
@@ -341,7 +328,7 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
     }
 
     private fun applyGuide() {
-        overlay.guide = guide; overlay.quadrant = quadrant; overlay.triFlip = triFlip
+        overlay.guide = guide; overlay.quadrant = quadrant; overlay.triFlip = triFlip; overlay.align = align
         guideRow.removeAllViews()
         for (g in Guide.values()) {
             guideRow.addView(chip(g.label, g == guide) { guide = g; aligned = false; save(); applyGuide() },
@@ -350,10 +337,13 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
         secondRow.removeAllViews()
         when (guide) {
             Guide.SPIRAL -> {
-                secondRow.addView(label("EYE", 10f, cMuted, mono, 0.13f))
+                // four orientations, drawn as the spiral itself
+                for (q in 0..3) secondRow.addView(tile(q == quadrant, { c, p, on -> drawMiniSpiral(c, p, q, on) }) { quadrant = q; aligned = false; save(); applyGuide() },
+                    LinearLayout.LayoutParams(dpi(44f), dpi(40f)).apply { rightMargin = dpi(6f) })
                 secondRow.addView(View(this), LinearLayout.LayoutParams(0, 1, 1f))
-                for (q in 0..3) secondRow.addView(tile(q == quadrant, { c, p, on -> drawQuad(c, p, q, on) }) { quadrant = q; aligned = false; save(); applyGuide() },
-                    LinearLayout.LayoutParams(dpi(52f), dpi(40f)).apply { leftMargin = dpi(8f) })
+                // where the golden box sits across the frame
+                for (a in 0..2) secondRow.addView(tile(a == align, { c, p, on -> drawAlign(c, p, a, on) }) { align = a; aligned = false; save(); applyGuide() },
+                    LinearLayout.LayoutParams(dpi(40f), dpi(40f)).apply { leftMargin = dpi(6f) })
             }
             Guide.TRIANGLES -> {
                 secondRow.addView(label("DIRECTION", 10f, cMuted, mono, 0.13f))
@@ -386,6 +376,30 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
         }
     }
 
+    private fun View.drawMiniSpiral(c: Canvas, p: Paint, q: Int, on: Boolean) {
+        val s = Spiral.of(q)
+        val h = height * 0.62f; val u = h / s.bh
+        val left = (width - s.bw * u) / 2; val top = (height - h) / 2
+        val ex = left - s.ox * u; val ey = top - s.oy * u
+        val path = android.graphics.Path()
+        val pts = s.pts
+        path.moveTo(ex + pts[0] * u, ey + pts[1] * u)
+        var i = 6
+        while (i < pts.size) { path.lineTo(ex + pts[i] * u, ey + pts[i + 1] * u); i += 6 }
+        p.style = Paint.Style.STROKE; p.strokeWidth = dp(1.4f); p.strokeCap = Paint.Cap.ROUND; p.color = if (on) cGold else withAlpha(cText, 0.7f)
+        c.drawPath(path, p)
+        p.style = Paint.Style.FILL; c.drawCircle(ex, ey, dp(1.8f), p)
+    }
+
+    private fun View.drawAlign(c: Canvas, p: Paint, a: Int, on: Boolean) {
+        val fw = dp(20f); val fh = dp(24f); val x0 = (width - fw) / 2; val y0 = (height - fh) / 2
+        p.style = Paint.Style.STROKE; p.strokeWidth = dp(1f); p.color = if (on) cGold else cMuted; p.alpha = 120
+        c.drawRect(x0, y0, x0 + fw, y0 + fh, p)
+        val bw = fh * 0.639f; val bx = when (a) { 0 -> x0; 2 -> x0 + fw - bw; else -> x0 + (fw - bw) / 2 }
+        p.style = Paint.Style.FILL; p.alpha = 255
+        c.drawRect(bx, y0, bx + bw, y0 + fh, p.apply { alpha = if (on) 200 else 150 })
+    }
+
     private fun View.drawDir(c: Canvas, p: Paint, flip: Boolean, on: Boolean) {
         val s = dp(20f); val x0 = (width - s) / 2; val y0 = (height - s) / 2
         p.style = Paint.Style.STROKE; p.strokeWidth = dp(1.2f); p.color = if (on) cGold else cMuted
@@ -407,17 +421,12 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
         f.addListener({ provider = f.get(); bindCamera() }, ContextCompat.getMainExecutor(this))
     }
 
-    @OptIn(markerClass = [ExperimentalCamera2Interop::class])
     private fun bindCamera() {
         val p = provider ?: return
         camera?.cameraInfo?.zoomState?.removeObservers(this)
         p.unbindAll()
         val ratio43 = AspectRatioStrategy.RATIO_4_3_FALLBACK_AUTO_STRATEGY
         val pb = Preview.Builder().setResolutionSelector(ResolutionSelector.Builder().setAspectRatioStrategy(ratio43).build())
-        // Every preview frame reports what the camera actually chose: aperture, shutter, ISO.
-        Camera2Interop.Extender(pb).setSessionCaptureCallback(object : CameraCaptureSession.CaptureCallback() {
-            override fun onCaptureCompleted(session: CameraCaptureSession, request: CaptureRequest, result: TotalCaptureResult) { onExposure(result) }
-        })
         val prev = pb.build().also { it.setSurfaceProvider(preview.surfaceProvider) }
         val cap = ImageCapture.Builder()
             .setResolutionSelector(ResolutionSelector.Builder().setAspectRatioStrategy(ratio43).build())
@@ -448,31 +457,11 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
         updateHud()
     }
 
-    private fun onExposure(r: TotalCaptureResult) {
-        val now = SystemClock.uptimeMillis()
-        if (now - lastExpoAt < 250) return
-        lastExpoAt = now
-        val parts = ArrayList<String>(4)
-        r.get(CaptureResult.LENS_APERTURE)?.let { parts.add("ƒ/" + String.format(Locale.US, "%.1f", it)) }
-        r.get(CaptureResult.SENSOR_EXPOSURE_TIME)?.let { ns ->
-            val s = ns / 1e9
-            parts.add(if (s >= 0.5) String.format(Locale.US, "%.1fs", s) else "1/" + (1 / s).roundToInt())
-        }
-        r.get(CaptureResult.SENSOR_SENSITIVITY)?.let { parts.add("ISO $it") }
-        val t = parts.joinToString("   ")
-        runOnUiThread { expoText = t; renderExpo() }
-    }
-
-    private fun renderExpo() {
-        val z = if (abs(zoomRatio - 1f) < 0.05f) "1×" else String.format(Locale.US, "%.1f×", zoomRatio)
-        expoL.text = if (expoText.isEmpty()) z else "$expoText   $z"
-    }
-
     private fun onZoom(z: ZoomState) {
         zoomRatio = z.zoomRatio; zoomMin = z.minZoomRatio; zoomMax = z.maxZoomRatio
         val key = "$zoomMin-$zoomMax"
         if (key != chipsFor) { chipsFor = key; buildZoomChips() }
-        syncZoomChips(); renderExpo()
+        syncZoomChips()
     }
 
     private fun zoomStops(): List<Float> {
@@ -585,9 +574,8 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
     private fun updateHud() {
         if (!::hud.isInitialized) return
         val fr = overlay.frame
-        expoR.text = if (guide == Guide.SPIRAL) "STRETCHED" else ""
         val st = trackState
-        val goals = if (fr.isEmpty) emptyList() else Geo.goals(guide, fr, quadrant, triFlip)
+        val goals = if (fr.isEmpty) emptyList() else Geo.goals(guide, fr, quadrant, triFlip, align)
         val state: String
         var line: String? = null
         if (st == null || overlay.target == null) state = "none"

@@ -92,6 +92,17 @@ object Geo {
         return PointF(fr.left - s.ox * sx, fr.top - s.oy * sy)
     }
 
+    /**
+     * Shoot mode: the true golden spiral, unstretched, spanning the frame top to bottom.
+     * [align] 0 = left, 1 = centre, 2 = right. Returns the eye, the scale and the box's left edge.
+     */
+    fun shootSpiral(s: Spiral, fr: RectF, align: Int): Triple<PointF, Float, Float> {
+        val u = fr.height() / s.bh
+        val boxW = s.bw * u
+        val left = when (align) { 0 -> fr.left; 2 -> fr.right - boxW; else -> fr.left + (fr.width() - boxW) / 2 }
+        return Triple(PointF(left - s.ox * u, fr.top - s.oy * u), u, left)
+    }
+
     /** The true spiral (no stretching) at the largest size that fits inside the frame, centred. */
     fun phiEye(s: Spiral, fr: RectF): Pair<PointF, Float> {
         val u = min(fr.width() / s.bw, fr.height() / s.bh)
@@ -100,12 +111,12 @@ object Geo {
     }
 
     /** Points the subject should land on for a guide, in screen px. */
-    fun goals(guide: Guide, fr: RectF, quadrant: Int, triFlip: Boolean): List<PointF> {
+    fun goals(guide: Guide, fr: RectF, quadrant: Int, triFlip: Boolean, align: Int = 1): List<PointF> {
         val tl = PointF(fr.left, fr.top); val tr = PointF(fr.right, fr.top)
         val br = PointF(fr.right, fr.bottom); val bl = PointF(fr.left, fr.bottom)
         fun grid(fs: FloatArray) = fs.flatMap { a -> fs.map { b -> PointF(fr.left + a * fr.width(), fr.top + b * fr.height()) } }
         return when (guide) {
-            Guide.SPIRAL -> listOf(spiralEye(Spiral.of(quadrant), fr))
+            Guide.SPIRAL -> listOf(shootSpiral(Spiral.of(quadrant), fr, align).first)
             Guide.THIRDS -> grid(floatArrayOf(1 / 3f, 2 / 3f))
             Guide.PHI_GRID -> grid(floatArrayOf((1 - 1 / PHI).toFloat(), (1 / PHI).toFloat()))
             Guide.TRIANGLES -> if (!triFlip) listOf(footOf(tl, br, tr), footOf(tl, br, bl)) else listOf(footOf(tr, bl, tl), footOf(tr, bl, br))
