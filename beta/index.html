@@ -1,0 +1,1330 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Fibonacci β">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#0B0B0C">
+<link rel="apple-touch-icon" href="../icon-180.png">
+<link rel="icon" type="image/png" sizes="192x192" href="../icon-192.png">
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="description" content="Golden-ratio framing guides over a live viewfinder.">
+<title>Fibonacci Camera β</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=DM+Mono:wght@400;500&display=swap">
+<style>
+:root{
+  --base:#0B0B0C; --surface:#16161A; --elev:#1F1F25; --line:#2E2E36;
+  --text:#F5F3EF; --muted:#A3A09A; --gold:#E0B252; --danger:#E06B5A;
+  --ui:'Inter',system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;
+  --mono:'DM Mono',ui-monospace,'SF Mono',Menlo,monospace;
+  color-scheme:dark;
+  padding-top:env(safe-area-inset-top,0px);
+  padding-bottom:env(safe-area-inset-bottom,0px);
+}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html,body{height:100%;margin:0}
+body{background:var(--base);color:var(--text);font-family:var(--ui);font-size:14px;
+  overscroll-behavior:none;-webkit-user-select:none;user-select:none;-webkit-tap-highlight-color:transparent}
+img{max-width:100%}
+.gutter{padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+
+#app{height:100%;display:flex;flex-direction:column;min-height:0}
+header{display:flex;align-items:center;gap:10px;padding-block:10px;flex:0 0 auto}
+.brand{font-size:13px;font-weight:600;min-width:0}
+.brand small{display:block;font-family:var(--mono);font-size:9px;letter-spacing:1px;color:var(--muted);
+  font-weight:400;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.grow{flex:1 1 auto;min-width:0}
+
+.chip{display:inline-flex;align-items:center;gap:6px;border-radius:999px;background:var(--elev);
+  border:1px solid transparent;color:var(--muted);font-size:11px;font-weight:500;letter-spacing:.4px;
+  padding:7px 11px;white-space:nowrap;cursor:pointer;font-family:var(--ui);line-height:1}
+.chip.on{background:rgba(224,178,82,.18);border-color:rgba(224,178,82,.85);color:var(--gold)}
+.icobtn{width:36px;height:36px;flex:0 0 auto;border-radius:10px;border:1px solid var(--line);
+  background:var(--elev);display:grid;place-items:center;cursor:pointer;padding:0}
+.icobtn.on{background:rgba(224,178,82,.22);border-color:rgba(224,178,82,.9)}
+.icobtn svg{width:17px;height:17px;stroke:var(--muted);fill:none;stroke-width:1.5;
+  stroke-linecap:round;stroke-linejoin:round}
+.icobtn.on svg{stroke:var(--gold)}
+.icobtn[hidden]{display:none}
+:focus-visible{outline:2px solid var(--gold);outline-offset:2px}
+
+#stageWrap{flex:1 1 auto;min-height:0;position:relative;background:#000;overflow:hidden}
+#vid{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;background:#000;display:none}
+#vid.on{display:block}
+#vid.mirror{transform:scaleX(-1)}
+#ov{position:absolute;inset:0;width:100%;height:100%;touch-action:none}
+#gate{position:absolute;inset:0;display:grid;place-content:center;justify-items:center;gap:14px;
+  padding:24px;background:rgba(11,11,12,.72);backdrop-filter:blur(3px);text-align:center}
+#gate[hidden]{display:none}
+#gate p{margin:0;max-width:30ch;font-size:12.5px;line-height:1.55;color:var(--muted)}
+#gate p b{color:var(--text);font-weight:500}
+#gate .warn{color:var(--danger)}
+
+.band{flex:0 0 auto}
+.readout{display:flex;align-items:center;justify-content:space-between;gap:10px;padding-block:11px;
+  font-family:var(--mono);font-size:10px;letter-spacing:.5px;color:var(--muted)}
+.ratio{font-family:var(--mono);font-size:9px;letter-spacing:.7px;color:var(--gold);
+  background:rgba(224,178,82,.12);border:1px solid rgba(224,178,82,.38);border-radius:999px;
+  padding:5px 10px;white-space:nowrap}
+.picker{display:flex;gap:8px;overflow-x:auto;padding-block:9px;scrollbar-width:none}
+.picker::-webkit-scrollbar{display:none}
+.tbar{display:flex;align-items:center;gap:9px;padding-block:9px}
+.state{display:inline-flex;align-items:center;background:var(--elev);border-radius:999px;padding:6px 12px;
+  font-family:var(--mono);font-size:10px;letter-spacing:.5px;color:var(--text);white-space:nowrap;
+  overflow:hidden;text-overflow:ellipsis;min-width:0}
+.state.dim{color:var(--muted)}
+.btn{border:1px solid var(--line);background:var(--elev);color:var(--text);border-radius:999px;
+  padding:7px 14px;font-size:11px;font-weight:500;font-family:var(--ui);cursor:pointer;white-space:nowrap}
+
+.actions{display:flex;align-items:center;gap:10px;padding-block:12px}
+.primary{flex:1 1 auto;min-width:0;border:0;background:var(--gold);color:#0B0B0C;border-radius:14px;
+  padding:14px 10px;font-size:14px;font-weight:600;font-family:var(--ui);cursor:pointer;white-space:nowrap}
+.ghost{flex:0 0 auto;border:1px solid var(--line);background:var(--elev);color:var(--text);border-radius:14px;
+  padding:14px 16px;font-size:13px;font-weight:500;font-family:var(--ui);cursor:pointer;white-space:nowrap}
+.ghost.on{border-color:rgba(224,178,82,.8);color:var(--gold);background:rgba(224,178,82,.14)}
+#shutter{width:72px;height:72px;border-radius:50%;border:2px solid rgba(255,255,255,.95);
+  background:transparent;padding:4px;cursor:pointer;flex:0 0 auto}
+#shutter i{display:block;width:100%;height:100%;border-radius:50%;background:#fff}
+#shutter:active i{background:var(--gold)}
+.livebar{justify-content:space-between}
+
+.foot{display:flex;gap:24px;justify-content:center;padding-block:12px;
+  font-family:var(--mono);font-size:10px;letter-spacing:1.2px;color:var(--muted)}
+.foot button{background:none;border:0;color:inherit;font:inherit;letter-spacing:inherit;cursor:pointer;padding:0}
+.foot button.on{color:var(--gold);font-weight:500}
+
+#sheet{position:fixed;left:0;right:0;bottom:0;z-index:20;background:var(--surface);
+  border-top:1px solid var(--line);border-radius:18px 18px 0 0;
+  padding-bottom:calc(16px + env(safe-area-inset-bottom,0px));
+  transform:translateY(102%);transition:transform .26s ease;max-height:86%;overflow-y:auto}
+#sheet.open{transform:translateY(0)}
+#scrim{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:19;opacity:0;pointer-events:none;transition:opacity .26s}
+#scrim.open{opacity:1;pointer-events:auto}
+.sheet-head{display:flex;align-items:center;justify-content:space-between;padding-block:14px}
+.sheet-head h2{margin:0;font-size:15px;font-weight:600}
+.lab{font-family:var(--mono);font-size:9px;letter-spacing:1.3px;color:var(--muted);
+  display:flex;justify-content:space-between;padding-block:14px 8px}
+.lab b{color:var(--text);font-weight:500}
+.orients{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+.orients button{background:var(--elev);border:1px solid var(--line);border-radius:10px;padding:6px 4px 5px;
+  cursor:pointer;display:grid;justify-items:center;gap:3px}
+.orients button.on{border-color:var(--gold);background:rgba(224,178,82,.14)}
+.orients canvas{display:block;width:40px;height:40px}
+.orients span{font-family:var(--mono);font-size:7.5px;color:var(--muted)}
+.orients button.on span{color:var(--gold)}
+input[type=range]{width:100%;accent-color:var(--gold);margin:0}
+.rowbtns{display:flex;gap:10px;padding-block:18px 6px}
+.note{font-size:11.5px;line-height:1.55;color:var(--muted);padding-block:14px 2px;
+  border-top:1px solid var(--line);margin-top:18px}
+.note b{color:var(--text);font-weight:500}
+#toast{position:fixed;left:50%;transform:translateX(-50%);
+  bottom:calc(26px + env(safe-area-inset-bottom,0px));background:var(--elev);border:1px solid var(--line);
+  color:var(--text);font-size:12px;padding:10px 16px;border-radius:999px;z-index:40;opacity:0;
+  transition:opacity .2s;pointer-events:none;max-width:86%;text-align:center}
+#toast.on{opacity:1}
+/* ---- live HUD: exposure row, zoom chips, aligned pill, coach card */
+#hud{position:absolute;pointer-events:none;left:0;top:0;width:0;height:0}
+#hud[hidden]{display:none}
+.expo{position:absolute;left:12px;right:12px;top:10px;display:flex;justify-content:space-between;gap:10px;
+  font-family:var(--mono);font-size:11px;letter-spacing:.4px;color:rgba(245,243,239,.78);text-shadow:0 1px 3px rgba(0,0,0,.7)}
+.expo #expoR{color:var(--gold)}
+.zchips{position:absolute;bottom:12px;left:50%;transform:translateX(-50%);display:flex;gap:2px;padding:4px;
+  border-radius:999px;background:rgba(11,11,12,.6);pointer-events:auto}
+.zchips[hidden]{display:none}
+.zchips button{border:0;background:transparent;color:var(--text);font-family:var(--mono);font-size:12px;
+  min-width:38px;height:30px;border-radius:999px;cursor:pointer;padding:0 8px}
+.zchips button.on{background:rgba(245,243,239,.16);color:var(--gold)}
+.apill{position:absolute;left:12px;bottom:14px;display:inline-flex;align-items:center;gap:7px;padding:6px 11px;
+  border-radius:999px;font-family:var(--mono);font-size:10.5px;letter-spacing:1.2px;
+  background:rgba(11,11,12,.55);border:1px solid rgba(245,243,239,.25);color:var(--muted)}
+.apill i{width:6px;height:6px;border-radius:50%;background:currentColor;display:block}
+.apill.on{background:rgba(224,178,82,.18);border-color:rgba(224,178,82,.85);color:var(--gold)}
+.apill[hidden]{display:none}
+.coach{position:absolute;left:12px;right:12px;bottom:58px;padding:11px 14px 12px;border-radius:14px;
+  background:rgba(11,11,12,.62);border:1px solid rgba(245,243,239,.22);backdrop-filter:blur(4px)}
+.coach.on{background:rgba(60,46,20,.62);border-color:rgba(224,178,82,.8)}
+.coach[hidden]{display:none}
+.coach b{display:flex;align-items:center;gap:7px;font-family:var(--mono);font-size:10.5px;letter-spacing:1.4px;
+  font-weight:500;color:var(--muted)}
+.coach.on b{color:var(--gold)}
+.coach b i{width:6px;height:6px;border-radius:50%;background:currentColor;display:block}
+.coach span{display:block;margin-top:5px;font-size:14px;line-height:1.4;color:var(--text)}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+</style>
+</head>
+<body>
+
+<div id="app">
+  <header class="gutter">
+    <div class="brand grow">Fibonacci Camera<small id="srcName">SAMPLE SCENE</small></div>
+    <button class="chip on" id="turnsChip" type="button">SPIRAL · 2.25 TURNS</button>
+    <button class="icobtn" id="coachBtn" type="button" aria-label="Coaching" aria-pressed="false">
+      <svg viewBox="0 0 24 24"><path d="M4 5h16v11H9l-5 4z"/><path d="M8 9h8M8 12h5"/></svg>
+    </button>
+    <button class="icobtn" id="torch" type="button" aria-label="Torch" hidden>
+      <svg viewBox="0 0 24 24"><path d="M9 2h6l-1 7h4l-8 13 1-9H7z"/></svg>
+    </button>
+  </header>
+
+  <div id="stageWrap">
+    <video id="vid" playsinline muted autoplay></video>
+    <canvas id="ov"></canvas>
+    <div id="hud" hidden>
+      <div class="expo"><span id="expoL"></span><span id="expoR"></span></div>
+      <div class="coach" id="coachCard" hidden><b><i></i><em id="coachT" style="font-style:normal"></em></b><span id="coachS"></span></div>
+      <div class="apill" id="alignPill" hidden><i></i><span id="alignTxt">ALIGNED</span></div>
+      <div class="zchips" id="zchips" hidden></div>
+    </div>
+    <div id="gate">
+      <button class="primary" id="startCam" type="button" style="padding:14px 22px">Start the live viewfinder</button>
+      <p id="gateMsg">The guide draws over the live camera. Your browser will ask for camera access first.</p>
+    </div>
+  </div>
+
+  <div class="band gutter readout">
+    <span id="readLeft">φ CROP · —</span>
+    <span class="ratio" id="readRatio">1 : 1.618</span>
+  </div>
+
+  <div class="band gutter picker" id="picker"></div>
+
+  <div class="band gutter tbar">
+    <span class="state grow" id="gstate">TOP-LEFT ↕ · 92% · 0°</span>
+    <button class="btn" id="adjust" type="button">Adjust</button>
+    <button class="icobtn" id="lock" type="button" aria-label="Lock the guide" aria-pressed="false">
+      <svg viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="9" rx="2"/><path id="shk" d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>
+    </button>
+  </div>
+
+  <div class="band gutter actions livebar" id="liveBar" hidden>
+    <button class="ghost" id="pickBtn2" type="button">Photos</button>
+    <button id="shutter" type="button" aria-label="Take the photo"><i></i></button>
+    <button class="icobtn" id="flip" type="button" aria-label="Switch camera" style="width:46px;height:46px">
+      <svg viewBox="0 0 24 24"><path d="M21 8V5a1 1 0 0 0-1-1h-3M3 16v3a1 1 0 0 0 1 1h3"/><path d="M16 20h4a1 1 0 0 0 1-1v-4M8 4H4a1 1 0 0 0-1 1v4"/><circle cx="12" cy="12" r="3.2"/></svg>
+    </button>
+  </div>
+
+  <div class="band gutter actions" id="photoBar">
+    <button class="primary" id="save" type="button">Save φ crop</button>
+    <button class="ghost" id="liveBtn" type="button">Live</button>
+    <button class="ghost" id="pickBtn" type="button">Photos</button>
+  </div>
+
+  <div class="band gutter foot" id="foot">
+    <button type="button" data-view="original">ORIGINAL</button>
+    <button type="button" data-view="guide" class="on">WITH GUIDE</button>
+    <button type="button" data-view="crop">φ CROP</button>
+  </div>
+</div>
+
+<div id="scrim"></div>
+<section id="sheet" aria-label="Adjust the guide">
+  <div class="gutter">
+    <div class="sheet-head"><h2>Adjust the guide</h2><button class="btn" id="closeSheet" type="button">Done</button></div>
+    <div class="lab"><span>ORIENTATION</span><b id="orientVal">TOP-LEFT ↕</b></div>
+    <div class="orients" id="orients"></div>
+    <div class="lab"><span>TURNS</span><b id="turnsVal">2.25×</b></div>
+    <input type="range" id="turns" min="1" max="4" step="0.25" value="2.25">
+
+    <div class="lab"><span>PROPORTION</span><b id="growthVal">φ 1.618</b></div>
+    <input type="range" id="growth" min="105" max="260" step="1" value="162">
+    <div class="rowbtns" style="padding-block:10px 0">
+      <button class="ghost on" id="stretchBtn" type="button" style="flex:1;padding:11px 10px">Stretch: on</button>
+      <button class="ghost on" id="bindBtn" type="button" style="flex:1;padding:11px 10px">Edges: held</button>
+    </div>
+    <div class="rowbtns" style="padding-block:8px 0">
+      <button class="ghost" id="fitHeight" type="button" style="flex:1;padding:11px 8px">Full height · φ</button>
+      <button class="ghost" id="fitFrame" type="button" style="flex:1;padding:11px 8px">All four edges</button>
+      <button class="ghost" id="goldenBtn" type="button" style="flex:1;padding:11px 8px">Back to φ</button>
+    </div>
+
+    <div class="lab"><span>SIZE</span><b id="scaleVal">92%</b></div>
+    <input type="range" id="scale" min="25" max="250" step="1" value="100">
+    <div class="lab"><span>ROTATION</span><b id="rotVal">0°</b></div>
+    <input type="range" id="rot" min="-180" max="180" step="1" value="0">
+    <div class="lab" id="zoomLab" hidden><span>CAMERA ZOOM</span><b id="zoomVal">1.0×</b></div>
+    <input type="range" id="zoom" min="100" max="400" step="5" value="100" hidden>
+    <div class="rowbtns">
+      <button class="ghost" id="reset" type="button" style="flex:1">Reset the guide</button>
+      <button class="ghost" id="saveFull" type="button" style="flex:1">Save full frame</button>
+    </div>
+    <p class="note"><b>Drag inside the guide to move it, a corner to size it, the top handle to rotate it.</b>
+      Double-tap steps through the eight orientations. The lock hides the handles and holds everything in place.
+      In the viewfinder a pinch zooms the lens. On a photo there is no lens, so two fingers belong to the
+      guide instead: pinch to resize it, twist to rotate it.
+      <br><br><b>Proportion</b> changes how fast the spiral opens out, which is what makes it tall or
+      wide. At φ it is the golden spiral. Anywhere else it is still a true spiral, just a different one —
+      nothing is ever stretched, so the curve stays a curve. <b>Fit the frame</b> finds the proportion
+      whose natural shape matches this photo.</p>
+  </div>
+</section>
+
+<div id="toast" role="status" aria-live="polite"></div>
+<input type="file" accept="image/*" id="pick" hidden>
+
+<script>
+(function(){
+"use strict";
+var PHI = 1.6180339887498949;
+var $ = function(id){ return document.getElementById(id); };
+
+/* ------------------------------------------------------------------ state */
+// `growth` is how much the radius multiplies every quarter-turn. At φ this is
+// the golden spiral. Other values are still true logarithmic spirals, just not
+// that one — which is how the proportion changes without anything being stretched.
+var DEF = { overlay:'spiral', turns:2.25, orient:0, scale:1, rot:0, cx:0.336, cy:0.303,
+            locked:false, triFlip:0, view:'guide', growth:PHI, fit:'height', bind:true, stretch:true, coach:false };
+// Bump this when a default changes, or saved settings keep overriding the new one.
+var STORE = 'fibcam.v4';
+var SMIN = 0.25, SMAX = 2.5;      // a narrow frame needs over 1.0 to reach full height
+var S = {}; for (var k in DEF) S[k] = DEF[k];
+var saved = null;
+try {
+  saved = JSON.parse(localStorage.getItem(STORE) || 'null');
+  if (saved) for (var k2 in DEF) if (saved[k2] !== undefined && typeof saved[k2] === typeof DEF[k2]) S[k2] = saved[k2];
+  localStorage.removeItem('fibcam');                        // retire the unversioned key
+} catch (e) {}
+function remember(){ try { localStorage.setItem(STORE, JSON.stringify(S)); } catch(e){} }
+
+var mode = 'photo';                 // 'photo' | 'live'
+var photo = null;                   // {el,w,h,name}
+var view = { s:1, tx:0, ty:0 };     // photo-mode zoom/pan only
+var stream = null, track = null, caps = {}, camZoom = 1, facing = 'environment';
+var W = 0, H = 0, dpr = 1;
+var cv = $('ov'), ctx = cv.getContext('2d'), vid = $('vid');
+
+/* -------------------------------------------------------- spiral geometry */
+var ORIENTS = [
+  {fx:0,fy:0,t:0},{fx:1,fy:0,t:0},{fx:0,fy:1,t:0},{fx:1,fy:1,t:0},
+  {fx:0,fy:0,t:1},{fx:1,fy:0,t:1},{fx:0,fy:1,t:1},{fx:1,fy:1,t:1}
+];
+var geoCache = {};
+// Eye at the origin, longer box side normalised to 1. Everything downstream
+// multiplies by ONE scalar, so X and Y can never be scaled apart.
+function geoFor(turns, orient, growth){
+  var key = turns.toFixed(2) + '|' + orient + '|' + growth.toFixed(4);
+  if (geoCache[key]) return geoCache[key];
+  var o = ORIENTS[orient], b = Math.log(growth)/(Math.PI/2);
+  var thMax = turns*2*Math.PI, N = 700, pts = [], i, th, r, p;
+  for (i=0;i<=N;i++){ th = thMax*i/N; r = Math.exp(b*th); pts.push([r*Math.cos(th), r*Math.sin(th)]); }
+  if (o.t)  for (i=0;i<pts.length;i++){ p = pts[i]; pts[i] = [p[1], p[0]]; }
+  if (o.fx) for (i=0;i<pts.length;i++) pts[i] = [-pts[i][0], pts[i][1]];
+  if (o.fy) for (i=0;i<pts.length;i++) pts[i] = [pts[i][0], -pts[i][1]];
+  var eye = pts[0], mnx=Infinity,mxx=-Infinity,mny=Infinity,mxy=-Infinity;
+  for (i=0;i<pts.length;i++){ p = pts[i];
+    if(p[0]<mnx)mnx=p[0]; if(p[0]>mxx)mxx=p[0]; if(p[1]<mny)mny=p[1]; if(p[1]>mxy)mxy=p[1]; }
+  var bw = mxx-mnx, bh = mxy-mny, kk = 1/Math.max(bw,bh);
+  var out = { pts:[], bw:bw*kk, bh:bh*kk, ox:(mnx-eye[0])*kk, oy:(mny-eye[1])*kk };
+  for (i=0;i<pts.length;i++) out.pts.push([(pts[i][0]-eye[0])*kk, (pts[i][1]-eye[1])*kk]);
+  geoCache[key] = out; return out;
+}
+function geo(){ return geoFor(S.turns, S.orient, S.growth); }
+function atPhi(){ return !S.stretch && Math.abs(S.growth - PHI) < 5e-4; }
+function orientLabel(i){
+  var g = geoFor(S.turns, i, S.growth), fx = -g.ox/g.bw, fy = -g.oy/g.bh;
+  return (fy<0.5?'TOP':'BOTTOM') + '-' + (fx<0.5?'LEFT':'RIGHT') + (g.bw<g.bh?' ↕':' ↔');
+}
+// Cheap box-aspect probe, used to solve for the growth that matches a frame.
+// Only the transpose flag changes the aspect; the mirror flips do not.
+function boxAspect(turns, orient, k){
+  var o = ORIENTS[orient], b = Math.log(k)/(Math.PI/2), thMax = turns*2*Math.PI, N = 240;
+  var mnx=1e9,mxx=-1e9,mny=1e9,mxy=-1e9, i, th, r, x, y, t;
+  for (i=0;i<=N;i++){
+    th = thMax*i/N; r = Math.exp(b*th);
+    x = r*Math.cos(th); y = r*Math.sin(th);
+    if (o.t){ t = x; x = y; y = t; }
+    if(x<mnx)mnx=x; if(x>mxx)mxx=x; if(y<mny)mny=y; if(y>mxy)mxy=y;
+  }
+  return (mxx-mnx)/(mxy-mny);
+}
+// The growth whose natural box matches the photo's shape — so the spiral fills
+// the frame by being the right spiral, not by being squashed into it.
+function growthForAspect(target){
+  var best = null, k, d;
+  for (k = 1.03; k <= 3.0; k += 0.005){
+    d = Math.abs(boxAspect(S.turns, S.orient, k) - target);
+    if (!best || d < best.d) best = { k:k, d:d };
+  }
+  return best.k;
+}
+function growthForFrame(){ var fr = frame(); return growthForAspect(fr.w/fr.h); }
+// 'height' keeps the real golden spiral and sizes it so the curve spans the frame
+// top to bottom; on a frame narrower than the spiral's own 0.639 box it reaches past
+// the sides, which is what a golden spiral does. 'frame' instead reshapes the spiral
+// to the frame's proportion so it touches all four edges, and is no longer φ.
+// `keepPos` sizes the guide but leaves the eye where the user put it.
+function applyFit(keepPos){
+  var fr = frame(), g, base;
+  if (S.stretch){ S.scale = 1; if (keepPos) reBind(); else centreGuide(); return; }   // scale 1 already is the frame
+  if (S.fit === 'frame'){
+    S.growth = growthForAspect(fr.w/fr.h);
+    S.scale = 1;
+  } else if (S.fit === 'height'){
+    S.growth = PHI;
+    g = geo(); base = baseFit(fr);
+    S.scale = Math.max(SMIN, Math.min(SMAX, fr.h / (g.bh * base)));
+  } else return;
+  if (keepPos) reBind(); else centreGuide();
+}
+
+/* ----------------------------------------------------------- frame + maths */
+function srcSize(){
+  if (mode === 'live' && vid.videoWidth) return { w:vid.videoWidth, h:vid.videoHeight };
+  if (photo) return { w:photo.w, h:photo.h };
+  return { w:W||1, h:H||1 };
+}
+// The frame is the source's own rectangle, letterboxed in the stage — the same
+// rect `object-fit: contain` gives the video, so the overlay sits exactly on it.
+function frame(){
+  var s = srcSize(), ia = s.w/s.h, sa = W/H, w, h;
+  if (ia > sa){ w = W; h = W/ia; } else { h = H; w = H*ia; }
+  return { x:(W-w)/2, y:(H-h)/2, w:w, h:h };
+}
+function baseFit(fr){ var g = geo(); return Math.min(fr.w/g.bw, fr.h/g.bh); }
+// Non-uniform on purpose: stretch makes the spiral's box exactly the frame, which
+// distorts the curve. Lissy asked for that explicitly. Every other mode returns
+// the same number twice, so nothing else in the app can scale the axes apart.
+function fitScales(fr, mult){
+  var g = geo(), m = (mult === undefined) ? S.scale : mult;
+  if (S.stretch) return { sx: (fr.w / g.bw) * m, sy: (fr.h / g.bh) * m };
+  var u = baseFit(fr) * m;
+  return { sx: u, sy: u };
+}
+
+function xform(fr){
+  var f = fitScales(fr), c = Math.cos(S.rot), si = Math.sin(S.rot);
+  var ex = fr.x + S.cx*fr.w, ey = fr.y + S.cy*fr.h;
+  return { sx:f.sx, sy:f.sy, s:f.sy, c:c, si:si, ex:ex, ey:ey,
+    at:function(p){ var x = p[0]*f.sx, y = p[1]*f.sy;
+      return [ ex + x*c - y*si, ey + x*si + y*c ]; } };
+}
+function cornersOf(T){
+  var g = geo();
+  return [[g.ox,g.oy],[g.ox+g.bw,g.oy],[g.ox+g.bw,g.oy+g.bh],[g.ox,g.oy+g.bh]].map(T.at);
+}
+function handleOf(T){
+  var g = geo(), tm = T.at([g.ox+g.bw/2, g.oy]);
+  var hx = tm[0] + 34*T.si, hy = tm[1] - 34*T.c;
+  if (hx < 16 || hx > W-16 || hy < 16 || hy > H-16){ hx = tm[0] - 34*T.si; hy = tm[1] + 34*T.c; }
+  return [hx, hy];
+}
+// At the golden growth the crop is an exact φ rectangle: the spiral's own box is
+// 1.565:1 there, not φ, so the rectangle sits a little proud on one axis. At any
+// other growth there is no φ to appeal to, so the crop is the spiral's own box.
+// The crop can reach past the photo — the φ rectangle is taller than the spiral's
+// own box, so a guide filling the frame pushes it over the edge. Shrink it about
+// its centre until it fits: uniform, so the ratio it claims stays true.
+function fitQuadToFrame(q, fr){
+  var cx = (q[0][0]+q[2][0])/2, cy = (q[0][1]+q[2][1])/2, lo = 0.2, hi = 1, mid, i;
+  function inside(f){
+    for (var j=0;j<4;j++){
+      var x = cx + (q[j][0]-cx)*f, y = cy + (q[j][1]-cy)*f;
+      if (x < fr.x || x > fr.x+fr.w || y < fr.y || y > fr.y+fr.h) return false;
+    }
+    return true;
+  }
+  if (inside(1)) return q;
+  for (i=0;i<26;i++){ mid=(lo+hi)/2; if (inside(mid)) lo=mid; else hi=mid; }
+  return q.map(function(p){ return [cx+(p[0]-cx)*lo, cy+(p[1]-cy)*lo]; });
+}
+function cropQuad(fr, T){ return fitQuadToFrame(cropRectLocal().map(T.at), fr); }
+function cropRectLocal(){
+  var g = geo(), x, y, w, h;
+  if (atPhi()){
+    if (g.bw <= g.bh){ w = g.bw; h = w*PHI; x = g.ox; y = g.oy + (g.bh-h)/2; }
+    else             { h = g.bh; w = h*PHI; y = g.oy; x = g.ox + (g.bw-w)/2; }
+    return [[x,y],[x+w,y],[x+w,y+h],[x,y+h]];
+  }
+  return [[g.ox,g.oy],[g.ox+g.bw,g.oy],[g.ox+g.bw,g.oy+g.bh],[g.ox,g.oy+g.bh]];
+}
+// Per-axis, so a stretched box is centred by the scales it is actually drawn with.
+function centreGuide(){
+  var fr = frame(), g = geo(), f = fitScales(fr);
+  S.cx = ((fr.w - g.bw*f.sx)/2 - g.ox*f.sx)/fr.w;
+  S.cy = ((fr.h - g.bh*f.sy)/2 - g.oy*f.sy)/fr.h;
+}
+function dist(a,b){ var dx=a[0]-b[0], dy=a[1]-b[1]; return Math.sqrt(dx*dx+dy*dy); }
+
+/* ------- keeping the guide inside the frame, the way a crop stays inside ---- */
+function boxCornersAt(mult, fr){
+  var g = geo(), c = Math.cos(S.rot), si = Math.sin(S.rot), f = fitScales(fr, mult);
+  var ex = fr.x + S.cx*fr.w, ey = fr.y + S.cy*fr.h, out = [], i, p, x, y;
+  var box = [[g.ox,g.oy],[g.ox+g.bw,g.oy],[g.ox+g.bw,g.oy+g.bh],[g.ox,g.oy+g.bh]];
+  for (i=0;i<4;i++){ p = box[i]; x = p[0]*f.sx; y = p[1]*f.sy;
+    out.push([ex + x*c - y*si, ey + x*si + y*c]); }
+  return out;
+}
+function insideFrame(pts, fr){
+  for (var i=0;i<4;i++){
+    if (pts[i][0] < fr.x-0.6 || pts[i][0] > fr.x+fr.w+0.6) return false;
+    if (pts[i][1] < fr.y-0.6 || pts[i][1] > fr.y+fr.h+0.6) return false;
+  }
+  return true;
+}
+function clampPos(fr){
+  var pts = boxCornersAt(S.scale, fr), mnx=1e9,mxx=-1e9,mny=1e9,mxy=-1e9, dx=0, dy=0, i, p;
+  for (i=0;i<4;i++){ p = pts[i];
+    if(p[0]<mnx)mnx=p[0]; if(p[0]>mxx)mxx=p[0]; if(p[1]<mny)mny=p[1]; if(p[1]>mxy)mxy=p[1]; }
+  if (mxx-mnx <= fr.w){ if (mnx < fr.x) dx = fr.x-mnx; else if (mxx > fr.x+fr.w) dx = fr.x+fr.w-mxx; }
+  if (mxy-mny <= fr.h){ if (mny < fr.y) dy = fr.y-mny; else if (mxy > fr.y+fr.h) dy = fr.y+fr.h-mxy; }
+  S.cx += dx/fr.w; S.cy += dy/fr.h;
+}
+// Biggest scale up to `want` whose box still fits, nudging position as it goes.
+function cappedScale(want, fr){
+  var cx=S.cx, cy=S.cy, sc=S.scale, lo=SMIN, hi=want, m, i, ok;
+  S.scale = want; clampPos(fr);
+  ok = insideFrame(boxCornersAt(want, fr), fr);
+  S.cx=cx; S.cy=cy; S.scale=sc;
+  if (ok) return want;
+  for (i=0;i<20;i++){
+    m = (lo+hi)/2;
+    S.cx=cx; S.cy=cy; S.scale=m; clampPos(fr);
+    if (insideFrame(boxCornersAt(m, fr), fr)) lo=m; else hi=m;
+    S.cx=cx; S.cy=cy; S.scale=sc;
+  }
+  return lo;
+}
+// Resizing stops at the frame. Unrotated, pushing further reshapes the spiral the
+// way dragging a crop corner does: the pinned edge holds, the free one keeps going.
+function applySize(want, fr){
+  want = Math.max(SMIN, Math.min(SMAX, want));
+  if (!S.bind){ S.scale = want; return; }
+  // Stretched, the box already matches the frame, so there is no free axis to
+  // pin and reshape — it can only be held at the edge or made smaller.
+  if (S.stretch){ S.scale = cappedScale(want, fr); clampPos(fr); return; }
+  if (Math.abs(S.rot) > 1e-6){ S.scale = cappedScale(want, fr); clampPos(fr); return; }
+  var g = geo(), base = baseFit(fr);
+  var wantW = g.bw*base*want, wantH = g.bh*base*want;
+  var fx = -g.ox/g.bw, fy = -g.oy/g.bh;
+  var ex = S.cx*fr.w, ey = S.cy*fr.h;
+  var maxW = Math.max(8, Math.min(ex/Math.max(fx,1e-4), (fr.w-ex)/Math.max(1-fx,1e-4)));
+  var maxH = Math.max(8, Math.min(ey/Math.max(fy,1e-4), (fr.h-ey)/Math.max(1-fy,1e-4)));
+  var w = Math.min(wantW, maxW), h = Math.min(wantH, maxH);
+  if (w >= wantW-0.5 && h >= wantH-0.5){ S.scale = want; return; }   // nothing pinned yet
+  S.growth = growthForAspect(w/h);                                   // an edge is holding
+  S.fit = 'manual';
+  var g2 = geo(), base2 = baseFit(fr);
+  S.scale = Math.max(SMIN, Math.min(SMAX, w/(g2.bw*base2)));
+  clampPos(fr);
+}
+function reBind(){ if (!S.bind) return; var fr = frame(); S.scale = cappedScale(S.scale, fr); clampPos(fr); }
+// Wrap to (-180, 180] and give the cardinals a little grip, so square is reachable.
+var CARDINALS = [0, 90, -90, 180, -180];
+function detent(rad){
+  var deg = ((rad*180/Math.PI + 180) % 360 + 360) % 360 - 180;
+  for (var i=0;i<CARDINALS.length;i++) if (Math.abs(deg - CARDINALS[i]) < 3) deg = CARDINALS[i];
+  return deg * Math.PI / 180;
+}
+function inPoly(p, poly){
+  var hit = false;
+  for (var i=0, j=poly.length-1; i<poly.length; j=i++){
+    var a = poly[i], b = poly[j];
+    if (((a[1]>p[1]) !== (b[1]>p[1])) && (p[0] < (b[0]-a[0])*(p[1]-a[1])/(b[1]-a[1]) + a[0])) hit = !hit;
+  }
+  return hit;
+}
+function foot(a,b,p){
+  var vx=b[0]-a[0], vy=b[1]-a[1], t=((p[0]-a[0])*vx + (p[1]-a[1])*vy)/(vx*vx+vy*vy);
+  return [a[0]+vx*t, a[1]+vy*t];
+}
+
+/* ------------------------------------------------------------ sample scene */
+function sampleScene(){
+  var w=1200, h=1600, c=document.createElement('canvas'); c.width=w; c.height=h;
+  var g=c.getContext('2d'), HZ=h*0.62;
+  var sky=g.createLinearGradient(0,0,0,HZ);
+  sky.addColorStop(0,'#141a2b'); sky.addColorStop(.45,'#45354a');
+  sky.addColorStop(.78,'#a8683f'); sky.addColorStop(1,'#e2a053');
+  g.fillStyle=sky; g.fillRect(0,0,w,HZ);
+  var glow=g.createRadialGradient(w*.3,HZ,0,w*.3,HZ,w*.72);
+  glow.addColorStop(0,'rgba(255,214,140,.92)'); glow.addColorStop(.35,'rgba(238,160,80,.34)');
+  glow.addColorStop(1,'rgba(238,160,80,0)');
+  g.fillStyle=glow; g.fillRect(0,0,w,HZ);
+  for (var i=0;i<7;i++){
+    g.fillStyle='rgba(255,226,186,'+(.05+(i%3)*.022)+')';
+    g.beginPath(); g.ellipse(w*(.18+.1*i), h*.10+i*h*.055, w*(.3+.05*i), h*.012, 0, 0, 6.3); g.fill();
+  }
+  g.fillStyle='#2b1f18';
+  g.beginPath(); g.moveTo(0,h); g.lineTo(0,HZ+h*.055);
+  g.quadraticCurveTo(w*.42, HZ-h*.035, w, HZ+h*.085); g.lineTo(w,h); g.closePath(); g.fill();
+  var grd=g.createLinearGradient(0,HZ,0,h);
+  grd.addColorStop(0,'rgba(150,95,45,.42)'); grd.addColorStop(1,'rgba(20,14,10,0)');
+  g.fillStyle=grd; g.fillRect(0,HZ,w,h-HZ);
+  g.strokeStyle='#120d0b'; g.lineCap='round';
+  (function branch(x,y,len,ang,wid,d){
+    if (d===0 || len<4) return;
+    var x2=x+Math.cos(ang)*len, y2=y+Math.sin(ang)*len;
+    g.lineWidth=wid; g.beginPath(); g.moveTo(x,y); g.lineTo(x2,y2); g.stroke();
+    var sp=.42+(d%3)*.08;
+    branch(x2,y2,len*.76,ang-sp,wid*.68,d-1);
+    branch(x2,y2,len*.72,ang+sp,wid*.66,d-1);
+    if (d%2===0) branch(x2,y2,len*.55,ang+.05,wid*.5,d-1);
+  })(w*.275, HZ+h*.012, h*.076, -Math.PI/2, 15, 9);
+  for (var t=0;t<2600;t++){
+    var gx=Math.random()*w, gy=HZ+Math.pow(Math.random(),.6)*(h-HZ);
+    g.strokeStyle='rgba(0,0,0,'+(.05+Math.random()*.14)+')'; g.lineWidth=1;
+    g.beginPath(); g.moveTo(gx,gy); g.lineTo(gx+(Math.random()-.5)*5, gy-4-Math.random()*8); g.stroke();
+  }
+  return { el:c, w:w, h:h, name:'SAMPLE SCENE' };
+}
+
+/* ------------------------------------------------------------------ paint */
+function seg(a,b){ ctx.beginPath(); ctx.moveTo(a[0],a[1]); ctx.lineTo(b[0],b[1]); ctx.stroke(); }
+function ring(p,r,fill,stroke,lw){
+  ctx.beginPath(); ctx.arc(p[0],p[1],r,0,6.2832);
+  if (fill){ ctx.fillStyle=fill; ctx.fill(); }
+  if (stroke){ ctx.strokeStyle=stroke; ctx.lineWidth=lw||1; ctx.stroke(); }
+}
+function drawFrameOverlay(fr, fracs){
+  ctx.strokeStyle='rgba(255,255,255,0.30)'; ctx.lineWidth=1;
+  for (var i=0;i<fracs.length;i++){
+    var f=fracs[i];
+    seg([fr.x+f*fr.w, fr.y],[fr.x+f*fr.w, fr.y+fr.h]);
+    seg([fr.x, fr.y+f*fr.h],[fr.x+fr.w, fr.y+f*fr.h]);
+  }
+}
+function drawTriangles(fr){
+  var tl=[fr.x,fr.y], tr=[fr.x+fr.w,fr.y], br=[fr.x+fr.w,fr.y+fr.h], bl=[fr.x,fr.y+fr.h], a,b,c1,c2;
+  if (!S.triFlip){ a=tl; b=br; c1=tr; c2=bl; } else { a=tr; b=bl; c1=tl; c2=br; }
+  ctx.strokeStyle='rgba(255,255,255,0.38)'; ctx.lineWidth=1;
+  seg(a,b); seg(c1,foot(a,b,c1)); seg(c2,foot(a,b,c2));
+  ring(foot(a,b,c1),4,null,'rgba(224,178,82,0.9)',1.4);
+  ring(foot(a,b,c2),4,null,'rgba(224,178,82,0.9)',1.4);
+}
+function drawSpiral(T){
+  var g=geo(), p;
+  ctx.beginPath(); p=T.at(g.pts[0]); ctx.moveTo(p[0],p[1]);
+  for (var i=1;i<g.pts.length;i++){ p=T.at(g.pts[i]); ctx.lineTo(p[0],p[1]); }
+  ctx.strokeStyle='rgba(255,255,255,0.86)'; ctx.lineWidth=1.4;
+  ctx.lineJoin='round'; ctx.lineCap='round'; ctx.stroke();
+}
+function drawWidget(T){
+  var cs=cornersOf(T), h=handleOf(T), g=geo(), i;
+  ctx.setLineDash([5,5]); ctx.strokeStyle='rgba(255,255,255,0.40)'; ctx.lineWidth=1;
+  ctx.beginPath(); ctx.moveTo(cs[0][0],cs[0][1]);
+  for (i=1;i<4;i++) ctx.lineTo(cs[i][0],cs[i][1]);
+  ctx.closePath(); ctx.stroke(); ctx.setLineDash([]);
+  ctx.strokeStyle='rgba(255,255,255,0.5)'; ctx.lineWidth=1.25;
+  seg(T.at([g.ox+g.bw/2, g.oy]), h);
+  for (i=0;i<4;i++) ring(cs[i],4.8,'rgba(255,255,255,0.95)','rgba(11,11,12,0.55)',1);
+  ring(h,6.8,'rgba(255,255,255,0.95)','rgba(11,11,12,0.55)',1);
+}
+function drawCropMask(q){
+  var i;
+  ctx.save(); ctx.beginPath(); ctx.rect(0,0,W,H);
+  ctx.moveTo(q[0][0],q[0][1]);
+  for (i=3;i>=1;i--) ctx.lineTo(q[i][0],q[i][1]);
+  ctx.closePath(); ctx.fillStyle='rgba(7,8,12,0.74)'; ctx.fill('evenodd'); ctx.restore();
+  ctx.strokeStyle='rgba(255,255,255,0.55)'; ctx.lineWidth=1;
+  ctx.beginPath(); ctx.moveTo(q[0][0],q[0][1]);
+  for (i=1;i<4;i++) ctx.lineTo(q[i][0],q[i][1]);
+  ctx.closePath(); ctx.stroke();
+}
+function drawPhoto(fr){
+  ctx.save(); ctx.beginPath(); ctx.rect(fr.x,fr.y,fr.w,fr.h); ctx.clip();
+  ctx.translate(fr.x+fr.w/2+view.tx, fr.y+fr.h/2+view.ty);
+  ctx.scale(view.s, view.s);
+  ctx.drawImage(photo.el, -fr.w/2, -fr.h/2, fr.w, fr.h);
+  ctx.restore();
+}
+function draw(){
+  if (!W || !H) return;
+  ctx.setTransform(dpr,0,0,dpr,0,0); ctx.clearRect(0,0,W,H);
+  var fr = frame();
+  if (mode === 'photo' && photo) drawPhoto(fr);
+  if (S.view === 'original' && mode === 'photo'){ frameEdge(fr); updateReadout(fr); return; }
+  var T = xform(fr);
+  if (S.view === 'crop' && S.overlay === 'spiral' && mode === 'photo') drawCropMask(cropQuad(fr, T));
+  if (S.overlay === 'grid')           drawFrameOverlay(fr, [1 - 1/PHI, 1/PHI]);
+  else if (S.overlay === 'thirds')    drawFrameOverlay(fr, [1/3, 2/3]);
+  else if (S.overlay === 'triangles') drawTriangles(fr);
+  else if (S.overlay === 'spiral'){
+    drawSpiral(T);
+    if (!S.locked && !(S.view === 'crop' && mode === 'photo')) drawWidget(T);
+    ring([T.ex,T.ey], 11, null, 'rgba(224,178,82,0.95)', 1.5);
+    ring([T.ex,T.ey], 2.5, 'rgba(224,178,82,1)', null, 0);
+  }
+  frameEdge(fr); updateReadout(fr);
+  if (mode === 'live') drawTarget(fr);
+  updateHud(fr);
+}
+function frameEdge(fr){
+  ctx.strokeStyle='rgba(255,255,255,0.10)'; ctx.lineWidth=1;
+  ctx.strokeRect(fr.x+0.5, fr.y+0.5, fr.w-1, fr.h-1);
+}
+
+/* -------------------------------------------------------- stage -> source */
+function stageToSrc(p, fr){
+  var s = srcSize();
+  if (mode === 'live') return [ ((p[0]-fr.x)/fr.w)*s.w, ((p[1]-fr.y)/fr.h)*s.h ];
+  var u = (p[0] - (fr.x+fr.w/2) - view.tx)/view.s + fr.w/2;
+  var v = (p[1] - (fr.y+fr.h/2) - view.ty)/view.s + fr.h/2;
+  return [ (u/fr.w)*s.w, (v/fr.h)*s.h ];
+}
+function srcPerStagePx(fr){
+  var s = srcSize();
+  return mode === 'live' ? s.w/fr.w : s.w/(fr.w*view.s);
+}
+
+/* --------------------------------------------------------------- readouts */
+function updateReadout(fr){
+  var s = srcSize();
+  if (S.overlay !== 'spiral'){
+    $('gstate').textContent = (S.overlay === 'off') ? 'NO GUIDE' : S.overlay.toUpperCase() + ' · FRAME-FIXED';
+    $('gstate').className = 'state grow dim';
+    $('readLeft').textContent = 'FULL FRAME · ' + s.w + ' × ' + s.h + ' px';
+    $('readRatio').textContent = s.w >= s.h ? (s.w/s.h).toFixed(3)+' : 1' : '1 : '+(s.h/s.w).toFixed(3);
+    return;
+  }
+  $('gstate').className = 'state grow';
+  $('gstate').textContent = orientLabel(S.orient) + ' · ' + Math.round(S.scale*100) + '% · ' +
+                            Math.round(S.rot*180/Math.PI) + '°';
+  var T = xform(fr), q = cropQuad(fr, T), k = srcPerStagePx(fr);
+  var cw = Math.round(dist(q[0],q[1])*k), ch = Math.round(dist(q[1],q[2])*k), phi = atPhi();
+  $('readLeft').textContent = (S.stretch ? 'STRETCHED · ' : (phi ? 'φ CROP · ' : 'GUIDE CROP · ')) + cw + ' × ' + ch + ' px';
+  $('readRatio').textContent = phi ? '1 : 1.618'
+    : (cw >= ch ? (cw/ch).toFixed(3) + ' : 1' : '1 : ' + (ch/cw).toFixed(3));
+  $('save').textContent = phi ? 'Save φ crop' : 'Save crop';
+}
+
+/* ------------------------------------------------------------ interaction */
+var ptrs = {}, nPtr = 0, gest = null, grab = null, lastTap = 0, downPt = null, moved = false, tapTimer = 0;
+function stagePt(e){ var r = cv.getBoundingClientRect(); return [e.clientX-r.left, e.clientY-r.top]; }
+
+cv.addEventListener('pointerdown', function(e){
+  cv.setPointerCapture(e.pointerId); ptrs[e.pointerId] = stagePt(e); nPtr++;
+  if (nPtr === 2){
+    var ks = Object.keys(ptrs), a = ptrs[ks[0]], b = ptrs[ks[1]];
+    gest = 'pinch';
+    grab = { d:dist(a,b), z:camZoom, gs:S.scale, gr:S.rot, a0:Math.atan2(b[1]-a[1], b[0]-a[0]) };
+    if (mode === 'photo' && S.overlay === 'spiral' && S.locked) pulseLock();
+    return;
+  }
+  if (nPtr !== 1) return;
+  var p = ptrs[e.pointerId], fr = frame(), T = xform(fr);
+  downPt = p; moved = false;
+  if (S.overlay === 'spiral' && !S.locked && !(S.view === 'crop' && mode === 'photo')){
+    var h = handleOf(T), cs = cornersOf(T), i;
+    if (dist(p,h) < 26){ gest='rotate'; grab={ a0:Math.atan2(p[1]-T.ey,p[0]-T.ex), r0:S.rot }; return; }
+    for (i=0;i<4;i++) if (dist(p,cs[i]) < 26){
+      gest='scale'; grab={ d0:Math.max(8,dist(p,[T.ex,T.ey])), s0:S.scale }; return;
+    }
+    if (inPoly(p,cs)){ gest='move'; grab={ px:p[0], py:p[1], cx:S.cx, cy:S.cy, fr:fr }; return; }
+  }
+  if (S.overlay === 'spiral' && S.locked && inPoly(p, cornersOf(T))) pulseLock();
+});
+
+cv.addEventListener('pointermove', function(e){
+  if (!(e.pointerId in ptrs)) return;
+  ptrs[e.pointerId] = stagePt(e);
+  if (downPt && dist(ptrs[e.pointerId], downPt) > 6) moved = true;
+  var fr = frame(), T, p = ptrs[e.pointerId];
+  if (gest === 'pinch'){
+    var ks = Object.keys(ptrs); if (ks.length < 2) return;
+    var a = ptrs[ks[0]], b = ptrs[ks[1]], ratio = dist(a,b)/grab.d;
+    // In the viewfinder a pinch zooms the lens, as it does in every camera.
+    // On a still there is no lens to zoom, so the pinch belongs to the guide.
+    if (mode === 'live'){ setZoom(grab.z * ratio); return; }
+    if (S.overlay !== 'spiral' || S.locked) return;
+    S.rot = detent(grab.gr + (Math.atan2(b[1]-a[1], b[0]-a[0]) - grab.a0));
+    S.fit = 'manual';
+    applySize(grab.gs * ratio, fr);
+    syncVals(); draw(); return;
+  }
+  if (gest === 'move'){
+    S.cx = Math.max(-0.2, Math.min(1.2, grab.cx + (p[0]-grab.px)/grab.fr.w));
+    S.cy = Math.max(-0.2, Math.min(1.2, grab.cy + (p[1]-grab.py)/grab.fr.h));
+    if (S.bind) clampPos(grab.fr);
+    draw(); return;
+  }
+  if (gest === 'scale'){
+    T = xform(fr);
+    S.fit = 'manual';
+    applySize(grab.s0*(dist(p,[T.ex,T.ey])/grab.d0), fr);
+    syncVals(); draw(); return;
+  }
+  if (gest === 'rotate'){
+    T = xform(fr);
+    S.rot = detent(grab.r0 + (Math.atan2(p[1]-T.ey, p[0]-T.ex) - grab.a0));
+    reBind();
+    syncVals(); draw(); return;
+  }
+});
+
+function endPtr(e){
+  if (e.pointerId in ptrs){ delete ptrs[e.pointerId]; nPtr = Math.max(0, nPtr-1); }
+  if (nPtr === 0){
+    if (!moved && downPt){
+      var now = Date.now(), tapAt = downPt, wasHandle = (gest === 'scale' || gest === 'rotate');
+      clearTimeout(tapTimer);
+      if (now - lastTap < 340 && S.overlay === 'spiral' && !S.locked){
+        S.orient = (S.orient+1)%8;
+        if (S.fit !== 'manual') applyFit(true); else reBind();       // same as the sheet's tiles, minus the recentre
+        syncSheet(); syncChips(); draw(); remember(); lastTap = 0;
+      } else {
+        lastTap = now;
+        // A single tap in the viewfinder names the subject. Wait out the double-tap window first.
+        if (mode === 'live' && !wasHandle) tapTimer = setTimeout(function(){ onSubjectTap(tapAt); }, 320);
+      }
+    }
+    gest = null; grab = null; remember();
+  } else if (nPtr === 1 && gest === 'pinch'){ gest = null; grab = null; }
+}
+cv.addEventListener('pointerup', endPtr);
+cv.addEventListener('pointercancel', endPtr);
+function pulseLock(){ var el=$('lock'); el.animate([{transform:'scale(1)'},{transform:'scale(1.18)'},{transform:'scale(1)'}],{duration:320}); }
+
+/* ------------------------------------------- subject tracking + coaching */
+// Tap the subject; a small patch around it is followed frame to frame on a
+// low-res copy of the feed (zero-mean SAD, so exposure shifts don't throw it).
+// No model, no network: it follows whatever you tapped, trees included.
+var trk = { on:false, lost:false, u:0, v:0, tpl:null, w:0, h:0, cv:null, cx:null, bad:0, raf:0, n:0, aligned:false, score:0 };
+var TW = 192, PR = 7, PN = (2*PR+1)*(2*PR+1), SR = 14;
+function trkGray(){
+  var vw = vid.videoWidth, vh = vid.videoHeight; if (!vw || !vh) return null;
+  var w = TW, h = Math.max(24, Math.round(TW*vh/vw));
+  if (!trk.cv){ trk.cv = document.createElement('canvas'); }
+  if (trk.cv.width !== w || trk.cv.height !== h){ trk.cv.width = w; trk.cv.height = h; trk.cx = trk.cv.getContext('2d', { willReadFrequently:true }); }
+  trk.cx.drawImage(vid, 0, 0, w, h);
+  var d = trk.cx.getImageData(0, 0, w, h).data, g = new Float32Array(w*h);
+  for (var i = 0, j = 0; j < g.length; i += 4, j++) g[j] = d[i]*0.299 + d[i+1]*0.587 + d[i+2]*0.114;
+  trk.w = w; trk.h = h; return g;
+}
+function patchAt(g, x, y){
+  var p = new Float32Array(PN), k = 0, s = 0, dx, dy, w = trk.w;
+  for (dy = -PR; dy <= PR; dy++) for (dx = -PR; dx <= PR; dx++){ var v = g[(y+dy)*w + (x+dx)]; p[k++] = v; s += v; }
+  s /= PN; for (k = 0; k < PN; k++) p[k] -= s;
+  return p;
+}
+function trkStep(){
+  var g = trkGray(); if (!g || !trk.tpl) return;
+  var w = trk.w, h = trk.h, best = 1e9, bx = trk.u, by = trk.v, x, y, dx, dy, k, s, m, sad, t = trk.tpl;
+  var r = trk.lost ? SR*2 : SR;
+  var x0 = Math.max(PR, trk.u - r), x1 = Math.min(w-PR-1, trk.u + r);
+  var y0 = Math.max(PR, trk.v - r), y1 = Math.min(h-PR-1, trk.v + r);
+  for (y = y0; y <= y1; y++) for (x = x0; x <= x1; x++){
+    m = 0;
+    for (dy = -PR; dy <= PR; dy++){ var row = (y+dy)*w; for (dx = -PR; dx <= PR; dx++) m += g[row + x + dx]; }
+    m /= PN; sad = 0; k = 0;
+    for (dy = -PR; dy <= PR && sad < best*PN; dy++){ var row2 = (y+dy)*w; for (dx = -PR; dx <= PR; dx++){ s = g[row2 + x + dx] - m - t[k++]; sad += s < 0 ? -s : s; } }
+    sad /= PN;
+    if (sad < best){ best = sad; bx = x; by = y; }
+  }
+  trk.score = best;
+  if (best < 16){
+    trk.u = bx; trk.v = by; trk.bad = 0; trk.lost = false;
+    var cur = patchAt(g, bx, by);                    // drift slowly with the subject's look
+    for (k = 0; k < PN; k++) t[k] = t[k]*0.92 + cur[k]*0.08;
+  } else if (++trk.bad > 8) trk.lost = true;
+}
+function trkLoop(){
+  if (mode !== 'live' || !trk.on){ trk.raf = 0; return; }
+  if ((trk.n++ & 1) === 0) trkStep();
+  draw();
+  trk.raf = requestAnimationFrame(trkLoop);
+}
+function clearTarget(){ trk.on = false; trk.lost = false; trk.tpl = null; trk.aligned = false; if (trk.raf){ cancelAnimationFrame(trk.raf); trk.raf = 0; } }
+// stage point <-> normalised feed position (front camera preview is mirrored)
+function stageToFeed(p, fr){ var nx = (p[0]-fr.x)/fr.w, ny = (p[1]-fr.y)/fr.h; if (facing === 'user') nx = 1-nx; return [nx, ny]; }
+function feedToStage(nx, ny, fr){ if (facing === 'user') nx = 1-nx; return [fr.x + nx*fr.w, fr.y + ny*fr.h]; }
+function targetStage(fr){ return feedToStage(trk.u/trk.w, trk.v/trk.h, fr); }
+function onSubjectTap(p){
+  if (mode !== 'live') return;
+  var fr = frame();
+  if (trk.on && !trk.lost && dist(p, targetStage(fr)) < 28){ clearTarget(); draw(); return; }   // tap the marker to drop it
+  var n = stageToFeed(p, fr); if (n[0] < 0 || n[0] > 1 || n[1] < 0 || n[1] > 1) return;
+  var g = trkGray(); if (!g) return;
+  trk.u = Math.max(PR, Math.min(trk.w-PR-1, Math.round(n[0]*trk.w)));
+  trk.v = Math.max(PR, Math.min(trk.h-PR-1, Math.round(n[1]*trk.h)));
+  trk.tpl = patchAt(g, trk.u, trk.v); trk.on = true; trk.lost = false; trk.bad = 0; trk.aligned = false;
+  // Focus where you tapped, where the camera allows it (Chrome on Android, mostly).
+  if (track && caps.pointsOfInterest){ try { track.applyConstraints({ advanced:[{ pointsOfInterest:[{ x:n[0], y:n[1] }] }] }).catch(function(){}); } catch(e){} }
+  if (!trk.raf) trk.raf = requestAnimationFrame(trkLoop);
+  draw();
+}
+// Where the subject should sit for the current guide.
+function goalsFor(fr){
+  if (S.overlay === 'spiral'){ var T = xform(fr); return [[T.ex, T.ey]]; }
+  var fs = S.overlay === 'grid' ? [1-1/PHI, 1/PHI] : S.overlay === 'thirds' ? [1/3, 2/3] : null, out = [], i, j;
+  if (fs){ for (i=0;i<2;i++) for (j=0;j<2;j++) out.push([fr.x+fs[i]*fr.w, fr.y+fs[j]*fr.h]); return out; }
+  if (S.overlay === 'triangles'){
+    var tl=[fr.x,fr.y], tr=[fr.x+fr.w,fr.y], br=[fr.x+fr.w,fr.y+fr.h], bl=[fr.x,fr.y+fr.h];
+    return S.triFlip ? [foot(tr,bl,tl), foot(tr,bl,br)] : [foot(tl,br,tr), foot(tl,br,bl)];
+  }
+  return [];
+}
+function alignRadius(fr){ return Math.max(14, 0.045*Math.min(fr.w, fr.h)); }
+function buzz(){ try { if (navigator.vibrate) navigator.vibrate(S.coach ? [22, 70, 22] : 28); } catch(e){} }
+var level = { dev:null, ok:false };
+function onMotion(e){
+  var g = e.accelerationIncludingGravity; if (!g || g.x == null) return;
+  if (Math.abs(g.z) > 7){ level.dev = null; return; }          // pointing at the floor or sky: level means nothing
+  var dev = Math.abs(Math.atan2(g.x, g.y) * 180/Math.PI); if (dev > 90) dev = 180 - dev;
+  if (Math.abs(g.x) > Math.abs(g.y)){ dev = Math.abs(Math.atan2(g.y, g.x) * 180/Math.PI); if (dev > 90) dev = 180 - dev; }   // landscape
+  level.dev = level.dev == null ? dev : level.dev*0.8 + dev*0.2;
+}
+window.addEventListener('devicemotion', onMotion);
+function drawTarget(fr){
+  if (!trk.on) return;
+  var p = targetStage(fr), on = trk.aligned && !trk.lost;
+  ctx.save();
+  if (trk.lost) ctx.setLineDash([4,4]);
+  ring(p, 17, null, on ? 'rgba(224,178,82,0.95)' : 'rgba(255,255,255,0.85)', 1.5);
+  ctx.setLineDash([]);
+  ctx.strokeStyle = on ? 'rgba(224,178,82,0.95)' : 'rgba(255,255,255,0.85)'; ctx.lineWidth = 1.5;
+  seg([p[0]-24,p[1]],[p[0]-19,p[1]]); seg([p[0]+19,p[1]],[p[0]+24,p[1]]);
+  seg([p[0],p[1]-24],[p[0],p[1]-19]); seg([p[0],p[1]+19],[p[0],p[1]+24]);
+  ctx.restore();
+}
+function coachLine(fr, p, goal){
+  var dx = (p[0]-goal[0])/fr.w, dy = (p[1]-goal[1])/fr.h, out = [];
+  // Subject right of the goal: turn the camera right, which slides the scene left.
+  if (Math.abs(dx) > 0.015) out.push((dx > 0 ? 'Pan right' : 'Pan left') + (Math.abs(dx) < 0.08 ? ' a touch' : ''));
+  if (Math.abs(dy) > 0.015) out.push((dy > 0 ? 'tilt down' : 'tilt up') + (Math.abs(dy) < 0.08 ? ' a touch' : ''));
+  var s = out.join(' · '); return s.charAt(0).toUpperCase() + s.slice(1);
+}
+function levelBit(){ if (level.dev == null) return ''; return level.dev < 1.5 ? ' · level' : ' · ' + level.dev.toFixed(0) + '° off level'; }
+var hintUntil = 0;
+function updateHud(fr){
+  var hud = $('hud'), live = (mode === 'live');
+  hud.hidden = !live; if (!live) return;
+  hud.style.left = fr.x + 'px'; hud.style.top = fr.y + 'px'; hud.style.width = fr.w + 'px'; hud.style.height = fr.h + 'px';
+  $('expoR').textContent = S.overlay !== 'spiral' ? '' : (S.stretch ? 'STRETCHED' : (atPhi() ? 'φ 1.618' : 'GROWTH ' + S.growth.toFixed(3)));
+  var pill = $('alignPill'), card = $('coachCard'), goals = goalsFor(fr), state, title, line;
+  if (!trk.on){ state = 'none'; }
+  else if (trk.lost){ state = 'lost'; }
+  else {
+    var p = targetStage(fr), best = null, i, d;
+    for (i = 0; i < goals.length; i++){ d = dist(p, goals[i]); if (!best || d < best.d) best = { d:d, g:goals[i] }; }
+    var r = alignRadius(fr);
+    if (!best){ state = 'noguide'; trk.aligned = false; }
+    else {
+      if (!trk.aligned && best.d < r){ trk.aligned = true; buzz(); }
+      else if (trk.aligned && best.d > r*1.8) trk.aligned = false;
+      state = trk.aligned ? 'aligned' : (best.d < r*3 ? 'close' : 'far');
+      line = trk.aligned ? null : coachLine(fr, p, best.g);
+    }
+  }
+  var where = S.overlay === 'spiral' ? 'on the eye' : 'on a power point';
+  if (state === 'none'){ title = 'TAP YOUR SUBJECT'; line = 'Tap what the photo is about. It buzzes when the subject lands ' + where + '.'; }
+  else if (state === 'lost'){ title = 'LOST IT'; line = 'Tap the subject again.'; }
+  else if (state === 'noguide'){ title = 'NO TARGET'; line = 'Pick a guide to aim for.'; }
+  else if (state === 'aligned'){ title = 'ALIGNED'; line = 'Subject ' + where + levelBit(); }
+  else { title = state === 'close' ? 'ALMOST' : 'MOVE'; line = (line || 'Hold there') + levelBit(); }
+  card.hidden = !S.coach; card.classList.toggle('on', state === 'aligned');
+  $('coachT').textContent = title; $('coachS').textContent = line;
+  var showPill = !S.coach && (state !== 'none' || Date.now() < hintUntil);
+  pill.hidden = !showPill; pill.classList.toggle('on', state === 'aligned');
+  $('alignTxt').textContent = state === 'aligned' ? 'ALIGNED' : state === 'lost' ? 'LOST' : state === 'none' ? 'TAP SUBJECT' : state === 'noguide' ? 'NO GUIDE' : 'TARGET';
+}
+// Exposure: shown only where the camera reports it. Phones don't expose aperture
+// to the web at all, and Chrome often only reports shutter/ISO once they're set,
+// so the row falls back to what is always true — resolution and frame rate.
+var expoTimer = 0;
+function pollExposure(){
+  if (!track || mode !== 'live') return;
+  var s = {}; try { s = track.getSettings() || {}; } catch(e){}
+  var parts = [];
+  if (s.exposureTime){ var sec = s.exposureTime/10000; parts.push(sec >= 1 ? sec.toFixed(1)+'s' : '1/' + Math.round(1/sec)); }
+  if (s.iso) parts.push('ISO ' + Math.round(s.iso));
+  if (!parts.length && s.width) parts.push(Math.max(s.width,s.height) + '×' + Math.min(s.width,s.height) + (s.frameRate ? ' · ' + Math.round(s.frameRate) + 'fps' : ''));
+  if (camZoom && caps.zoom) parts.push(camZoom.toFixed(1) + '×');
+  $('expoL').textContent = parts.join('   ');
+}
+function buildZoomChips(){
+  var box = $('zchips'); box.innerHTML = '';
+  if (!caps.zoom){ box.hidden = true; return; }
+  var mn = caps.zoom.min || 1, mx = caps.zoom.max || 1;
+  var zs = [0.5, 0.6, 1, 2, 3, 5, 10].filter(function(z){ return z >= mn - 0.01 && z <= mx + 0.01; });
+  if (zs.indexOf(0.5) >= 0 && zs.indexOf(0.6) >= 0) zs.splice(zs.indexOf(0.6), 1);
+  if (zs.length < 2){ box.hidden = true; return; }
+  zs.forEach(function(z){
+    var b = document.createElement('button'); b.type = 'button'; b.dataset.z = z;
+    b.textContent = z < 1 ? String(z).replace('0.', '.') : z + '×';
+    b.addEventListener('click', function(){ setZoom(z); });
+    box.appendChild(b);
+  });
+  box.hidden = false; syncZoomChips();
+}
+function syncZoomChips(){
+  var bs = $('zchips').children, bi = -1, bd = 1e9, i;
+  for (i = 0; i < bs.length; i++){ var d = Math.abs(parseFloat(bs[i].dataset.z) - camZoom); if (d < bd){ bd = d; bi = i; } }
+  for (i = 0; i < bs.length; i++) bs[i].classList.toggle('on', i === bi && bd < 0.15);
+}
+if (location.hash === '#debug') window.__fibcam = { trk:trk, frame:frame, xform:xform, level:level, S:S, onSubjectTap:onSubjectTap };
+$('coachBtn').addEventListener('click', function(){
+  S.coach = !S.coach; this.classList.toggle('on', S.coach); this.setAttribute('aria-pressed', String(S.coach));
+  remember(); draw();
+});
+
+/* ----------------------------------------------------------------- camera */
+function camSupported(){ return !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia); }
+function gateMessage(){
+  if (!window.isSecureContext){
+    var where = location.hostname ? location.protocol + '//' + location.hostname
+                                  : 'opened as a local file';
+    $('gateMsg').innerHTML = '<b class="warn">The camera needs a secure origin.</b><br>' +
+      'This page is ' + where + '. Serve it over <b>https://</b> or from <b>localhost</b> ' +
+      'and the viewfinder will work. Everything else on this page works as it is.';
+    return false;
+  }
+  if (!camSupported()){
+    $('gateMsg').innerHTML = '<b class="warn">This browser exposes no camera API.</b><br>' +
+      'Open the page in Safari or Chrome. Everything else works as it is.';
+    return false;
+  }
+  return true;
+}
+function stopCamera(){
+  clearTarget(); clearInterval(expoTimer); expoTimer = 0;
+  if (stream){ stream.getTracks().forEach(function(t){ t.stop(); }); stream = null; track = null; caps = {}; }
+  vid.classList.remove('on');
+}
+async function startCamera(){
+  if (!gateMessage()) return;
+  // iOS asks before handing over motion data (for the level readout); it has to be asked inside the tap.
+  try { if (window.DeviceMotionEvent && DeviceMotionEvent.requestPermission) DeviceMotionEvent.requestPermission().catch(function(){}); } catch(e){}
+  try {
+    stopCamera();
+    stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode:{ ideal:facing }, width:{ ideal:3840 }, height:{ ideal:2160 } },
+      audio: false
+    });
+  } catch (err){
+    var m = 'The camera could not start.';
+    if (err && err.name === 'NotAllowedError') m = 'Camera access was refused. Allow it in your browser settings for this site, then try again.';
+    else if (err && err.name === 'NotFoundError') m = 'No camera was found on this device.';
+    else if (err && err.name === 'NotReadableError') m = 'Another app is using the camera. Close it and try again.';
+    $('gateMsg').innerHTML = '<b class="warn">' + m + '</b>';
+    return;
+  }
+  vid.srcObject = stream;
+  vid.classList.toggle('mirror', facing === 'user');
+  try { await vid.play(); } catch(e){}
+  track = stream.getVideoTracks()[0];
+  caps = (track && track.getCapabilities) ? (track.getCapabilities() || {}) : {};
+  camZoom = (caps.zoom && track.getSettings && track.getSettings().zoom) || 1;
+  $('torch').hidden = !caps.torch;
+  var hasZoom = !!caps.zoom;
+  $('zoom').hidden = !hasZoom; $('zoomLab').hidden = !hasZoom;
+  if (hasZoom){
+    $('zoom').min = Math.round((caps.zoom.min||1)*100);
+    $('zoom').max = Math.round((caps.zoom.max||4)*100);
+    $('zoom').value = Math.round(camZoom*100);
+    $('zoomVal').textContent = camZoom.toFixed(1) + '×';
+  }
+  buildZoomChips(); expoTimer = setInterval(pollExposure, 700); hintUntil = Date.now() + 4000;
+  mode = 'live'; vid.classList.add('on'); $('gate').hidden = true; pollExposure();
+  $('srcName').textContent = 'LIVE · ' + facing.toUpperCase();
+  setBars(); resize(); reframe(true); draw();
+}
+async function setZoom(z){
+  if (!track || !caps.zoom) return;
+  z = Math.min(caps.zoom.max, Math.max(caps.zoom.min, z));
+  try { await track.applyConstraints({ advanced:[{ zoom:z }] }); camZoom = z;
+        $('zoom').value = Math.round(z*100); $('zoomVal').textContent = z.toFixed(1)+'×'; syncZoomChips(); pollExposure(); } catch(e){}
+}
+$('startCam').addEventListener('click', startCamera);
+$('liveBtn').addEventListener('click', startCamera);
+$('flip').addEventListener('click', function(){
+  facing = (facing === 'environment') ? 'user' : 'environment';
+  startCamera();
+});
+$('torch').addEventListener('click', async function(){
+  if (!track || !caps.torch) return;
+  var on = !this.classList.contains('on');
+  try { await track.applyConstraints({ advanced:[{ torch:on }] }); this.classList.toggle('on', on); }
+  catch(e){ toast('This camera would not switch the torch.'); }
+});
+$('zoom').addEventListener('input', function(){ setZoom(parseInt(this.value,10)/100); });
+
+$('shutter').addEventListener('click', function(){
+  if (mode !== 'live' || !vid.videoWidth) return;
+  var c = document.createElement('canvas');
+  c.width = vid.videoWidth; c.height = vid.videoHeight;
+  var g = c.getContext('2d');
+  if (facing === 'user'){ g.translate(c.width,0); g.scale(-1,1); }   // match the mirrored preview
+  g.drawImage(vid, 0, 0, c.width, c.height);
+  photo = { el:c, w:c.width, h:c.height, name:'CAPTURE' };
+  stopCamera(); mode = 'photo';
+  view.s = 1; view.tx = 0; view.ty = 0;
+  $('srcName').textContent = 'CAPTURE · ' + c.width + '×' + c.height;
+  setBars(); resize();                       // the guide keeps its exact placement
+  toast('Framed and captured.');
+});
+
+/* -------------------------------------------------------------- photo in */
+function loadFile(file){
+  if (!file) return;
+  var url = URL.createObjectURL(file), im = new Image();
+  im.onload = function(){
+    stopCamera(); mode = 'photo';
+    photo = { el:im, w:im.naturalWidth, h:im.naturalHeight, name:(file.name||'PHOTO').toUpperCase() };
+    $('srcName').textContent = photo.name.slice(0,22) + ' · ' + photo.w + '×' + photo.h;
+    view.s = 1; view.tx = 0; view.ty = 0; S.rot = 0;
+    setBars(); resize(); reframe(true); draw(); remember();
+    toast('Drag the guide onto your subject.');
+  };
+  im.onerror = function(){ toast('That file would not open as an image.'); URL.revokeObjectURL(url); };
+  im.src = url;
+}
+$('pick').addEventListener('change', function(){ loadFile(this.files[0]); this.value=''; });
+$('pickBtn').addEventListener('click', function(){ $('pick').click(); });
+$('pickBtn2').addEventListener('click', function(){ $('pick').click(); });
+
+/* ----------------------------------------------------------------- export */
+function blobOf(c){ return new Promise(function(res){ c.toBlob(res, 'image/jpeg', 0.92); }); }
+async function offer(canvas, filename){
+  var blob = await blobOf(canvas);
+  if (!blob){ toast('That image could not be encoded.'); return; }
+  try {
+    var file = new File([blob], filename, { type:'image/jpeg' });
+    if (navigator.canShare && navigator.canShare({ files:[file] })){
+      await navigator.share({ files:[file] });        // iOS: "Save Image" lands in Photos
+      return;
+    }
+  } catch (e){ if (e && e.name === 'AbortError') return; }
+  var url = URL.createObjectURL(blob), a = document.createElement('a');
+  a.href = url; a.download = filename; document.body.appendChild(a); a.click();
+  setTimeout(function(){ URL.revokeObjectURL(url); a.remove(); }, 1500);
+  toast('Saved to your downloads.');
+}
+function paintGuideOn(k, mapPt, scaleK){
+  var fr = frame(), T = xform(fr), g, i, p;
+  k.lineJoin='round'; k.lineCap='round';
+  if (S.overlay === 'spiral'){
+    g = geo();
+    k.beginPath(); p = mapPt(T.at(g.pts[0])); k.moveTo(p[0],p[1]);
+    for (i=1;i<g.pts.length;i++){ p = mapPt(T.at(g.pts[i])); k.lineTo(p[0],p[1]); }
+    k.strokeStyle='rgba(255,255,255,0.86)'; k.lineWidth=1.4*scaleK; k.stroke();
+    p = mapPt([T.ex,T.ey]);
+    k.beginPath(); k.arc(p[0],p[1],11*scaleK,0,6.3);
+    k.strokeStyle='rgba(224,178,82,0.95)'; k.lineWidth=1.5*scaleK; k.stroke();
+  } else if (S.overlay === 'grid' || S.overlay === 'thirds'){
+    var fracs = (S.overlay === 'grid') ? [1-1/PHI, 1/PHI] : [1/3, 2/3], a, b;
+    k.strokeStyle='rgba(255,255,255,0.3)'; k.lineWidth=1*scaleK;
+    for (i=0;i<fracs.length;i++){
+      var f = fracs[i];
+      a = mapPt([fr.x+f*fr.w, fr.y]); b = mapPt([fr.x+f*fr.w, fr.y+fr.h]);
+      k.beginPath(); k.moveTo(a[0],a[1]); k.lineTo(b[0],b[1]); k.stroke();
+      a = mapPt([fr.x, fr.y+f*fr.h]); b = mapPt([fr.x+fr.w, fr.y+f*fr.h]);
+      k.beginPath(); k.moveTo(a[0],a[1]); k.lineTo(b[0],b[1]); k.stroke();
+    }
+  } else if (S.overlay === 'triangles'){
+    var tl=[fr.x,fr.y], tr=[fr.x+fr.w,fr.y], br=[fr.x+fr.w,fr.y+fr.h], bl=[fr.x,fr.y+fr.h], A,B,C1,C2;
+    if (!S.triFlip){ A=tl; B=br; C1=tr; C2=bl; } else { A=tr; B=bl; C1=tl; C2=br; }
+    k.strokeStyle='rgba(255,255,255,0.38)'; k.lineWidth=1*scaleK;
+    [[A,B],[C1,foot(A,B,C1)],[C2,foot(A,B,C2)]].forEach(function(pair){
+      var m=mapPt(pair[0]), n=mapPt(pair[1]);
+      k.beginPath(); k.moveTo(m[0],m[1]); k.lineTo(n[0],n[1]); k.stroke();
+    });
+  }
+}
+$('save').addEventListener('click', async function(){
+  if (mode !== 'photo' || !photo){ toast('Take a photo first, or open one.'); return; }
+  if (S.overlay !== 'spiral'){ toast('The φ crop comes from the spiral. Pick SPIRAL first.'); return; }
+  var fr = frame(), T = xform(fr), q = cropQuad(fr, T), k = srcPerStagePx(fr);
+  var outW = Math.max(16, Math.round(dist(q[0],q[1])*k));
+  var outH = Math.max(16, Math.round(dist(q[1],q[2])*k));
+  var mid = [ (q[0][0]+q[2][0])/2, (q[0][1]+q[2][1])/2 ];
+  var ic = stageToSrc(mid, fr);
+  var c = document.createElement('canvas'); c.width = outW; c.height = outH;
+  var g = c.getContext('2d');
+  g.fillStyle = '#000'; g.fillRect(0,0,outW,outH);
+  g.save(); g.translate(outW/2, outH/2);
+  g.rotate(-S.rot);                               // crop and straighten in one step
+  g.drawImage(photo.el, -ic[0], -ic[1], photo.w, photo.h);
+  g.restore();
+  await offer(c, 'fibonacci-phi-crop.jpg');
+});
+$('saveFull').addEventListener('click', async function(){
+  if (mode !== 'photo' || !photo){ toast('Take a photo first, or open one.'); return; }
+  var fr = frame();
+  var c = document.createElement('canvas'); c.width = photo.w; c.height = photo.h;
+  var g = c.getContext('2d');
+  g.drawImage(photo.el, 0, 0, photo.w, photo.h);
+  paintGuideOn(g, function(p){ return stageToSrc(p, fr); }, srcPerStagePx(fr));
+  await offer(c, 'fibonacci-frame.jpg');
+});
+
+/* ---------------------------------------------------------------- chrome */
+var OVERLAYS = [['off','OFF'],['grid','PHI GRID'],['spiral','SPIRAL'],['triangles','TRIANGLES'],['thirds','THIRDS']];
+(function(){
+  var box = $('picker');
+  OVERLAYS.forEach(function(o){
+    var b = document.createElement('button');
+    b.type='button'; b.className='chip'; b.textContent=o[1]; b.dataset.k=o[0];
+    b.addEventListener('click', function(){
+      if (S.overlay === 'triangles' && o[0] === 'triangles') S.triFlip = S.triFlip ? 0 : 1;
+      S.overlay = o[0]; syncChips(); draw(); remember();
+    });
+    box.appendChild(b);
+  });
+})();
+function syncChips(){
+  var bs = $('picker').children;
+  for (var i=0;i<bs.length;i++) bs[i].classList.toggle('on', bs[i].dataset.k === S.overlay);
+  $('turnsChip').textContent = (S.overlay === 'spiral')
+    ? 'SPIRAL · ' + S.turns + ' TURNS'
+    : OVERLAYS.filter(function(o){ return o[0] === S.overlay; })[0][1];
+}
+function setBars(){
+  var live = (mode === 'live');
+  $('liveBar').hidden = !live;
+  $('photoBar').hidden = live;
+  $('foot').style.visibility = live ? 'hidden' : '';
+  if (live){ $('gate').hidden = true; }
+}
+$('lock').addEventListener('click', function(){
+  S.locked = !S.locked;
+  this.classList.toggle('on', S.locked);
+  this.setAttribute('aria-pressed', String(S.locked));
+  draw(); remember();
+});
+$('adjust').addEventListener('click', openSheet);
+$('turnsChip').addEventListener('click', openSheet);
+$('closeSheet').addEventListener('click', closeSheet);
+$('scrim').addEventListener('click', closeSheet);
+function openSheet(){ syncSheet(); $('sheet').classList.add('open'); $('scrim').classList.add('open'); }
+function closeSheet(){ $('sheet').classList.remove('open'); $('scrim').classList.remove('open'); }
+
+(function(){
+  var box = $('orients');
+  for (var i=0;i<8;i++) (function(i){
+    var b = document.createElement('button'); b.type='button';
+    var c = document.createElement('canvas'); c.width=80; c.height=80;
+    b.appendChild(c); b.appendChild(document.createElement('span')); box.appendChild(b);
+    b.addEventListener('click', function(){
+      S.orient=i; if (S.fit !== 'manual') applyFit(); else reBind();
+      syncSheet(); syncChips(); draw(); remember();
+    });
+  })(i);
+})();
+function paintOrientTiles(){
+  var bs = $('orients').children;
+  for (var i=0;i<8;i++){
+    var b=bs[i], c=b.firstChild, g=geoFor(S.turns,i,S.growth), k=c.getContext('2d'), on=(i===S.orient);
+    b.classList.toggle('on', on);
+    b.lastChild.textContent = orientLabel(i).replace('BOTTOM','BOT').replace('-',' ');
+    k.clearRect(0,0,80,80);
+    var s = Math.min(60/g.bw, 60/g.bh);                 // uniform fit, always
+    var ox = (80-g.bw*s)/2 - g.ox*s, oy = (80-g.bh*s)/2 - g.oy*s;
+    k.beginPath(); k.moveTo(ox+g.pts[0][0]*s, oy+g.pts[0][1]*s);
+    for (var j=1;j<g.pts.length;j+=3) k.lineTo(ox+g.pts[j][0]*s, oy+g.pts[j][1]*s);
+    k.strokeStyle = on ? '#E0B252' : 'rgba(245,243,239,0.6)'; k.lineWidth=1.5; k.stroke();
+    k.beginPath(); k.arc(ox,oy,2.6,0,6.3);
+    k.fillStyle = on ? '#E0B252' : 'rgba(245,243,239,0.8)'; k.fill();
+  }
+}
+function syncVals(){
+  $('turns').value = S.turns; $('turnsVal').textContent = S.turns + '×';
+  $('scale').value = Math.round(S.scale*100); $('scaleVal').textContent = Math.round(S.scale*100)+'%';
+  var d = Math.round(S.rot*180/Math.PI);
+  $('rot').value = d; $('rotVal').textContent = d + '°';
+  $('orientVal').textContent = orientLabel(S.orient);
+  $('growth').value = Math.round(S.growth*100);
+  $('growthVal').textContent = atPhi() ? 'φ 1.618' : S.growth.toFixed(3);
+  $('bindBtn').textContent = S.bind ? 'Edges: held' : 'Edges: free';
+  $('bindBtn').classList.toggle('on', S.bind);
+  $('fitHeight').classList.toggle('on', !S.stretch && S.fit === 'height');
+  $('fitFrame').classList.toggle('on', !S.stretch && S.fit === 'frame');
+  $('stretchBtn').textContent = S.stretch ? 'Stretch: on' : 'Stretch: off';
+  $('stretchBtn').classList.toggle('on', S.stretch);
+}
+function syncSheet(){ syncVals(); paintOrientTiles(); }
+$('turns').addEventListener('input', function(){
+  S.turns=parseFloat(this.value);
+  if (S.fit !== 'manual') applyFit(); else reBind();
+  syncSheet(); syncChips(); draw(); remember();
+});
+$('scale').addEventListener('input', function(){
+  S.fit = 'manual'; applySize(parseInt(this.value,10)/100, frame());
+  syncVals(); draw(); remember();
+});
+$('rot').addEventListener('input', function(){
+  S.rot=parseInt(this.value,10)*Math.PI/180; reBind(); syncVals(); draw(); remember();
+});
+$('growth').addEventListener('input', function(){
+  S.growth = parseInt(this.value,10)/100; S.fit = 'manual'; reBind();
+  syncVals(); draw(); remember();
+});
+$('goldenBtn').addEventListener('click', function(){
+  S.growth = PHI; S.stretch = false; S.fit = 'manual'; reBind(); syncSheet(); draw(); remember();
+  toast('Back to the golden spiral');
+});
+$('stretchBtn').addEventListener('click', function(){
+  S.stretch = !S.stretch;
+  if (S.stretch){ S.scale = 1; centreGuide(); } else { S.fit = 'height'; applyFit(); }
+  syncSheet(); draw(); remember();
+  toast(S.stretch ? 'Filling the frame — the curve is distorted'
+                  : 'A true spiral again, top to bottom');
+});
+$('fitHeight').addEventListener('click', function(){
+  S.stretch = false; S.fit = 'height'; applyFit(); syncSheet(); draw(); remember();
+  toast('Golden spiral, top to bottom');
+});
+$('fitFrame').addEventListener('click', function(){
+  S.stretch = false; S.fit = 'frame'; applyFit(); syncSheet(); draw(); remember();
+  toast('All four edges · growth ' + S.growth.toFixed(3) + ', no longer φ');
+});
+$('bindBtn').addEventListener('click', function(){
+  S.bind = !S.bind; if (S.bind) reBind();
+  syncVals(); draw(); remember();
+});
+$('reset').addEventListener('click', function(){
+  S.rot=0; S.orient=0; S.turns=2.25; S.fit='height'; S.bind=true; S.stretch=true;
+  view.s=1; view.tx=0; view.ty=0;
+  applyFit(); syncSheet(); syncChips(); draw(); remember();
+});
+var footBtns = document.querySelectorAll('#foot button');
+Array.prototype.forEach.call(footBtns, function(b){
+  b.addEventListener('click', function(){
+    S.view = b.dataset.view;
+    Array.prototype.forEach.call(footBtns, function(x){ x.classList.toggle('on', x===b); });
+    draw(); remember();
+  });
+});
+
+var toastT = null;
+function toast(msg){
+  var el = $('toast'); el.textContent = msg; el.classList.add('on');
+  clearTimeout(toastT); toastT = setTimeout(function(){ el.classList.remove('on'); }, 2600);
+}
+// `fresh` means the frame now holds something else, so the old position is moot.
+function reframe(fresh){
+  if (S.fit !== 'manual') applyFit(!fresh);
+  else { if (fresh) centreGuide(); reBind(); }
+}
+function resize(){
+  var r = $('stageWrap').getBoundingClientRect();
+  dpr = Math.min(3, window.devicePixelRatio || 1);
+  W = Math.max(1, r.width); H = Math.max(1, r.height);
+  cv.width = Math.round(W*dpr); cv.height = Math.round(H*dpr);
+  if (W > 1 && H > 1) reframe(false);          // the frame's shape may have changed
+  draw();
+}
+window.addEventListener('resize', resize);
+window.addEventListener('orientationchange', function(){ setTimeout(resize, 150); });
+vid.addEventListener('loadedmetadata', resize);
+document.addEventListener('visibilitychange', function(){
+  if (document.hidden && mode === 'live'){ stopCamera(); mode='photo'; if(!photo) photo = sampleScene();
+    setBars(); $('gate').hidden = false; gateMessage(); resize(); }
+});
+document.addEventListener('gesturestart', function(e){ e.preventDefault(); });   // iOS page pinch-zoom
+
+photo = sampleScene();
+gateMessage();
+$('lock').classList.toggle('on', S.locked);
+$('coachBtn').classList.toggle('on', S.coach); $('coachBtn').setAttribute('aria-pressed', String(S.coach));
+$('lock').setAttribute('aria-pressed', String(S.locked));
+Array.prototype.forEach.call(footBtns, function(x){ x.classList.toggle('on', x.dataset.view === S.view); });
+setBars(); syncChips(); syncSheet(); resize(); reframe(!(saved && saved.cx !== undefined)); syncSheet(); draw();
+if (document.fonts && document.fonts.ready) document.fonts.ready.then(resize);
+})();
+</script>
+</body>
+</html>
