@@ -1,0 +1,9 @@
+<resources>
+    <color name="base">#0B0B0C</color>
+    <color name="surface">#16161A</color>
+    <color name="elev">#1F1F25</color>
+    <color name="line">#2E2E36</color>
+    <color name="text">#F5F3EF</color>
+    <color name="muted">#A3A09A</color>
+    <color name="gold">#E0B252</color>
+</resources>

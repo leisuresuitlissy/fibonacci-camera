@@ -1,0 +1,8 @@
+<resources>
+    <style name="Theme.FibCam" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/base</item>
+        <item name="android:statusBarColor">@color/base</item>
+        <item name="android:navigationBarColor">@color/base</item>
+        <item name="android:colorAccent">@color/gold</item>
+    </style>
+</resources>

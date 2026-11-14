@@ -1,0 +1,47 @@
+name: Android APK
+
+on:
+  push:
+    paths: ['android/**', '.github/workflows/android.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+
+      - name: Build the APK
+        working-directory: android
+        run: gradle assembleRelease --stacktrace
+
+      - name: Name it
+        run: cp android/app/build/outputs/apk/release/app-release.apk fibonacci-camera.apk
+
+      # Same tag and file name every time, so the download link (and its QR code) never changes.
+      - name: Publish to the android-latest release
+        uses: ncipollo/release-action@v1
+        with:
+          tag: android-latest
+          commit: ${{ github.sha }}
+          name: Fibonacci Camera — Android (latest)
+          body: |
+            Built from ${{ github.sha }}.
+            On the phone: open the APK, allow installs from this source when asked, install. New builds install over the old one.
+          artifacts: fibonacci-camera.apk
+          allowUpdates: true
+          replacesArtifacts: true
+          removeArtifacts: true
+          makeLatest: true
