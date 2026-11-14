@@ -19,12 +19,12 @@ import androidx.annotation.RequiresApi
 enum class ArtMode(val label: String, val sliders: List<Pair<String, Float>>) {
     OFF("OFF", emptyList()),
     TILT_SHIFT("TILT SHIFT", listOf("Intensity" to 0.7f, "Focus" to 0.55f, "Width" to 0.25f, "Angle" to 0.5f)),
-    HOLGA("HOLGA", listOf("Intensity" to 0.8f, "Vignette" to 0.6f, "Softness" to 0.4f, "Leaks" to 0.5f)),
+    HOLGA("HOLGA", listOf("Intensity" to 0.7f, "Vignette" to 0.6f, "Softness" to 0.4f, "Leaks" to 0.5f)),
     PINHOLE("PINHOLE", listOf("Intensity" to 0.85f, "Softness" to 0.4f, "Vignette" to 0.6f)),
     GRAINY_FILM("GRAINY FILM", listOf("Intensity" to 0.9f, "Grain" to 0.5f, "Contrast" to 0.5f)),
     CROSS_PROCESS("CROSS PROCESS", listOf("Intensity" to 0.8f, "Colour" to 0.5f)),
-    DREAM_LENS("DREAM LENS", listOf("Intensity" to 0.7f, "Glow" to 0.5f, "Softness" to 0.4f)),
-    INFRARED("INFRARED", listOf("Intensity" to 0.85f, "Contrast" to 0.5f)),
+    DREAM_LENS("DREAM LENS", listOf("Intensity" to 0.45f, "Glow" to 0.45f, "Softness" to 0.35f)),
+    INFRARED("INFRARED", listOf("Intensity" to 0.9f, "Contrast" to 0.5f, "Halation" to 0.3f)),
     CYANOTYPE("CYANOTYPE", listOf("Intensity" to 0.9f, "Contrast" to 0.5f, "Paper" to 0.5f)),
     BLEACH_BYPASS("BLEACH BYPASS", listOf("Intensity" to 0.8f, "Saturation" to 0.35f, "Contrast" to 0.5f));
 

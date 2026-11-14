@@ -90,9 +90,6 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
     private lateinit var overlay: OverlayView
     private lateinit var hud: FrameLayout
     private lateinit var pill: TextView
-    private lateinit var coachCard: LinearLayout
-    private lateinit var coachT: TextView
-    private lateinit var coachS: TextView
     private lateinit var sourceTxt: TextView
     private lateinit var coachBtn: IconButton
     private lateinit var flashBtn: IconButton
@@ -117,7 +114,7 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
     private var guide = Guide.SPIRAL
     private var quadrant = 0
     private var triFlip = false
-    private var align = 1                 // 0 left, 1 centre, 2 right
+    private val align = 1                 // the spiral is always centred
     private var coach = false
     private var front = false
     private var flashMode = ImageCapture.FLASH_MODE_OFF
@@ -167,7 +164,6 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
         guide = runCatching { Guide.valueOf(prefs.getString("guide", Guide.SPIRAL.name)!!) }.getOrDefault(Guide.SPIRAL)
         quadrant = prefs.getInt("quadrant", 0)
         triFlip = prefs.getBoolean("triFlip", false)
-        align = prefs.getInt("align", 1)
         coach = prefs.getBoolean("coach", false)
         layer = prefs.getString("layer", "COMPOSE") ?: "COMPOSE"
         art = runCatching { ArtMode.valueOf(prefs.getString("art", ArtMode.OFF.name)!!) }.getOrDefault(ArtMode.OFF)
@@ -183,6 +179,7 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
                 imageCapture?.targetRotation = when (deviceRot) { 90 -> Surface.ROTATION_270; 180 -> Surface.ROTATION_180; 270 -> Surface.ROTATION_90; else -> Surface.ROTATION_0 }
             }
         }
+        overlay.squareGuide = art == ArtMode.HOLGA
         applyGuide(); applyArtUi(); applyLayer(); syncCoachBtn(); syncFlashBtn()
         loadThumb()
         checkForUpdate()
@@ -211,7 +208,7 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
 
     private fun save() {
         prefs.edit().putString("guide", guide.name).putInt("quadrant", quadrant)
-            .putBoolean("triFlip", triFlip).putInt("align", align).putBoolean("coach", coach)
+            .putBoolean("triFlip", triFlip).putBoolean("coach", coach)
             .putString("layer", layer).putString("art", art.name).apply()
     }
 
@@ -277,7 +274,12 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
             startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/leisuresuitlissy/fibonacci-camera/releases/download/android-latest/fibonacci-camera.apk")))
         }.apply { visibility = View.GONE }
         top.addView(updateBtn, LinearLayout.LayoutParams(wrap, wrap).apply { rightMargin = dpi(8f) })
-        coachBtn = iconButton(IconButton.Icon.COACH, 40f) { coach = !coach; save(); syncCoachBtn(); updateHud() }.apply { contentDescription = "Coaching" }
+        coachBtn = iconButton(IconButton.Icon.COACH, 40f) {
+            coach = !coach
+            if (!coach) { tracker.clear(); trackState = null; overlay.target = null; aligned = false }
+            else hintUntil = SystemClock.uptimeMillis() + 4000
+            save(); syncCoachBtn(); updateHud(); overlay.invalidate()
+        }.apply { contentDescription = "Coaching" }
         top.addView(coachBtn)
         flashBtn = iconButton(IconButton.Icon.FLASH_OFF, 40f) { cycleFlash() }.apply { contentDescription = "Flash" }
         top.addView(flashBtn, (flashBtn.layoutParams as LinearLayout.LayoutParams).apply { leftMargin = dpi(8f) })
@@ -294,13 +296,8 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
         stage.addView(overlay, lp(match, match))
         hud = FrameLayout(this)
         stage.addView(hud, lp(0, 0))
-        pill = label("TAP SUBJECT", 10.5f, cMuted, mono, 0.12f).apply { setPadding(dpi(11f), dpi(7f), dpi(11f), dpi(7f)); visibility = View.GONE }
+        pill = label("", 14f, cText, medium).apply { setPadding(dpi(16f), dpi(9f), dpi(16f), dpi(9f)); visibility = View.GONE }
         hud.addView(pill, lp(wrap, wrap, Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply { topMargin = dpi(12f) })
-        coachCard = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dpi(14f), dpi(11f), dpi(14f), dpi(12f)); visibility = View.GONE }
-        coachT = label("", 10.5f, cMuted, mono, 0.14f)
-        coachS = label("", 14f, cText).apply { setPadding(0, dpi(6f), 0, 0); setLineSpacing(0f, 1.15f) }
-        coachCard.addView(coachT); coachCard.addView(coachS)
-        hud.addView(coachCard, lp(match, wrap, Gravity.TOP).apply { leftMargin = dpi(12f); rightMargin = dpi(12f); topMargin = dpi(12f) })
         gateMsg = label("", 14f, cMuted).apply { gravity = Gravity.CENTER; setPadding(dpi(32f), 0, dpi(32f), 0); visibility = View.GONE }
         stage.addView(gateMsg, lp(match, match))
         stage.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> layoutFrame() }
@@ -366,6 +363,14 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
             contentDescription = "Take photo"
         }
         bar.addView(shutter, lp(dpi(78f), dpi(78f), Gravity.CENTER))
+        val importBtn = IconButton(this, IconButton.Icon.PHOTO, cText).apply {
+            glyphFraction = 0.5f
+            background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(cElev); setStroke(dpi(1f), cLine) }
+            contentDescription = "Import a photo"
+            translationX = -dp(84f)
+            setOnClickListener { pickFromLibrary() }
+        }
+        bar.addView(importBtn, lp(dpi(48f), dpi(48f), Gravity.CENTER))
         val flip = IconButton(this, IconButton.Icon.FLIP, cText).apply {
             glyphFraction = 0.56f
             background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(cElev); setStroke(dpi(1f), cLine) }
@@ -446,10 +451,7 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
         when (guide) {
             Guide.SPIRAL -> {
                 for (q in 0..3) secondRow.addView(tile(q == quadrant, { c, p, on -> drawMiniSpiral(c, p, q, on) }) { quadrant = q; aligned = false; save(); applyGuide() },
-                    LinearLayout.LayoutParams(dpi(44f), dpi(40f)).apply { rightMargin = dpi(6f) })
-                secondRow.addView(spacer())
-                for (a in 0..2) secondRow.addView(tile(a == align, { c, p, on -> drawAlign(c, p, a, on) }) { align = a; aligned = false; save(); applyGuide() },
-                    LinearLayout.LayoutParams(dpi(40f), dpi(40f)).apply { leftMargin = dpi(6f) })
+                    LinearLayout.LayoutParams(dpi(52f), dpi(40f)).apply { rightMargin = dpi(8f) })
             }
             Guide.TRIANGLES -> {
                 for (f in listOf(false, true)) secondRow.addView(tile(f == triFlip, { c, p, on -> drawDir(c, p, f, on) }) { triFlip = f; aligned = false; save(); applyGuide() },
@@ -516,6 +518,7 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
         for (m in ArtMode.values()) {
             artRow.addView(chip(m.label, m == art) {
                 art = m; artValues = Art.loadValues(prefs, m); artParam = 0
+                overlay.squareGuide = art == ArtMode.HOLGA; overlay.invalidate(); updateHud()
                 save(); applyArtUi(); applyLiveArt(); applyLayer()
             }, LinearLayout.LayoutParams(wrap, wrap).apply { rightMargin = dpi(8f) })
         }
@@ -678,15 +681,20 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
     // =========================================================== gestures
     override fun onSubjectTap(sx: Float, sy: Float) {
         val fr = overlay.frame
-        val cur = overlay.target
-        if (cur != null && trackState?.lost != true && Geo.dist(cur, PointF(sx, sy)) < dp(28f)) {
-            tracker.clear(); trackState = null; overlay.target = null; aligned = false; overlay.invalidate(); updateHud(); return
-        }
         if (!fr.contains(sx, sy)) return
-        var nx = (sx - fr.left) / fr.width(); val ny = (sy - fr.top) / fr.height()
-        if (front) nx = 1f - nx                                       // the preview is mirrored, the analysis frames aren't
-        tracker.target(nx, ny)
-        aligned = false
+        overlay.showFocus(sx, sy)
+        if (coach) {
+            // Coach mode: the tap also names the subject to follow. Tapping it again lets it go.
+            val cur = overlay.target
+            if (cur != null && trackState?.lost != true && Geo.dist(cur, PointF(sx, sy)) < dp(28f)) {
+                tracker.clear(); trackState = null; overlay.target = null; aligned = false; overlay.invalidate(); updateHud()
+            } else {
+                var nx = (sx - fr.left) / fr.width(); val ny = (sy - fr.top) / fr.height()
+                if (front) nx = 1f - nx                                   // the preview is mirrored, the analysis frames aren't
+                tracker.target(nx, ny)
+                aligned = false
+            }
+        }
         camera?.let { cam ->
             val pt = preview.meteringPointFactory.createPoint(sx, sy)
             cam.cameraControl.startFocusAndMetering(FocusMeteringAction.Builder(pt).setAutoCancelDuration(5, TimeUnit.SECONDS).build())
@@ -723,18 +731,16 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
     private fun buzz() {
         val fb = if (Build.VERSION.SDK_INT >= 30) HapticFeedbackConstants.CONFIRM else HapticFeedbackConstants.VIRTUAL_KEY
         overlay.performHapticFeedback(fb)
-        if (coach) overlay.postDelayed({ overlay.performHapticFeedback(fb) }, 110)
     }
 
     /** Screen offset (subject minus goal) → the move that fixes it, in the world's terms. */
     private fun coachLine(dx: Float, dy: Float): String {
         val (wx, wy) = when (deviceRot) { 90 -> -dy to dx; 180 -> -dx to -dy; 270 -> dy to -dx; else -> dx to dy }
         val out = ArrayList<String>(2)
-        // Subject right of the goal: turn the camera right, which slides the scene left.
-        if (abs(wx) > 0.015f) out.add((if (wx > 0) "pan right" else "pan left") + if (abs(wx) < 0.08f) " a touch" else "")
-        if (abs(wy) > 0.015f) out.add((if (wy > 0) "tilt down" else "tilt up") + if (abs(wy) < 0.08f) " a touch" else "")
-        val s = out.joinToString(" · ").ifEmpty { "hold there" }
-        return s.replaceFirstChar { it.uppercase() }
+        // Subject right of the goal: aim the camera right, which slides the scene left.
+        if (abs(wx) > 0.015f) out.add((if (abs(wx) < 0.08f) "slightly " else "") + if (wx > 0) "right" else "left")
+        if (abs(wy) > 0.015f) out.add((if (abs(wy) < 0.08f) "slightly " else "") + if (wy > 0) "down" else "up")
+        return if (out.isEmpty()) "Hold there" else "Aim " + out.joinToString(" and ")
     }
 
     private fun levelBit(): String {
@@ -744,46 +750,37 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
 
     private fun updateHud() {
         if (!::hud.isInitialized) return
-        val fr = overlay.frame
+        overlay.coach = coach
+        if (!coach) {
+            // Normal shooting: just the guide. No target, no status, nothing to judge.
+            pill.visibility = View.GONE; overlay.goal = null; aligned = false; overlay.aligned = false
+            return
+        }
+        val fr = overlay.guideFrame
         val st = trackState
         val goals = if (fr.isEmpty) emptyList() else Geo.goals(guide, fr, quadrant, triFlip, align)
-        val state: String
-        var line: String? = null
-        if (st == null || overlay.target == null) state = "none"
-        else if (st.lost) state = "lost"
+        val text: String
+        var on = false
+        val p = overlay.target
+        if (st == null || p == null) { text = "Tap your subject"; overlay.goal = null }
+        else if (st.lost) { text = "Tap your subject again"; overlay.goal = null }
         else {
-            val p = overlay.target!!
             val best = goals.minByOrNull { Geo.dist(p, it) }
-            if (best == null) { state = "noguide"; aligned = false }
+            overlay.goal = best
+            if (best == null) { text = "Pick a guide to aim for"; aligned = false }
             else {
                 val d = Geo.dist(p, best)
                 val r = max(dp(14f), 0.045f * min(fr.width(), fr.height()))
                 if (!aligned && d < r) { aligned = true; buzz() } else if (aligned && d > r * 1.8f) aligned = false
-                state = if (aligned) "aligned" else if (d < r * 3) "close" else "far"
-                if (!aligned) line = coachLine((p.x - best.x) / fr.width(), (p.y - best.y) / fr.height())
+                on = aligned
+                text = if (aligned) "Aligned" + levelBit() else coachLine((p.x - best.x) / fr.width(), (p.y - best.y) / fr.height())
             }
         }
         overlay.aligned = aligned
-        val where = if (guide == Guide.SPIRAL) "on the eye" else "on a power point"
-        val title = when (state) { "none" -> "TAP YOUR SUBJECT"; "lost" -> "LOST IT"; "noguide" -> "NO TARGET"; "aligned" -> "ALIGNED"; "close" -> "ALMOST"; else -> "MOVE" }
-        val text = when (state) {
-            "none" -> "Tap what the photo is about. It buzzes when the subject lands $where."
-            "lost" -> "Tap the subject again."
-            "noguide" -> "Pick a guide to aim for."
-            "aligned" -> "Subject $where" + levelBit()
-            else -> (line ?: "Hold there") + levelBit()
-        }
-        val on = state == "aligned"
-        coachCard.visibility = if (coach) View.VISIBLE else View.GONE
-        coachCard.background = if (on) rounded(0xB33C2E14.toInt(), withAlpha(cGold, 0.8f), 14f) else rounded(withAlpha(cBase, 0.66f), withAlpha(cText, 0.22f), 14f)
-        coachT.text = "●  $title"; coachT.setTextColor(if (on) cGold else cMuted)
-        coachS.text = text
-        val showPill = !coach && (state != "none" || SystemClock.uptimeMillis() < hintUntil)
-        pill.visibility = if (showPill) View.VISIBLE else View.GONE
-        pill.text = "●  " + when (state) { "aligned" -> "ALIGNED"; "lost" -> "LOST"; "none" -> "TAP SUBJECT"; "noguide" -> "NO GUIDE"; else -> "TARGET" }
-        pill.setTextColor(if (on) cGold else cMuted)
-        pill.background = if (on) rounded(withAlpha(cGold, 0.18f), withAlpha(cGold, 0.85f)) else rounded(withAlpha(cBase, 0.55f), withAlpha(cText, 0.25f))
-        if (state == "none" && SystemClock.uptimeMillis() < hintUntil) pill.postDelayed({ updateHud() }, 4100)
+        pill.visibility = View.VISIBLE
+        pill.text = text
+        pill.setTextColor(if (on) cGold else cText)
+        pill.background = if (on) rounded(0xD93C2E14.toInt(), withAlpha(cGold, 0.85f)) else rounded(withAlpha(cBase, 0.72f), withAlpha(cText, 0.18f))
     }
 
     // =========================================================== level
