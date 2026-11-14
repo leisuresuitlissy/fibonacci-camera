@@ -101,12 +101,13 @@ final class Renderer {
     }
 
     /** Runs the look (or a plain copy) from src into a pass, inside `viewport` (px). The look is measured against src. */
-    func encodeArt(_ cmd: MTLCommandBuffer, src: MTLTexture, recipe: Recipe?, pass rp: MTLRenderPassDescriptor, viewport: CGRect) {
+    func encodeArt(_ cmd: MTLCommandBuffer, src: MTLTexture, recipe: Recipe?, pass rp: MTLRenderPassDescriptor, viewport: CGRect, measure: CGRect? = nil) {
         guard let enc = cmd.makeRenderCommandEncoder(descriptor: rp) else { return }
         enc.setViewport(MTLViewport(originX: Double(viewport.minX), originY: Double(viewport.minY), width: Double(viewport.width), height: Double(viewport.height), znear: 0, zfar: 1))
         if let r = recipe, r.isOn, let p = pipe("art_\(r.mode.rawValue)") {
             var u = ArtUniforms()
             u.res = SIMD2(Float(src.width), Float(src.height))
+            if let m = measure { u.org = SIMD2(Float(m.minX), Float(m.minY)); u.res = SIMD2(Float(m.width), Float(m.height)) }   // the look is measured against this box
             u.amt = r.values[0]; u.p1 = r.values[1]; u.p2 = r.values[2]; u.p3 = r.values[3]; u.seed = r.seed
             u.vpo = SIMD2(Float(viewport.minX), Float(viewport.minY))
             u.vps = SIMD2(Float(src.width) / Float(viewport.width), Float(src.height) / Float(viewport.height))
@@ -151,6 +152,18 @@ final class Renderer {
         let rp = MTLRenderPassDescriptor()
         rp.colorAttachments[0].texture = out; rp.colorAttachments[0].loadAction = .dontCare; rp.colorAttachments[0].storeAction = .store
         encodeArt(cmd, src: mid, recipe: recipe, pass: rp, viewport: CGRect(x: 0, y: 0, width: w, height: h))
+        cmd.commit(); cmd.waitUntilCompleted()
+        return cgImage(from: out)
+    }
+
+    /** Editor preview: the pair at display size, with the look measured against the crop box. */
+    func renderDisplay(base: MTLTexture, top: MTLTexture?, m: simd_float3x3, blend: Blend, strength: Float, recipe: Recipe?, measure: CGRect?) -> CGImage? {
+        let w = base.width, h = base.height
+        guard let mid = makeTarget(w, h), let out = makeTarget(w, h), let cmd = queue.makeCommandBuffer() else { return nil }
+        encodeComposite(cmd, base: base, top: top, m: m, blend: blend, strength: strength, into: mid)
+        let rp = MTLRenderPassDescriptor()
+        rp.colorAttachments[0].texture = out; rp.colorAttachments[0].loadAction = .dontCare; rp.colorAttachments[0].storeAction = .store
+        encodeArt(cmd, src: mid, recipe: recipe, pass: rp, viewport: CGRect(x: 0, y: 0, width: w, height: h), measure: measure)
         cmd.commit(); cmd.waitUntilCompleted()
         return cgImage(from: out)
     }

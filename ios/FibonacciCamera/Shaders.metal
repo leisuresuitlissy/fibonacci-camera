@@ -114,7 +114,7 @@ static float4 fx_TILT_SHIFT(texture2d<float> T, constant U& uu, float2 p) {
 }
 
 fragment float4 art_TILT_SHIFT(VOut in [[stage_in]], texture2d<float> T [[texture(0)]], constant U& uu [[buffer(0)]]) {
-    return fx_TILT_SHIFT((in.pos.xy - uu.vpo_) * uu.vps_, T, uu);
+    return fx_TILT_SHIFT(T, uu, (in.pos.xy - uu.vpo_) * uu.vps_);
 }
 
 static float4 fx_HOLGA(texture2d<float> T, constant U& uu, float2 p) {
@@ -145,7 +145,7 @@ static float4 fx_HOLGA(texture2d<float> T, constant U& uu, float2 p) {
 }
 
 fragment float4 art_HOLGA(VOut in [[stage_in]], texture2d<float> T [[texture(0)]], constant U& uu [[buffer(0)]]) {
-    return fx_HOLGA((in.pos.xy - uu.vpo_) * uu.vps_, T, uu);
+    return fx_HOLGA(T, uu, (in.pos.xy - uu.vpo_) * uu.vps_);
 }
 
 static float4 fx_PINHOLE(texture2d<float> T, constant U& uu, float2 p) {
@@ -162,7 +162,7 @@ static float4 fx_PINHOLE(texture2d<float> T, constant U& uu, float2 p) {
 }
 
 fragment float4 art_PINHOLE(VOut in [[stage_in]], texture2d<float> T [[texture(0)]], constant U& uu [[buffer(0)]]) {
-    return fx_PINHOLE((in.pos.xy - uu.vpo_) * uu.vps_, T, uu);
+    return fx_PINHOLE(T, uu, (in.pos.xy - uu.vpo_) * uu.vps_);
 }
 
 static float4 fx_GRAINY_FILM(texture2d<float> T, constant U& uu, float2 p) {
@@ -177,7 +177,7 @@ static float4 fx_GRAINY_FILM(texture2d<float> T, constant U& uu, float2 p) {
 }
 
 fragment float4 art_GRAINY_FILM(VOut in [[stage_in]], texture2d<float> T [[texture(0)]], constant U& uu [[buffer(0)]]) {
-    return fx_GRAINY_FILM((in.pos.xy - uu.vpo_) * uu.vps_, T, uu);
+    return fx_GRAINY_FILM(T, uu, (in.pos.xy - uu.vpo_) * uu.vps_);
 }
 
 static float4 fx_CROSS_PROCESS(texture2d<float> T, constant U& uu, float2 p) {
@@ -196,7 +196,7 @@ static float4 fx_CROSS_PROCESS(texture2d<float> T, constant U& uu, float2 p) {
 }
 
 fragment float4 art_CROSS_PROCESS(VOut in [[stage_in]], texture2d<float> T [[texture(0)]], constant U& uu [[buffer(0)]]) {
-    return fx_CROSS_PROCESS((in.pos.xy - uu.vpo_) * uu.vps_, T, uu);
+    return fx_CROSS_PROCESS(T, uu, (in.pos.xy - uu.vpo_) * uu.vps_);
 }
 
 static float4 fx_DREAM_LENS(texture2d<float> T, constant U& uu, float2 p) {
@@ -213,7 +213,7 @@ static float4 fx_DREAM_LENS(texture2d<float> T, constant U& uu, float2 p) {
 }
 
 fragment float4 art_DREAM_LENS(VOut in [[stage_in]], texture2d<float> T [[texture(0)]], constant U& uu [[buffer(0)]]) {
-    return fx_DREAM_LENS((in.pos.xy - uu.vpo_) * uu.vps_, T, uu);
+    return fx_DREAM_LENS(T, uu, (in.pos.xy - uu.vpo_) * uu.vps_);
 }
 
 static float4 fx_INFRARED(texture2d<float> T, constant U& uu, float2 p) {
@@ -230,7 +230,7 @@ static float4 fx_INFRARED(texture2d<float> T, constant U& uu, float2 p) {
 }
 
 fragment float4 art_INFRARED(VOut in [[stage_in]], texture2d<float> T [[texture(0)]], constant U& uu [[buffer(0)]]) {
-    return fx_INFRARED((in.pos.xy - uu.vpo_) * uu.vps_, T, uu);
+    return fx_INFRARED(T, uu, (in.pos.xy - uu.vpo_) * uu.vps_);
 }
 
 static float4 fx_CYANOTYPE(texture2d<float> T, constant U& uu, float2 p) {
@@ -252,7 +252,7 @@ static float4 fx_CYANOTYPE(texture2d<float> T, constant U& uu, float2 p) {
 }
 
 fragment float4 art_CYANOTYPE(VOut in [[stage_in]], texture2d<float> T [[texture(0)]], constant U& uu [[buffer(0)]]) {
-    return fx_CYANOTYPE((in.pos.xy - uu.vpo_) * uu.vps_, T, uu);
+    return fx_CYANOTYPE(T, uu, (in.pos.xy - uu.vpo_) * uu.vps_);
 }
 
 static float4 fx_BLEACH_BYPASS(texture2d<float> T, constant U& uu, float2 p) {
@@ -271,5 +271,5 @@ static float4 fx_BLEACH_BYPASS(texture2d<float> T, constant U& uu, float2 p) {
 }
 
 fragment float4 art_BLEACH_BYPASS(VOut in [[stage_in]], texture2d<float> T [[texture(0)]], constant U& uu [[buffer(0)]]) {
-    return fx_BLEACH_BYPASS((in.pos.xy - uu.vpo_) * uu.vps_, T, uu);
+    return fx_BLEACH_BYPASS(T, uu, (in.pos.xy - uu.vpo_) * uu.vps_);
 }
