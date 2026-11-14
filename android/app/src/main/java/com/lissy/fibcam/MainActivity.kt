@@ -289,7 +289,7 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
         bar.addView(shutter, lp(dpi(78f), dpi(78f), Gravity.CENTER))
         val flip = label("⟲", 24f, cMuted).apply {
             gravity = Gravity.CENTER; background = rounded(cElev, cLine, 12f); contentDescription = "Switch camera"
-            setOnClickListener { front = !front; tracker.clear(); trackState = null; overlay.target = null; bindCamera() }
+            setOnClickListener { front = !front; tracker.clear(); trackState = null; this@MainActivity.overlay.target = null; bindCamera() }
         }
         bar.addView(flip, lp(dpi(54f), dpi(54f), Gravity.CENTER_VERTICAL or Gravity.END).apply { rightMargin = dpi(24f) })
         root.addView(bar, LinearLayout.LayoutParams(match, dpi(120f)))
