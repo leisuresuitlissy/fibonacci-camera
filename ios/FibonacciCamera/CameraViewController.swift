@@ -133,8 +133,9 @@ final class CameraViewController: UIViewController, PHPickerViewControllerDelega
         view.backgroundColor = Style.base
         guide = Guide(rawValue: d.string(forKey: "guide") ?? "") ?? .spiral
         quadrant = d.integer(forKey: "quadrant"); triFlip = d.bool(forKey: "triFlip")
-        layer = d.string(forKey: "layer") ?? "COMPOSE"
-        art = ArtMode(rawValue: d.string(forKey: "art") ?? "") ?? .OFF; artValues = art.loadValues()
+        // A fresh launch always opens on Compose with no look; slider positions per look are kept.
+        layer = "COMPOSE"
+        art = .OFF; artValues = art.loadValues()
         flash = AVCaptureDevice.FlashMode(rawValue: d.integer(forKey: "flash")) ?? .off
         double = d.bool(forKey: "double")
         blend = Blend(rawValue: d.integer(forKey: "blend")) ?? .screen

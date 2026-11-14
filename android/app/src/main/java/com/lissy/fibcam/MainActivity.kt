@@ -186,8 +186,11 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
         quadrant = prefs.getInt("quadrant", 0)
         triFlip = prefs.getBoolean("triFlip", false)
         coach = prefs.getBoolean("coach", false)
-        layer = prefs.getString("layer", "COMPOSE") ?: "COMPOSE"
-        art = runCatching { ArtMode.valueOf(prefs.getString("art", ArtMode.OFF.name)!!) }.getOrDefault(ArtMode.OFF)
+        // A fresh launch always opens on Compose with no look. Only a restore (Android rebuilt the screen
+        // behind your back) brings back the tab and look you had. Slider positions per look are kept either way.
+        val restoring = savedInstanceState != null
+        layer = if (restoring) prefs.getString("layer", "COMPOSE") ?: "COMPOSE" else "COMPOSE"
+        art = if (restoring) runCatching { ArtMode.valueOf(prefs.getString("art", ArtMode.OFF.name)!!) }.getOrDefault(ArtMode.OFF) else ArtMode.OFF
         if (!Art.supported) art = ArtMode.OFF
         artValues = Art.loadValues(prefs, art)
         lastUri = prefs.getString("lastUri", null)?.let { Uri.parse(it) }
