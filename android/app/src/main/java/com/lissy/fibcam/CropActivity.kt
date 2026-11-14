@@ -17,8 +17,12 @@ import android.util.TypedValue
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
+import android.content.res.ColorStateList
+import android.os.Build
 import android.widget.FrameLayout
+import android.widget.HorizontalScrollView
 import android.widget.LinearLayout
+import android.widget.SeekBar
 import android.widget.TextView
 import androidx.activity.ComponentActivity
 import androidx.activity.result.PickVisualMediaRequest
@@ -63,6 +67,15 @@ class CropActivity : ComponentActivity() {
     private lateinit var dial: DialView
     private lateinit var saveBtn: TextView
     private lateinit var noteView: TextView
+    private lateinit var tabRow: LinearLayout
+    private lateinit var cropLayer: LinearLayout
+    private lateinit var artLayer: LinearLayout
+    private lateinit var artRow: LinearLayout
+    private lateinit var paramRow: LinearLayout
+    private lateinit var artSlider: SeekBar
+    private var tab = "CROP"
+    private var recipe = Recipe(ArtMode.OFF, FloatArray(4), (Math.random() * 1000).toFloat())
+    private var artParam = 0
 
     private var ratio = "PHI"            // PHI, ORIGINAL, 4:5, 1:1, 3:2
     private var portrait = true
@@ -86,7 +99,9 @@ class CropActivity : ComponentActivity() {
                 if (b == null) { note("That photo couldn’t be opened."); return@runOnUiThread }
                 crop.bmp = b
                 portrait = b.height >= b.width
-                crop.post { if (!restore()) applyRatio(reset = true); note(null) }
+                Recipe.decode(prefs.getString("art:$src", null))?.let { if (Art.supported) recipe = it }
+                crop.recipe = recipe
+                crop.post { if (!restore()) applyRatio(reset = true); applyTab(); applyArtUi(); note(null) }
             }
         }
     }
@@ -139,10 +154,32 @@ class CropActivity : ComponentActivity() {
         read.addView(readR)
         root.addView(read, LinearLayout.LayoutParams(match, dpi(40f)))
 
-        ratioRow = row(); root.addView(ratioRow, LinearLayout.LayoutParams(match, dpi(48f)))
-        eyeRow = row(); root.addView(eyeRow, LinearLayout.LayoutParams(match, dpi(48f)))
+        tabRow = row().apply { setPadding(dpi(16f), dpi(6f), dpi(16f), dpi(2f)) }
+        root.addView(tabRow, LinearLayout.LayoutParams(match, wrap))
+        val layers = FrameLayout(this)
+        cropLayer = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        ratioRow = row(); cropLayer.addView(ratioRow, LinearLayout.LayoutParams(match, dpi(48f)))
+        eyeRow = row(); cropLayer.addView(eyeRow, LinearLayout.LayoutParams(match, dpi(48f)))
         dial = DialView(this).apply { onChange = { v -> crop.theta = Math.toRadians(v.toDouble()).toFloat(); crop.refit() } }
-        root.addView(dial, LinearLayout.LayoutParams(match, dpi(64f)))
+        cropLayer.addView(dial, LinearLayout.LayoutParams(match, dpi(64f)))
+        layers.addView(cropLayer, FrameLayout.LayoutParams(match, match))
+        artLayer = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(0, dpi(10f), 0, 0) }
+        val ascroll = HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false }
+        artRow = row(); ascroll.addView(artRow)
+        artLayer.addView(ascroll, LinearLayout.LayoutParams(match, dpi(48f)))
+        paramRow = row(); artLayer.addView(paramRow, LinearLayout.LayoutParams(match, dpi(32f)))
+        artSlider = SeekBar(this).apply {
+            max = 100
+            progressTintList = ColorStateList.valueOf(cGold); progressBackgroundTintList = ColorStateList.valueOf(cLine); thumbTintList = ColorStateList.valueOf(Color.WHITE)
+            setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(sb: SeekBar, v: Int, fromUser: Boolean) { if (fromUser) onArtSlider(v / 100f) }
+                override fun onStartTrackingTouch(sb: SeekBar) {}
+                override fun onStopTrackingTouch(sb: SeekBar) {}
+            })
+        }
+        artLayer.addView(artSlider, LinearLayout.LayoutParams(match, dpi(36f)).apply { leftMargin = dpi(4f); rightMargin = dpi(4f) })
+        layers.addView(artLayer, FrameLayout.LayoutParams(match, match))
+        root.addView(layers, LinearLayout.LayoutParams(match, dpi(160f)))
 
         val bar = row().apply { setPadding(dpi(16f), dpi(8f), dpi(16f), dpi(12f)) }
         bar.addView(label("Reset", 13f, cText, medium).apply {
@@ -157,6 +194,55 @@ class CropActivity : ComponentActivity() {
         root.addView(bar, LinearLayout.LayoutParams(match, wrap))
         return root
     }
+
+    private fun applyTab() {
+        tabRow.removeAllViews()
+        for ((key, text) in listOf("CROP" to "CROP", "ART" to ("ART" + if (recipe.mode != ArtMode.OFF) " · " + recipe.mode.label else ""))) {
+            val on = key == tab
+            tabRow.addView(label(text, 11f, if (on) cGold else cMuted, medium, 0.06f).apply {
+                gravity = Gravity.CENTER; maxLines = 1
+                background = if (on) rounded(alpha(cGold, 0.14f), alpha(cGold, 0.7f), 10f) else rounded(Color.TRANSPARENT, cLine, 10f)
+                setPadding(dpi(6f), dpi(8f), dpi(6f), dpi(8f))
+                setOnClickListener { tab = key; applyTab() }
+            }, LinearLayout.LayoutParams(0, wrap, 1f).apply { if (key == "ART") leftMargin = dpi(6f) })
+        }
+        cropLayer.visibility = if (tab == "CROP") View.VISIBLE else View.GONE
+        artLayer.visibility = if (tab == "ART") View.VISIBLE else View.GONE
+    }
+
+    private fun applyArtUi() {
+        artRow.removeAllViews(); paramRow.removeAllViews()
+        if (!Art.supported) { paramRow.addView(label("Art modes need Android 13 or newer.", 12f, cMuted)); artSlider.visibility = View.INVISIBLE; return }
+        for (m in ArtMode.values()) {
+            artRow.addView(chip(m.label, m == recipe.mode) {
+                recipe = Recipe(m, Art.loadValues(prefs, m), recipe.seed); artParam = 0
+                if (m == ArtMode.HOLGA && ratio != "1:1") { ratio = "1:1"; applyRatio(reset = false) }   // Holga is a square camera
+                crop.recipe = recipe; rememberArt(); applyArtUi(); applyTab()
+            }, LinearLayout.LayoutParams(wrap, wrap).apply { rightMargin = dpi(8f) })
+        }
+        if (recipe.mode == ArtMode.OFF) {
+            paramRow.addView(label("Pick a look. It's saved as a copy, like the crop.", 11.5f, cMuted))
+            artSlider.visibility = View.INVISIBLE; return
+        }
+        recipe.mode.sliders.forEachIndexed { i, (name, _) ->
+            val on = i == artParam
+            paramRow.addView(label(name.uppercase(Locale.US), 10f, if (on) cGold else cMuted, mono, 0.1f).apply {
+                setPadding(0, 0, dpi(14f), 0); setOnClickListener { artParam = i; applyArtUi() }
+            })
+        }
+        paramRow.addView(View(this), LinearLayout.LayoutParams(0, 1, 1f))
+        paramRow.addView(label("${(recipe.values[artParam] * 100).roundToInt()}", 11f, cGold, mono))
+        artSlider.visibility = View.VISIBLE
+        artSlider.progress = (recipe.values[artParam] * 100).roundToInt()
+    }
+
+    private fun onArtSlider(v: Float) {
+        recipe.values[artParam] = v
+        (paramRow.getChildAt(paramRow.childCount - 1) as? TextView)?.text = "${(v * 100).roundToInt()}"
+        crop.invalidate(); rememberArt()
+    }
+
+    private fun rememberArt() { prefs.edit().putString("art:$src", recipe.encode()).apply() }
 
     private fun note(text: String?) {
         if (text == null) { noteView.visibility = View.GONE; return }
@@ -258,19 +344,25 @@ class CropActivity : ComponentActivity() {
         if (busy) return
         busy = true; note("Saving a copy…"); remember()
         val cx = crop.cx; val cy = crop.cy; val cw = crop.cw; val ch = crop.ch; val deg = Math.toDegrees(crop.theta.toDouble()).toFloat()
-        val tag = if (ratio == "PHI") "phi" else ratio.replace(":", "x").lowercase(Locale.US)
+        val r = recipe.copy(values = recipe.values.copyOf())
+        val tag = (if (ratio == "PHI") "phi" else ratio.replace(":", "x").lowercase(Locale.US)) +
+            (if (r.mode != ArtMode.OFF && Art.supported) "_" + r.mode.fileTag else "")
         io.execute {
             val result = runCatching {
                 val full = try { decode(src, display = false) } catch (e: OutOfMemoryError) { decode(src, display = false, forceSample = 2) }
                 val f = full.width.toFloat() / view.width
                 val ow = (cw * f).roundToInt().coerceAtLeast(16); val oh = (ch * f).roundToInt().coerceAtLeast(16)
-                val out = Bitmap.createBitmap(ow, oh, Bitmap.Config.ARGB_8888)
+                var out = Bitmap.createBitmap(ow, oh, Bitmap.Config.ARGB_8888)
                 Canvas(out).apply {
                     drawColor(Color.BLACK)
                     translate(ow / 2f, oh / 2f); rotate(-deg); translate(-cx * f, -cy * f)   // crop and straighten in one step
                     drawBitmap(full, 0f, 0f, Paint(Paint.FILTER_BITMAP_FLAG))
                 }
                 full.recycle()
+                if (r.mode != ArtMode.OFF && Build.VERSION.SDK_INT >= 33) {
+                    val styled = Art.render(out, r)                   // the look, measured against the crop
+                    if (styled !== out) { out.recycle(); out = styled }
+                }
                 val (name, taken) = originalInfo()
                 val values = ContentValues().apply {
                     put(MediaStore.MediaColumns.DISPLAY_NAME, "${name}_${tag}_" + SimpleDateFormat("HHmmss", Locale.US).format(Date()) + ".jpg")
@@ -287,7 +379,7 @@ class CropActivity : ComponentActivity() {
             }
             runOnUiThread {
                 busy = false
-                result.onSuccess { note("Saved a $it copy · original untouched"); crop.postDelayed({ note(null) }, 2600) }
+                result.onSuccess { note("Saved a $it copy · original untouched"); rememberArt(); crop.postDelayed({ note(null) }, 2600) }
                     .onFailure { note("Couldn’t save: ${it.message}") }
             }
         }

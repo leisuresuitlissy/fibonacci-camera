@@ -3,7 +3,11 @@ package com.lissy.fibcam
 import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.Bitmap
+import android.graphics.BitmapShader
 import android.graphics.Canvas
+import android.graphics.RuntimeShader
+import android.graphics.Shader
+import android.os.Build
 import android.graphics.Matrix
 import android.graphics.Paint
 import android.graphics.Path
@@ -37,6 +41,12 @@ class CropView(ctx: Context) : View(ctx) {
     var guide = Guide.SPIRAL
     var quadrant = 0
     var triFlip = false
+    /** The art look, drawn live on the photo. Applied relative to the crop, as the saved copy will be. */
+    var recipe: Recipe? = null
+        set(v) { field = v; invalidate() }
+    private var artShader: RuntimeShader? = null
+    private var artShaderMode: ArtMode? = null
+    private val artPaint = Paint(Paint.FILTER_BITMAP_FLAG)
 
     private val d = resources.displayMetrics.density
     private val painter = GuidePainter(d)
@@ -101,8 +111,8 @@ class CropView(ctx: Context) : View(ctx) {
         val b = bmp ?: return
         if (k <= 0f || width == 0) return
         m.reset(); m.postScale(k, k); m.postTranslate(ox, oy)
-        c.drawBitmap(b, m, bmpPaint)
         val q = corners().map { toScreen(it) }
+        if (!drawArt(c, b, q)) c.drawBitmap(b, m, bmpPaint)
         // dim everything outside the crop
         path.reset(); path.fillType = Path.FillType.EVEN_ODD
         path.addRect(0f, 0f, width.toFloat(), height.toFloat(), Path.Direction.CW)
@@ -117,6 +127,19 @@ class CropView(ctx: Context) : View(ctx) {
         painter.draw(c, RectF(-w / 2, -h / 2, w / 2, h / 2), guide, quadrant, triFlip, trueSpiral = true)
         c.restore()
         for (p in q) { c.drawCircle(p.x, p.y, 6 * d, handle); c.drawCircle(p.x, p.y, 6 * d, handleEdge) }
+    }
+
+    private fun drawArt(c: Canvas, b: Bitmap, q: List<PointF>): Boolean {
+        val r = recipe ?: return false
+        if (r.mode == ArtMode.OFF || Build.VERSION.SDK_INT < 33) return false
+        if (artShaderMode != r.mode) { artShader = Art.newShader(r.mode); artShaderMode = r.mode }
+        val sh = artShader ?: return false
+        sh.setInputShader("content", BitmapShader(b, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP).apply { setLocalMatrix(m) })
+        val x0 = q.minOf { it.x }; val y0 = q.minOf { it.y }; val x1 = q.maxOf { it.x }; val y1 = q.maxOf { it.y }
+        Art.setUniforms(sh, r.values, x0, y0, x1 - x0, y1 - y0, r.seed)
+        artPaint.shader = sh
+        c.drawRect(ox, oy, ox + b.width * k, oy + b.height * k, artPaint)
+        return true
     }
 
     // ---------------------------------------------------------------- touch
