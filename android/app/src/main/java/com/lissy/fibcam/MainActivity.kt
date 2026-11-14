@@ -158,6 +158,8 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
     private var zoomMin = 1f
     private var zoomMax = 1f
     private var chipsFor = ""
+    /** Zoom ratios where the phone has a real lens (or a full-quality sensor crop), measured from the hardware. */
+    private var lensStops: List<Float>? = null
 
     private var level: Float? = null
     private var deviceRot = 0
@@ -734,6 +736,7 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
         gateMsg.visibility = View.GONE
         sourceTxt.text = if (front) "LIVE · FRONT" else "LIVE · REAR"
         chipsFor = ""
+        lensStops = camera?.let { measureLenses(it) }
         camera?.cameraInfo?.zoomState?.observe(this) { z -> onZoom(z) }
         refreshExposure()
         if (evIndex != 0) camera?.cameraControl?.setExposureCompensationIndex(evIndex)
@@ -748,17 +751,48 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
         syncZoomChips()
     }
 
+    /**
+     * Reads the physical cameras behind the logical one and works out each lens's field of view
+     * relative to the main camera. Ultra-wide < 1, telephoto > 1. Null if the phone doesn't say.
+     */
+    @androidx.annotation.OptIn(androidx.camera.camera2.interop.ExperimentalCamera2Interop::class)
+    private fun measureLenses(cam: Camera): List<Float>? = runCatching {
+        val mgr = getSystemService(Context.CAMERA_SERVICE) as android.hardware.camera2.CameraManager
+        val id = androidx.camera.camera2.interop.Camera2CameraInfo.from(cam.cameraInfo).cameraId
+        fun reach(ch: android.hardware.camera2.CameraCharacteristics): Float? {
+            val f = ch.get(android.hardware.camera2.CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)?.minOrNull() ?: return null
+            val sz = ch.get(android.hardware.camera2.CameraCharacteristics.SENSOR_INFO_PHYSICAL_SIZE) ?: return null
+            return f / kotlin.math.hypot(sz.width, sz.height)            // focal length per sensor diagonal = angle of view
+        }
+        val phys = mgr.getCameraCharacteristics(id).physicalCameraIds
+        if (phys.isEmpty()) return@runCatching null
+        val reaches = phys.mapNotNull { reach(mgr.getCameraCharacteristics(it)) }.sorted()
+        if (reaches.isEmpty()) return@runCatching null
+        // 1× is the main camera: the widest lens, unless the camera offers an ultra-wide below 1×
+        val ultra = zoomMinOf(cam) < 0.95f
+        val main = if (ultra && reaches.size > 1) reaches[1] else reaches[0]
+        reaches.map { it / main }
+    }.getOrNull()
+
+    private fun zoomMinOf(cam: Camera) = cam.cameraInfo.zoomState.value?.minZoomRatio ?: 1f
+
     private fun zoomStops(): List<Float> {
         val out = ArrayList<Float>()
-        if (zoomMin < 0.95f) out.add(zoomMin)                        // the ultra-wide, where the camera offers it
+        if (zoomMin < 0.95f) out.add(zoomMin)                         // the ultra-wide, where the camera offers it
         out.add(1f)
-        for (s in listOf(2f, 5f, 10f)) if (s <= zoomMax + 0.01f) out.add(s)
-        return out
+        if (zoomMax >= 2f) out.add(2f)                                // main-sensor crop: full quality on modern phones
+        val lenses = lensStops
+        if (lenses != null) {
+            // only telephotos the phone actually has; no digital-only stops
+            for (r in lenses) if (r > 2.5f && r <= zoomMax + 0.01f) out.add(if (abs(r - r.roundToInt()) < 0.35f) r.roundToInt().toFloat() else r)
+        } else if (zoomMax >= 4.9f) out.add(5f)                      // the phone won't say; 5× is the safest guess
+        return out.distinct()
     }
 
     private fun zoomLabel(z: Float) = when {
         z < 1f -> String.format(Locale.US, "%.1f×", z).removePrefix("0")
-        else -> "${z.roundToInt()}×"
+        abs(z - z.roundToInt()) < 0.05f -> "${z.roundToInt()}×"
+        else -> String.format(Locale.US, "%.1f×", z)
     }
 
     private fun buildZoomChips() {
@@ -767,23 +801,31 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
         if (stops.size < 2) return
         for (s in stops) {
             val b = label(zoomLabel(s), 12f, cText, mono).apply {
-                gravity = Gravity.CENTER; setPadding(0, 0, 0, 0); tag = s
+                gravity = Gravity.CENTER; setPadding(0, 0, 0, 0); tag = s; maxLines = 1
+                contentDescription = "Zoom ${zoomLabel(s)}"
                 setOnClickListener { camera?.cameraControl?.setZoomRatio(s) }
             }
-            zoomRow.addView(b, LinearLayout.LayoutParams(dpi(44f), dpi(34f)).apply { leftMargin = dpi(4f); rightMargin = dpi(4f) })
+            zoomRow.addView(b, LinearLayout.LayoutParams(dpi(42f), dpi(42f)).apply { leftMargin = dpi(5f); rightMargin = dpi(5f) })
         }
     }
 
+    /**
+     * The chip you're on, or the one just below where a pinch has landed, lights up and shows the
+     * live value ("1.4×"), so pinching tells you where you are. Tapping any chip snaps back to it.
+     */
     private fun syncZoomChips() {
-        var best: View? = null; var bd = Float.MAX_VALUE
+        var active: TextView? = null
         for (i in 0 until zoomRow.childCount) {
-            val v = zoomRow.getChildAt(i); val d = abs((v.tag as Float) - zoomRatio)
-            if (d < bd) { bd = d; best = v }
+            val v = zoomRow.getChildAt(i) as TextView
+            if ((v.tag as Float) <= zoomRatio + 0.02f) active = v
         }
+        if (active == null && zoomRow.childCount > 0) active = zoomRow.getChildAt(0) as TextView
         for (i in 0 until zoomRow.childCount) {
-            val v = zoomRow.getChildAt(i) as TextView; val on = v === best && bd < 0.15f
-            v.setTextColor(if (on) cGold else cText)
-            v.background = if (on) rounded(withAlpha(cGold, 0.16f), withAlpha(cGold, 0.5f)) else rounded(cElev)
+            val v = zoomRow.getChildAt(i) as TextView; val on = v === active
+            val stop = v.tag as Float
+            v.text = if (on && abs(stop - zoomRatio) > 0.04f) zoomLabel(zoomRatio) else zoomLabel(stop)
+            v.setTextColor(if (on) cGold else cMuted)
+            v.background = if (on) rounded(withAlpha(cGold, 0.16f), withAlpha(cGold, 0.5f)) else rounded(withAlpha(cElev, 0.9f))
         }
     }
 
