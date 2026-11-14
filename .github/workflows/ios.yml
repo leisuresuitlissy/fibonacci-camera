@@ -1,0 +1,55 @@
+name: iOS project
+
+on:
+  push:
+    paths: ['ios/**', '.github/workflows/ios.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Generate the Xcode project
+        working-directory: ios
+        run: |
+          brew install xcodegen
+          sed -i '' "s/CURRENT_PROJECT_VERSION: \"1\"/CURRENT_PROJECT_VERSION: \"${{ github.run_number }}\"/" project.yml
+          xcodegen generate
+
+      # Compile for real iPhones without signing: proves the Swift and Metal build before it reaches the Mac.
+      - name: Build (unsigned)
+        working-directory: ios
+        run: |
+          set -o pipefail
+          xcodebuild -project FibonacciCamera.xcodeproj -scheme FibonacciCamera -configuration Debug \
+            -sdk iphoneos -destination 'generic/platform=iOS' CODE_SIGNING_ALLOWED=NO build 2>&1 \
+            | grep -E "error:|warning: .*deprecated|BUILD (SUCCEEDED|FAILED)" || true
+          xcodebuild -project FibonacciCamera.xcodeproj -scheme FibonacciCamera -configuration Debug \
+            -sdk iphoneos -destination 'generic/platform=iOS' CODE_SIGNING_ALLOWED=NO build -quiet
+
+      - name: Package the project
+        run: |
+          rm -rf ios/build
+          cp -R ios "Fibonacci Camera iOS"
+          echo "Build ${{ github.run_number }}" > "Fibonacci Camera iOS/BUILD.txt"
+          zip -qr fibonacci-camera-ios.zip "Fibonacci Camera iOS"
+
+      - name: Publish to the ios-latest release
+        uses: ncipollo/release-action@v1
+        with:
+          tag: ios-latest
+          commit: ${{ github.sha }}
+          name: Fibonacci Camera — iOS project (latest)
+          body: |
+            Build ${{ github.run_number }} · built from ${{ github.sha }}.
+            Open FibonacciCamera.xcodeproj in Xcode, choose your Apple ID as the Team, plug in the iPhone, press Run.
+          artifacts: fibonacci-camera-ios.zip
+          allowUpdates: true
+          replacesArtifacts: true
+          removeArtifacts: true
+          makeLatest: false
