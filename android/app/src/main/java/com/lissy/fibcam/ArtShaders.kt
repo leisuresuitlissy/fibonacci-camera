@@ -225,5 +225,5 @@ half4 main(float2 p) {
 """,
     )
 
-    fun source(mode: ArtMode) = COMMON + (BODIES[mode] ?: "") + MAIN
+    fun source(mode: ArtMode) = COMMON + (BODIES[mode] ?: "")
 }
