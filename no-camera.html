@@ -163,12 +163,13 @@ input[type=range]{width:100%;accent-color:var(--gold);margin:0}
     <div class="lab"><span>PROPORTION</span><b id="growthVal">φ 1.618</b></div>
     <input type="range" id="growth" min="105" max="260" step="1" value="162">
     <div class="rowbtns" style="padding-block:10px 0">
-      <button class="ghost on" id="fitHeight" type="button" style="flex:1;padding:11px 10px">Full height · φ</button>
-      <button class="ghost" id="fitFrame" type="button" style="flex:1;padding:11px 10px">All four edges</button>
+      <button class="ghost on" id="stretchBtn" type="button" style="flex:1;padding:11px 10px">Stretch: on</button>
+      <button class="ghost on" id="bindBtn" type="button" style="flex:1;padding:11px 10px">Edges: held</button>
     </div>
     <div class="rowbtns" style="padding-block:8px 0">
-      <button class="ghost" id="goldenBtn" type="button" style="flex:1;padding:11px 10px">Back to φ</button>
-      <button class="ghost on" id="bindBtn" type="button" style="flex:1;padding:11px 10px">Edges: held</button>
+      <button class="ghost" id="fitHeight" type="button" style="flex:1;padding:11px 8px">Full height · φ</button>
+      <button class="ghost" id="fitFrame" type="button" style="flex:1;padding:11px 8px">All four edges</button>
+      <button class="ghost" id="goldenBtn" type="button" style="flex:1;padding:11px 8px">Back to φ</button>
     </div>
 
     <div class="lab"><span>SIZE</span><b id="scaleVal">100%</b></div>
@@ -205,9 +206,9 @@ var $ = function(id){ return document.getElementById(id); };
 // golden spiral. Other values are still true logarithmic spirals, just not that
 // one — which is how the proportion changes without anything being stretched.
 var DEF = { overlay:'spiral', turns:2.25, orient:0, scale:1, rot:0, cx:0.336, cy:0.303,
-            locked:false, triFlip:0, view:'guide', growth:PHI, fit:'height', bind:true };
+            locked:false, triFlip:0, view:'guide', growth:PHI, fit:'height', bind:true, stretch:true };
 // Bump this when a default changes, or saved settings keep overriding the new one.
-var STORE = 'fibcam.v3';
+var STORE = 'fibcam.v4';
 var SMIN = 0.25, SMAX = 2.5;      // a narrow frame needs over 1.0 to reach full height
 var S = {};
 for (var k in DEF) S[k] = DEF[k];
@@ -249,7 +250,7 @@ function geoFor(turns, orient, growth){
   return out;
 }
 function geo(){ return geoFor(S.turns, S.orient, S.growth); }
-function atPhi(){ return Math.abs(S.growth - PHI) < 5e-4; }
+function atPhi(){ return !S.stretch && Math.abs(S.growth - PHI) < 5e-4; }
 // Cheap box-aspect probe, used to solve for the growth that matches a frame.
 // Only the transpose flag changes the aspect; the mirror flips do not.
 function boxAspect(turns, orient, k){
@@ -280,6 +281,7 @@ function growthForFrame(){ var fr = frame(); return growthForAspect(fr.w/fr.h); 
 // to the frame's proportion so it touches all four edges, and is no longer φ.
 function applyFit(){
   var fr = frame(), g, base;
+  if (S.stretch){ S.scale = 1; centreGuide(); return; }   // scale 1 already is the frame
   if (S.fit === 'frame'){
     S.growth = growthForAspect(fr.w/fr.h);
     S.scale = 1;
@@ -308,12 +310,22 @@ function frame(){
 }
 function baseFit(fr){ var g = geo(); return Math.min(fr.w / g.bw, fr.h / g.bh); }
 
+// Non-uniform on purpose: stretch makes the spiral's box exactly the frame, which
+// distorts the curve. Lissy asked for that explicitly. Every other mode returns
+// the same number twice, so nothing else in the app can scale the axes apart.
+function fitScales(fr, mult){
+  var g = geo(), m = (mult === undefined) ? S.scale : mult;
+  if (S.stretch) return { sx: (fr.w / g.bw) * m, sy: (fr.h / g.bh) * m };
+  var u = baseFit(fr) * m;
+  return { sx: u, sy: u };
+}
+
 function xform(fr){
-  var g = geo(), s = baseFit(fr) * S.scale;
-  var c = Math.cos(S.rot), si = Math.sin(S.rot);
-  var ex = fr.x + S.cx * fr.w, ey = fr.y + S.cy * fr.h;
-  return { s:s, c:c, si:si, ex:ex, ey:ey,
-           at: function(p){ return [ ex + p[0]*s*c - p[1]*s*si, ey + p[0]*s*si + p[1]*s*c ]; } };
+  var f = fitScales(fr), c = Math.cos(S.rot), si = Math.sin(S.rot);
+  var ex = fr.x + S.cx*fr.w, ey = fr.y + S.cy*fr.h;
+  return { sx:f.sx, sy:f.sy, s:f.sy, c:c, si:si, ex:ex, ey:ey,
+    at:function(p){ var x = p[0]*f.sx, y = p[1]*f.sy;
+      return [ ex + x*c - y*si, ey + x*si + y*c ]; } };
 }
 function cornersOf(T){
   var g = geo();
@@ -364,11 +376,12 @@ function centreGuide(){
 function dist(a,b){ var dx=a[0]-b[0], dy=a[1]-b[1]; return Math.sqrt(dx*dx+dy*dy); }
 
 /* ------- keeping the guide inside the frame, the way a crop stays inside ---- */
-function boxCornersAt(s, fr){
-  var g = geo(), c = Math.cos(S.rot), si = Math.sin(S.rot);
-  var k = baseFit(fr)*s, ex = fr.x + S.cx*fr.w, ey = fr.y + S.cy*fr.h, out = [], i, p;
+function boxCornersAt(mult, fr){
+  var g = geo(), c = Math.cos(S.rot), si = Math.sin(S.rot), f = fitScales(fr, mult);
+  var ex = fr.x + S.cx*fr.w, ey = fr.y + S.cy*fr.h, out = [], i, p, x, y;
   var box = [[g.ox,g.oy],[g.ox+g.bw,g.oy],[g.ox+g.bw,g.oy+g.bh],[g.ox,g.oy+g.bh]];
-  for (i=0;i<4;i++){ p = box[i]; out.push([ex + p[0]*k*c - p[1]*k*si, ey + p[0]*k*si + p[1]*k*c]); }
+  for (i=0;i<4;i++){ p = box[i]; x = p[0]*f.sx; y = p[1]*f.sy;
+    out.push([ex + x*c - y*si, ey + x*si + y*c]); }
   return out;
 }
 function insideFrame(pts, fr){
@@ -406,6 +419,9 @@ function cappedScale(want, fr){
 function applySize(want, fr){
   want = Math.max(SMIN, Math.min(SMAX, want));
   if (!S.bind){ S.scale = want; return; }
+  // Stretched, the box already matches the frame, so there is no free axis to
+  // pin and reshape — it can only be held at the edge or made smaller.
+  if (S.stretch){ S.scale = cappedScale(want, fr); clampPos(fr); return; }
   if (Math.abs(S.rot) > 1e-6){ S.scale = cappedScale(want, fr); clampPos(fr); return; }
   var g = geo(), base = baseFit(fr);
   var wantW = g.bw*base*want, wantH = g.bh*base*want;
@@ -605,7 +621,7 @@ function updateReadout(fr){
   var k = imgPerStagePx(fr);
   var cw = Math.round(dist(q[0], q[1]) * k), ch = Math.round(dist(q[1], q[2]) * k);
   var phi = atPhi();
-  $('readLeft').textContent = (phi ? 'φ CROP · ' : 'GUIDE CROP · ') + cw + ' × ' + ch + ' px';
+  $('readLeft').textContent = (S.stretch ? 'STRETCHED · ' : (phi ? 'φ CROP · ' : 'GUIDE CROP · ')) + cw + ' × ' + ch + ' px';
   $('readRatio').textContent = phi ? '1 : 1.618'
     : (cw >= ch ? (cw/ch).toFixed(3) + ' : 1' : '1 : ' + (ch/cw).toFixed(3));
   $('save').textContent = phi ? 'Save φ crop' : 'Save crop';
@@ -773,8 +789,10 @@ function syncVals(){
   $('growthVal').textContent = atPhi() ? 'φ 1.618' : S.growth.toFixed(3);
   $('bindBtn').textContent = S.bind ? 'Edges: held' : 'Edges: free';
   $('bindBtn').classList.toggle('on', S.bind);
-  $('fitHeight').classList.toggle('on', S.fit === 'height');
-  $('fitFrame').classList.toggle('on', S.fit === 'frame');
+  $('fitHeight').classList.toggle('on', !S.stretch && S.fit === 'height');
+  $('fitFrame').classList.toggle('on', !S.stretch && S.fit === 'frame');
+  $('stretchBtn').textContent = S.stretch ? 'Stretch: on' : 'Stretch: off';
+  $('stretchBtn').classList.toggle('on', S.stretch);
 }
 function syncSheet(){ syncVals(); paintOrientTiles(); }
 $('turns').addEventListener('input', function(){
@@ -794,15 +812,22 @@ $('growth').addEventListener('input', function(){
   syncVals(); draw(); remember();
 });
 $('goldenBtn').addEventListener('click', function(){
-  S.growth = PHI; S.fit = 'manual'; reBind(); syncSheet(); draw(); remember();
+  S.growth = PHI; S.stretch = false; S.fit = 'manual'; reBind(); syncSheet(); draw(); remember();
   toast('Back to the golden spiral');
 });
+$('stretchBtn').addEventListener('click', function(){
+  S.stretch = !S.stretch;
+  if (S.stretch){ S.scale = 1; centreGuide(); } else { S.fit = 'height'; applyFit(); }
+  syncSheet(); draw(); remember();
+  toast(S.stretch ? 'Filling the frame — the curve is distorted'
+                  : 'A true spiral again, top to bottom');
+});
 $('fitHeight').addEventListener('click', function(){
-  S.fit = 'height'; applyFit(); syncSheet(); draw(); remember();
+  S.stretch = false; S.fit = 'height'; applyFit(); syncSheet(); draw(); remember();
   toast('Golden spiral, top to bottom');
 });
 $('fitFrame').addEventListener('click', function(){
-  S.fit = 'frame'; applyFit(); syncSheet(); draw(); remember();
+  S.stretch = false; S.fit = 'frame'; applyFit(); syncSheet(); draw(); remember();
   toast('All four edges · growth ' + S.growth.toFixed(3) + ', no longer φ');
 });
 $('bindBtn').addEventListener('click', function(){
@@ -810,7 +835,7 @@ $('bindBtn').addEventListener('click', function(){
   syncVals(); draw(); remember();
 });
 $('reset').addEventListener('click', function(){
-  S.rot = 0; S.orient = 0; S.turns = 2.25; S.fit = 'height'; S.bind = true;
+  S.rot = 0; S.orient = 0; S.turns = 2.25; S.fit = 'height'; S.bind = true; S.stretch = true;
   view.s = 1; view.tx = 0; view.ty = 0;
   applyFit(); syncSheet(); syncChips(); draw(); remember();
 });

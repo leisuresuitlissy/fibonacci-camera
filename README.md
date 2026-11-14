@@ -87,7 +87,15 @@ pixels that are not there.
 
 ### Proportion
 
-**The default is the real golden spiral, spanning the frame top to bottom.**
+**The default is Stretch: the spiral is pulled to fill the frame exactly.** The
+curve is distorted by this — a stretched logarithmic spiral is not a logarithmic
+spiral, and its growth rate is no longer φ in every direction. The app does not
+pretend otherwise: the readout says `STRETCHED` and reports the frame's real
+ratio instead of 1 : 1.618.
+
+Turn **Stretch: off** and you get the honest geometry instead:
+
+**The real golden spiral, spanning the frame top to bottom.**
 On a frame narrower than the spiral's own 0.639 box — most phone cameras — the
 curve reaches past the left and right edges, which is what a golden spiral does
 in a tall frame. It is not stretched or reshaped to fit.
