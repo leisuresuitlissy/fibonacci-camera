@@ -32,6 +32,18 @@ jobs:
           xcodebuild -project FibonacciCamera.xcodeproj -scheme FibonacciCamera -configuration Debug \
             -sdk iphoneos -destination 'generic/platform=iOS' CODE_SIGNING_ALLOWED=NO build -quiet
 
+      # An unsigned app for Sideloadly (or similar), which signs it with a free Apple ID — no Xcode needed on the Mac.
+      - name: Build the IPA (Release, unsigned)
+        working-directory: ios
+        run: |
+          xcodebuild -project FibonacciCamera.xcodeproj -scheme FibonacciCamera -configuration Release \
+            -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" build -quiet
+          mkdir -p Payload
+          cp -R build/Build/Products/Release-iphoneos/FibonacciCamera.app Payload/
+          zip -qry ../fibonacci-camera.ipa Payload
+          rm -rf Payload
+
       - name: Package the project
         run: |
           rm -rf ios/build
@@ -47,8 +59,9 @@ jobs:
           name: Fibonacci Camera — iOS project (latest)
           body: |
             Build ${{ github.run_number }} · built from ${{ github.sha }}.
-            Open FibonacciCamera.xcodeproj in Xcode, choose your Apple ID as the Team, plug in the iPhone, press Run.
-          artifacts: fibonacci-camera-ios.zip
+            No Xcode: drop fibonacci-camera.ipa into Sideloadly with your Apple ID and the iPhone plugged in.
+            With Xcode: open FibonacciCamera.xcodeproj, choose your Apple ID as the Team, plug in the iPhone, press Run.
+          artifacts: fibonacci-camera-ios.zip,fibonacci-camera.ipa
           allowUpdates: true
           replacesArtifacts: true
           removeArtifacts: true
