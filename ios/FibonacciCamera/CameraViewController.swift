@@ -123,7 +123,28 @@ final class CameraViewController: UIViewController, PHPickerViewControllerDelega
     private var strength: Float = 0.6
     private var saving = 0
 
-    private var recipe: Recipe? { art == .OFF ? nil : Recipe(mode: art, values: artValues, seed: seed) }
+    private var recipe: Recipe? {
+        guard art != .OFF else { return nil }
+        let f = liveFocus()
+        return Recipe(mode: art, values: artValues, seed: seed, fx: Float(f.x), fy: Float(f.y))
+    }
+    private var lastFocus = CGPoint(x: 0.5, y: 0.5)
+
+    /** What stays sharp under Depth: the subject you tapped, followed as you move; before that, the spiral's eye or the middle. */
+    private func liveFocus() -> CGPoint {
+        let fr = live.frameRect
+        guard !fr.isEmpty else { return CGPoint(x: 0.5, y: 0.5) }
+        if let s = subject { return CGPoint(x: (s.x - fr.minX) / fr.width, y: (s.y - fr.minY) / fr.height) }
+        if guide == .spiral, let e = Geo.goals(.spiral, overlay.guideFrame, quadrant: quadrant, triFlip: triFlip).first {
+            return CGPoint(x: (e.x - fr.minX) / fr.width, y: (e.y - fr.minY) / fr.height)
+        }
+        return CGPoint(x: 0.5, y: 0.5)
+    }
+    private func refreshFocus() {
+        guard art != .OFF else { return }
+        let f = liveFocus()
+        if hypot(f.x - lastFocus.x, f.y - lastFocus.y) > 0.004 { lastFocus = f; live.recipe = recipe }
+    }
     private static var firstURL: URL { FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0].appendingPathComponent("first-exposure.jpg") }
 
     override var preferredStatusBarStyle: UIStatusBarStyle { .lightContent }
@@ -357,6 +378,7 @@ final class CameraViewController: UIViewController, PHPickerViewControllerDelega
             secondRow.addArrangedSubview(Style.label(guide == .off ? "No guide" : "Double-tap the picture to switch spiral orientation", Style.medium(11.5), Style.muted))
         }
         overlay.guide = guide; overlay.quadrant = quadrant; overlay.triFlip = triFlip
+        lastFocus = CGPoint(x: -1, y: -1); refreshFocus()
     }
 
     private func doubleTap() {
@@ -381,7 +403,8 @@ final class CameraViewController: UIViewController, PHPickerViewControllerDelega
             paramRow.addArrangedSubview(Style.label("Pick a look. The original is always kept; the look is saved as a copy.", Style.medium(11.5), Style.muted))
             artSlider.isHidden = true; return
         }
-        for (i, s) in art.sliders.enumerated() {
+        for i in art.shown {
+            let s = art.sliders[i]
             let b = UIButton(type: .system)
             b.setAttributedTitle(NSAttributedString(string: s.0.uppercased(), attributes: [.font: Style.mono(10), .kern: 1, .foregroundColor: i == artParam ? Style.gold : Style.muted]), for: .normal)
             b.addAction(UIAction { [weak self] _ in self?.artParam = i; self?.applyArtUi() }, for: .touchUpInside)
@@ -507,6 +530,7 @@ final class CameraViewController: UIViewController, PHPickerViewControllerDelega
         let lf = live.frameRect
         let p = CGPoint(x: lf.minX + st.nx * lf.width, y: lf.minY + st.ny * lf.height)
         subject = p
+        refreshFocus()
         guard let best = Geo.nearestGoal(guide, fr, quadrant: quadrant, triFlip: triFlip, p: p) else { aligned = false; return }
         let d = hypot(best.x - p.x, best.y - p.y)
         let r = max(14, 0.045 * min(fr.width, fr.height))

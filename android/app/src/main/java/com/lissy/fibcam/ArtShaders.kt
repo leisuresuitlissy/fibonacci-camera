@@ -23,6 +23,8 @@ uniform float p1;
 uniform float p2;
 uniform float p3;
 uniform float seed;
+uniform float2 foc;
+uniform float dep;
 
 float luma(float3 c) { return dot(c, float3(0.299, 0.587, 0.114)); }
 float hash(float2 p) { return fract(sin(dot(p, float2(12.9898, 78.233)) + seed * 17.0) * 43758.5453); }
@@ -48,6 +50,18 @@ float3 blurAt(float2 p, float r) {
         acc += px(p + float2(cos(a), sin(a)) * r * k).rgb;
     }
     return acc / 25.0;
+}
+// Depth: sharp around the focus point (your subject), gently softer with distance, like a fast lens.
+// dep 0 = off; the default is subtle. Returns a blur radius in px.
+float depthR(float2 p) {
+    if (dep <= 0.001) return 0.0;
+    float2 d = (uvOf(p) - foc) * float2(res.x / res.y, 1.0);
+    float f = smoothstep(0.1, 0.8, length(d));
+    return f * f * dep * 0.02 * min(res.x, res.y);
+}
+float3 focusAt(float2 p, float3 c) {
+    float r = depthR(p);
+    return r < 0.6 ? c : blurAt(p, r);
 }
 // Only what's brighter than thr spreads out: a highlight halo, not a wash.
 float3 bloomAt(float2 p, float r, float thr) {
@@ -94,6 +108,7 @@ half4 main(float2 p) {
 half4 main(float2 p) {
     float4 o = px(p);
     if (!inFrame(p)) return half4(o);
+    o.rgb = focusAt(p, o.rgb);
     float s = min(res.x, res.y);
     float2 sq = (p - org - 0.5 * (res - float2(s))) / s;
     float inside = step(0.0, sq.x) * step(sq.x, 1.0) * step(0.0, sq.y) * step(sq.y, 1.0);
@@ -101,7 +116,7 @@ half4 main(float2 p) {
     float edge = length(cd) * 1.414;
     float k = amt;
     float rad = s * (0.0008 + (0.006 + p2 * 0.03) * pow(smoothstep(0.2, 1.1, edge), 1.3)) * (0.3 + 0.7 * k);
-    float3 c = blurAt(p, rad);
+    float3 c = blurAt(p, max(rad, depthR(p)));
     float ca = s * 0.006 * edge * edge * (0.4 + k);
     c.r = mix(c.r, px(p + cd * ca).r, 0.55);
     c.b = mix(c.b, px(p - cd * ca).b, 0.55);
@@ -122,9 +137,10 @@ half4 main(float2 p) {
 half4 main(float2 p) {
     float4 o = px(p);
     if (!inFrame(p)) return half4(o);
+    o.rgb = focusAt(p, o.rgb);
     float s = min(res.x, res.y);
     float e = edgeOf(p);
-    float3 c = blurAt(p, s * (0.0015 + p1 * 0.004 + e * e * (0.006 + p1 * 0.022)));
+    float3 c = blurAt(p, max(s * (0.0015 + p1 * 0.004 + e * e * (0.006 + p1 * 0.022)), depthR(p)));
     c = mix(c, blurAt(p, s * 0.022), 0.2);
     c += bloomAt(p, s * 0.03, 0.72) * 0.25;
     c = satur(c, 1.18) * float3(1.06, 1.0, 0.9) + float3(0.012, 0.004, 0.0);
@@ -136,6 +152,7 @@ half4 main(float2 p) {
 half4 main(float2 p) {
     float4 o = px(p);
     if (!inFrame(p)) return half4(o);
+    o.rgb = focusAt(p, o.rgb);
     float l = luma(o.rgb);
     l = clamp((l - 0.5) * (1.0 + p2 * 1.1) + 0.5, 0.0, 1.0);
     l = smoothstep(0.04, 0.99, l);
@@ -148,6 +165,7 @@ half4 main(float2 p) {
 half4 main(float2 p) {
     float4 o = px(p);
     if (!inFrame(p)) return half4(o);
+    o.rgb = focusAt(p, o.rgb);
     float3 c = o.rgb;
     float3 x = float3(smoothstep(0.05, 0.85, c.r), clamp(c.g * 1.08 + 0.04, 0.0, 1.0), c.b * 0.6 + 0.15);
     x.g = mix(x.g, smoothstep(0.0, 1.0, x.g), 0.6);
@@ -164,9 +182,10 @@ half4 main(float2 p) {
 half4 main(float2 p) {
     float4 o = px(p);
     if (!inFrame(p)) return half4(o);
+    o.rgb = focusAt(p, o.rgb);
     float s = min(res.x, res.y);
     float3 halo = bloomAt(p, s * (0.012 + p1 * 0.05), 0.55) * (0.9 + p1 * 1.8);
-    float3 soft = blurAt(p, s * (0.0015 + p2 * 0.005));
+    float3 soft = mix(o.rgb, blurAt(p, s * (0.0015 + p2 * 0.005)), 0.85);
     float3 c = mix(o.rgb, soft, 0.15 + 0.5 * p2);
     c = c + clamp(halo, 0.0, 1.0) * (1.0 - c);
     c = mix(c, c * 0.93 + 0.035, 0.7);
@@ -178,6 +197,7 @@ half4 main(float2 p) {
 half4 main(float2 p) {
     float4 o = px(p);
     if (!inFrame(p)) return half4(o);
+    o.rgb = focusAt(p, o.rgb);
     float3 c = o.rgb;
     float l = luma(c);
     float veg = smoothstep(-0.02, 0.16, c.g - 0.5 * (c.r + c.b));
@@ -192,6 +212,7 @@ half4 main(float2 p) {
 half4 main(float2 p) {
     float4 o = px(p);
     if (!inFrame(p)) return half4(o);
+    o.rgb = focusAt(p, o.rgb);
     float l = luma(o.rgb);
     l = clamp((l - 0.5) * (0.95 + p1 * 0.8 + amt * 0.35) + 0.5, 0.0, 1.0);
     l = mix(l, smoothstep(0.0, 1.0, l), 0.45);
@@ -211,6 +232,7 @@ half4 main(float2 p) {
 half4 main(float2 p) {
     float4 o = px(p);
     if (!inFrame(p)) return half4(o);
+    o.rgb = focusAt(p, o.rgb);
     float3 c = o.rgb;
     float3 lum = float3(luma(c));
     float3 ov = mix(2.0 * c * lum, 1.0 - 2.0 * (1.0 - c) * (1.0 - lum), step(float3(0.5), lum));

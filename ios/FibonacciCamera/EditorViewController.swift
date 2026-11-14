@@ -31,6 +31,7 @@ final class EditorViewController: UIViewController, PHPickerViewControllerDelega
     private var editTab = "CROP"
     private var recipe = Recipe(mode: .OFF, values: ArtMode.OFF.defaults, seed: Float.random(in: 0..<1000))
     private var artParam = 0
+    private var focusHinted = false
     private var ratio = "PHI"
     private var portrait = true
     private var scale: CGFloat = 1             // full px per display px
@@ -113,6 +114,11 @@ final class EditorViewController: UIViewController, PHPickerViewControllerDelega
         pin(canvas, to: stage)
         canvas.onChange = { [weak self] in self?.syncReadout(); self?.refreshIfArt() }
         canvas.onSecondChange = { [weak self] in self?.refresh() }
+        canvas.onFocusTap = { [weak self] p in
+            guard let self else { return }
+            self.recipe.fx = Float(p.x); self.recipe.fy = Float(p.y)
+            self.canvas.focus = p; self.refresh()
+        }
         note.backgroundColor = Style.base.withAlphaComponent(0.85); note.textAlignment = .center; note.layer.cornerRadius = 14
         note.layer.borderWidth = 1; note.layer.borderColor = Style.gold.withAlphaComponent(0.8).cgColor; note.clipsToBounds = true; note.isHidden = true
         note.translatesAutoresizingMaskIntoConstraints = false; stage.addSubview(note)
@@ -184,6 +190,8 @@ final class EditorViewController: UIViewController, PHPickerViewControllerDelega
         }
         cropLayer.isHidden = editTab != "CROP"; artLayer.isHidden = editTab != "ART"; blendLayer.isHidden = editTab != "BLEND"
         canvas.editingSecond = editTab == "BLEND"      // in Blend your fingers move the second photo; elsewhere, the crop
+        canvas.focusMode = editTab == "ART"            // in Art, a tap picks what stays sharp
+        canvas.focus = recipe.isOn && recipe.mode.hasDepth && recipe.values[4] > 0 ? CGPoint(x: CGFloat(recipe.fx), y: CGFloat(recipe.fy)) : nil
     }
 
     // ============================================================ ratio + guide
@@ -243,7 +251,7 @@ final class EditorViewController: UIViewController, PHPickerViewControllerDelega
         for m in ArtMode.allCases {
             artRow.addArrangedSubview(Style.chip(m.label, on: m == recipe.mode) { [weak self] in
                 guard let self else { return }
-                self.recipe = Recipe(mode: m, values: m.loadValues(), seed: self.recipe.seed); self.artParam = 0
+                self.recipe = Recipe(mode: m, values: m.loadValues(), seed: self.recipe.seed, fx: self.recipe.fx, fy: self.recipe.fy); self.artParam = 0
                 if m == .HOLGA && self.ratio != "1:1" { self.ratio = "1:1"; self.applyRatio(reset: false) }   // Holga is a square camera
                 self.applyArtUi(); self.applyTab(); self.refresh()
             })
@@ -253,7 +261,12 @@ final class EditorViewController: UIViewController, PHPickerViewControllerDelega
             paramRow.addArrangedSubview(Style.label("Pick a look. It's saved as a copy, like the crop.", Style.medium(11.5), Style.muted))
             artSlider.isHidden = true; return
         }
-        for (i, s) in recipe.mode.sliders.enumerated() {
+        if !focusHinted && recipe.mode.hasDepth {
+            focusHinted = true; showNote("Tap the photo to choose what stays sharp")
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.6) { self.showNote(nil) }
+        }
+        for i in recipe.mode.shown {
+            let s = recipe.mode.sliders[i]
             let b = UIButton(type: .system)
             b.setAttributedTitle(NSAttributedString(string: s.0.uppercased(), attributes: [.font: Style.mono(10), .kern: 1, .foregroundColor: i == artParam ? Style.gold : Style.muted]), for: .normal)
             b.addAction(UIAction { [weak self] _ in self?.artParam = i; self?.applyArtUi() }, for: .touchUpInside)
@@ -360,7 +373,14 @@ final class EditorViewController: UIViewController, PHPickerViewControllerDelega
         let c = canvas, f = scale
         let cx = c.cx, cy = c.cy, cw = c.cw, ch = c.ch, th = c.theta
         let s2 = (c.s2x, c.s2y, c.s2w, c.s2r)
-        let rc = recipe.isOn ? recipe : nil, img = image, sec = second, b = blend, st = strength
+        var rc = recipe.isOn ? recipe : nil
+        if rc != nil {
+            // the focus point travels with the crop: from across the photo to across the cropped, straightened copy
+            let dx = CGFloat(recipe.fx) * c.bw - cx, dy = CGFloat(recipe.fy) * c.bh - cy
+            rc!.fx = Float(((dx * cos(th) + dy * sin(th)) + cw / 2) / cw)
+            rc!.fy = Float(((-dx * sin(th) + dy * cos(th)) + ch / 2) / ch)
+        }
+        let img = image, sec = second, b = blend, st = strength
         Library.ensure { ok in
             guard ok else { self.busy = false; self.showNote("Photos access is off. Turn it on in Settings › Fibonacci."); return }
             self.renderQ.async {

@@ -11,6 +11,8 @@ struct ArtUniforms {
     var amt: Float = 0, p1: Float = 0, p2: Float = 0, p3: Float = 0, seed: Float = 0
     var vpo = SIMD2<Float>(0, 0)
     var vps = SIMD2<Float>(1, 1)
+    var foc = SIMD2<Float>(0.5, 0.5)
+    var dep: Float = 0
 }
 
 /** Layout must match `struct B` in Shaders.metal. */
@@ -107,7 +109,12 @@ final class Renderer {
         if let r = recipe, r.isOn, let p = pipe("art_\(r.mode.rawValue)") {
             var u = ArtUniforms()
             u.res = SIMD2(Float(src.width), Float(src.height))
-            if let m = measure { u.org = SIMD2(Float(m.minX), Float(m.minY)); u.res = SIMD2(Float(m.width), Float(m.height)) }   // the look is measured against this box
+            u.dep = r.values.count > 4 ? r.values[4] : 0
+            u.foc = SIMD2(r.fx, r.fy)
+            if let m = measure {          // the look is measured against this box; the focus point moves into it
+                u.org = SIMD2(Float(m.minX), Float(m.minY)); u.res = SIMD2(Float(m.width), Float(m.height))
+                u.foc = SIMD2((r.fx * Float(src.width) - Float(m.minX)) / Float(m.width), (r.fy * Float(src.height) - Float(m.minY)) / Float(m.height))
+            }
             u.amt = r.values[0]; u.p1 = r.values[1]; u.p2 = r.values[2]; u.p3 = r.values[3]; u.seed = r.seed
             u.vpo = SIMD2(Float(viewport.minX), Float(viewport.minY))
             u.vps = SIMD2(Float(src.width) / Float(viewport.width), Float(src.height) / Float(viewport.height))

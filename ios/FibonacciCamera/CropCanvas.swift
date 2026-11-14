@@ -24,6 +24,11 @@ final class CropCanvas: UIView {
 
     var s2x: CGFloat = 0, s2y: CGFloat = 0, s2w: CGFloat = 1, s2r: CGFloat = 0
     var editingSecond = false { didSet { setNeedsDisplay() } }
+    /** Art tab: a quick tap picks what stays sharp (reported 0...1 across the photo). */
+    var focusMode = false { didSet { setNeedsDisplay() } }
+    var focus: CGPoint? { didSet { setNeedsDisplay() } }
+    var onFocusTap: ((CGPoint) -> Void)?
+    private var downAt = CGPoint.zero, downT: TimeInterval = 0, multi = false
 
     private var k: CGFloat = 1, ox: CGFloat = 0, oy: CGFloat = 0
 
@@ -96,6 +101,12 @@ final class CropCanvas: UIView {
         c.clip(to: fr)
         GuidePainter.draw(c, fr, guide, quadrant: quadrant, triFlip: triFlip, trueSpiral: true)
         c.restoreGState()
+        if focusMode, let f = focus {
+            let p = toScreen(CGPoint(x: f.x * bw, y: f.y * bh))
+            c.setStrokeColor(Style.gold.cgColor); c.setLineWidth(1.6)
+            c.strokeEllipse(in: CGRect(x: p.x - 18, y: p.y - 18, width: 36, height: 36))
+            c.setFillColor(Style.gold.cgColor); c.fillEllipse(in: CGRect(x: p.x - 2.5, y: p.y - 2.5, width: 5, height: 5))
+        }
         if editingSecond, let t = secondSize {
             let g = s2w * bw / t.width, r = s2r * .pi / 180
             let pts = [CGPoint(x: -t.width / 2, y: -t.height / 2), CGPoint(x: t.width / 2, y: -t.height / 2), CGPoint(x: t.width / 2, y: t.height / 2), CGPoint(x: -t.width / 2, y: t.height / 2)]
@@ -151,6 +162,7 @@ final class CropCanvas: UIView {
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
         guard pic != nil else { return }
         active.append(contentsOf: touches)
+        if active.count == 1, let t = touches.first { downAt = t.location(in: self); downT = t.timestamp; multi = false } else { multi = true }
         if active.count == 1 {
             let p = active[0].location(in: self); last = p
             if editingSecond && secondSize != nil { mode = .move; return }
@@ -190,11 +202,17 @@ final class CropCanvas: UIView {
     }
 
     override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
+        if focusMode, !multi, active.count == 1, let t = touches.first, t.timestamp - downT < 0.35 {
+            let p = t.location(in: self)
+            if hypot(p.x - downAt.x, p.y - downAt.y) < 10, k > 0 {
+                onFocusTap?(CGPoint(x: min(1, max(0, (p.x - ox) / k / bw)), y: min(1, max(0, (p.y - oy) / k / bh))))
+            }
+        }
         active.removeAll { touches.contains($0) }
         if active.count == 1 { last = active[0].location(in: self); mode = (editingSecond && secondSize != nil) ? .move : .none }
         if active.isEmpty { mode = .none }
     }
-    override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) { touchesEnded(touches, with: event) }
+    override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) { multi = true; touchesEnded(touches, with: event) }
 }
 
 /** Straighten dial: ±45°, half-degree steps, sticks at 0, double-tap resets. */

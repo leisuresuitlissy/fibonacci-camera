@@ -129,7 +129,7 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
     private var flashMode = ImageCapture.FLASH_MODE_OFF
     private var layer = "COMPOSE"         // COMPOSE, ART, EXPOSURE — switching never clears the others
     private var art = ArtMode.OFF
-    private var artValues = FloatArray(4)
+    private var artValues = FloatArray(5)
     private var artParam = 0
     private var liveSeed = (Math.random() * 1000).toFloat()
     private var liveShader: RuntimeShader? = null
@@ -561,6 +561,7 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
     // ---- compose
     private fun applyGuide() {
         overlay.guide = guide; overlay.quadrant = quadrant; overlay.triFlip = triFlip; overlay.align = align
+        if (::preview.isInitialized) overlay.post { applyLiveArt() }
         guideRow.removeAllViews()
         for (g in Guide.values()) {
             guideRow.addView(chip(g.label, g == guide) { guide = g; aligned = false; save(); applyGuide() },
@@ -646,10 +647,10 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
             artSlider.visibility = View.INVISIBLE
             return
         }
-        art.sliders.forEachIndexed { i, (name, _) ->
+        art.shown.forEach { i ->
             val on = i == artParam
-            paramRow.addView(label(name.uppercase(Locale.US), 10f, if (on) cGold else cMuted, mono, 0.1f).apply {
-                setPadding(0, 0, dpi(14f), 0); setOnClickListener { artParam = i; applyArtUi() }
+            paramRow.addView(label(art.sliders[i].first.uppercase(Locale.US), 10f, if (on) cGold else cMuted, mono, 0.1f).apply {
+                setPadding(0, 0, dpi(12f), 0); setOnClickListener { artParam = i; applyArtUi() }
             })
         }
         paramRow.addView(spacer())
@@ -666,6 +667,23 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
     }
 
     /** The art mode runs on the preview itself, so the viewfinder shows the finished look. */
+    private var lastFocus = PointF(0.5f, 0.5f)
+
+    /**
+     * What stays sharp under Depth (0..1 across the frame): the subject you tapped, followed as you move;
+     * before any tap, the spiral's eye, or the middle for other guides.
+     */
+    private fun liveFocus(): PointF {
+        val fr = overlay.frame
+        if (fr.isEmpty) return PointF(0.5f, 0.5f)
+        val t = overlay.target; val st = trackState
+        if (t != null && st != null && !st.lost) return PointF((t.x - fr.left) / fr.width(), (t.y - fr.top) / fr.height())
+        if (guide == Guide.SPIRAL) Geo.goals(Guide.SPIRAL, overlay.guideFrame, quadrant, triFlip, align).firstOrNull()?.let {
+            return PointF((it.x - fr.left) / fr.width(), (it.y - fr.top) / fr.height())
+        }
+        return PointF(0.5f, 0.5f)
+    }
+
     private fun applyLiveArt() {
         if (!::preview.isInitialized) return
         if (!Art.supported || art == ArtMode.OFF || overlay.frame.isEmpty) { if (Build.VERSION.SDK_INT >= 31) camLayer.setRenderEffect(null); liveShader = null; return }
@@ -673,7 +691,8 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
         val sh = liveShader?.takeIf { it === liveFor(art) } ?: Art.newShader(art).also { liveShader = it; liveMode = art }
         if (sh == null) { camLayer.setRenderEffect(null); return }
         val f = overlay.frame
-        Art.setUniforms(sh, artValues, f.left, f.top, f.width(), f.height(), liveSeed)
+        val fp = liveFocus(); lastFocus = fp
+        Art.setUniforms(sh, artValues, f.left, f.top, f.width(), f.height(), liveSeed, fp.x, fp.y)
         camLayer.setRenderEffect(RenderEffect.createRuntimeShaderEffect(sh, "content"))   // live picture and first exposure together
     }
     private var liveMode: ArtMode? = null
@@ -886,6 +905,8 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
         }
         updateHud()
         overlay.invalidate()
+        // Depth follows the subject: refresh the look only when the sharp spot has actually moved
+        if (art != ArtMode.OFF) { val fp = liveFocus(); if (Geo.dist(fp, lastFocus) > 0.004f) applyLiveArt() }
     }
 
     /** A brief "Nice" when the subject lands; never shown while the subject is lost. */
@@ -979,7 +1000,8 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
             put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/Fibonacci Camera")
         }
         // The art look at the moment of the shot. The original is saved as-is; the look becomes a copy.
-        val recipe = if (Art.supported && art != ArtMode.OFF) Recipe(art, artValues.copyOf(), liveSeed) else null
+        val fp = liveFocus()
+        val recipe = if (Art.supported && art != ArtMode.OFF) Recipe(art, artValues.copyOf(), liveSeed, fp.x, fp.y) else null
         val first = if (double) firstUri else null
         val takingFirst = double && first == null
         val blendNow = blend; val strengthNow = blendStrength

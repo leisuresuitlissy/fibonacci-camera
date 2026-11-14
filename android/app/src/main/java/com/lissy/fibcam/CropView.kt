@@ -45,10 +45,18 @@ class CropView(ctx: Context) : View(ctx) {
     var triFlip = false
     /** The art look, drawn live on the photo. Applied relative to the crop, as the saved copy will be. */
     var recipe: Recipe? = null
+    /** Art tab: a quick tap picks the point that stays sharp under Depth (reported 0..1 across the photo). */
+    var focusMode = false
+        set(v) { field = v; invalidate() }
+    var onFocusTap: ((Float, Float) -> Unit)? = null
+    private var downX = 0f; private var downY = 0f; private var downT = 0L; private var multi = false
+    private val slop = android.view.ViewConfiguration.get(ctx).scaledTouchSlop
         set(v) { field = v; invalidate() }
     private var artShader: RuntimeShader? = null
     private var artShaderMode: ArtMode? = null
     private val artPaint = Paint(Paint.FILTER_BITMAP_FLAG)
+    private val focusRing = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; color = 0xFFE0B252.toInt() }
+    private val focusDot = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFFE0B252.toInt() }
 
     // ---- second exposure: centre in base-bitmap px, width as a fraction of base width, rotation in degrees
     var second: Bitmap? = null
@@ -178,6 +186,14 @@ class CropView(ctx: Context) : View(ctx) {
         c.clipRect(-w / 2, -h / 2, w / 2, h / 2)
         painter.draw(c, RectF(-w / 2, -h / 2, w / 2, h / 2), guide, quadrant, triFlip, trueSpiral = true)
         c.restore()
+        recipe?.let { r ->
+            // Art tab: show what stays sharp
+            if (focusMode && r.mode != ArtMode.OFF && r.mode != ArtMode.TILT_SHIFT && r.values.getOrElse(4) { 0f } > 0f) {
+                val fx = ox + r.fx * bw * k; val fy = oy + r.fy * bh * k
+                focusRing.strokeWidth = 1.6f * d
+                c.drawCircle(fx, fy, 18 * d, focusRing); c.drawCircle(fx, fy, 2.5f * d, focusDot)
+            }
+        }
         if (editingSecond && second != null) {
             second?.let { t ->
                 // outline of the second photo, so you can see what you're moving
@@ -199,7 +215,8 @@ class CropView(ctx: Context) : View(ctx) {
         val sh = artShader ?: return false
         sh.setInputShader("content", BitmapShader(b, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP).apply { setLocalMatrix(m) })
         val x0 = q.minOf { it.x }; val y0 = q.minOf { it.y }; val x1 = q.maxOf { it.x }; val y1 = q.maxOf { it.y }
-        Art.setUniforms(sh, r.values, x0, y0, x1 - x0, y1 - y0, r.seed)
+        val sfx = ox + r.fx * bw * k; val sfy = oy + r.fy * bh * k
+        Art.setUniforms(sh, r.values, x0, y0, x1 - x0, y1 - y0, r.seed, (sfx - x0) / (x1 - x0), (sfy - y0) / (y1 - y0))
         artPaint.shader = sh
         c.drawRect(ox, oy, ox + b.width * k, oy + b.height * k, artPaint)
         return true
@@ -287,6 +304,14 @@ class CropView(ctx: Context) : View(ctx) {
         if (bmp == null) return false
         if (editingSecond && second != null) return secondTouch(e)
         scaler.onTouchEvent(e)
+        when (e.actionMasked) {
+            MotionEvent.ACTION_DOWN -> { downX = e.x; downY = e.y; downT = e.eventTime; multi = false }
+            MotionEvent.ACTION_POINTER_DOWN -> multi = true
+            MotionEvent.ACTION_UP -> if (focusMode && !multi && e.eventTime - downT < 350 && hypot(e.x - downX, e.y - downY) < slop) {
+                val u = ((e.x - ox) / k / bw).coerceIn(0f, 1f); val v = ((e.y - oy) / k / bh).coerceIn(0f, 1f)
+                onFocusTap?.invoke(u, v)
+            }
+        }
         when (e.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 lx = e.x; ly = e.y

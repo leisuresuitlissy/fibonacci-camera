@@ -33,7 +33,9 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.concurrent.Executors
+import kotlin.math.cos
 import kotlin.math.max
+import kotlin.math.sin
 import kotlin.math.min
 import kotlin.math.roundToInt
 
@@ -80,7 +82,8 @@ class CropActivity : ComponentActivity() {
     private lateinit var blendSlider: SeekBar
     private var secondUri: Uri? = null
     private var tab = "CROP"
-    private var recipe = Recipe(ArtMode.OFF, FloatArray(4), (Math.random() * 1000).toFloat())
+    private var recipe = Recipe(ArtMode.OFF, FloatArray(5), (Math.random() * 1000).toFloat())
+    private var focusHinted = false
     private var artParam = 0
 
     private var ratio = "PHI"            // PHI, ORIGINAL, 4:5, 1:1, 3:2
@@ -149,7 +152,10 @@ class CropActivity : ComponentActivity() {
         root.addView(top, LinearLayout.LayoutParams(match, wrap))
 
         val stage = FrameLayout(this).apply { setBackgroundColor(Color.BLACK) }
-        crop = CropView(this).apply { onChange = { syncReadout() }; onSecondChange = { rememberSecond() } }
+        crop = CropView(this).apply {
+            onChange = { syncReadout() }; onSecondChange = { rememberSecond() }
+            onFocusTap = { u, v -> recipe = recipe.copy(fx = u, fy = v); crop.recipe = recipe; crop.invalidate(); rememberArt() }
+        }
         stage.addView(crop, FrameLayout.LayoutParams(match, match))
         noteView = label("", 12f, cGold, medium).apply {
             background = rounded(alpha(cBase, 0.85f), alpha(cGold, 0.8f)); setPadding(dpi(14f), dpi(9f), dpi(14f), dpi(9f)); visibility = View.GONE
@@ -241,6 +247,7 @@ class CropActivity : ComponentActivity() {
         artLayer.visibility = if (tab == "ART") View.VISIBLE else View.GONE
         blendLayer.visibility = if (tab == "BLEND") View.VISIBLE else View.GONE
         crop.editingSecond = tab == "BLEND"          // in Blend, your fingers move the second photo; elsewhere, the crop
+        crop.focusMode = tab == "ART"                // in Art, a tap picks what stays sharp
     }
 
     // ------------------------------------------------------------- double exposure
@@ -311,7 +318,7 @@ class CropActivity : ComponentActivity() {
         if (!Art.supported) { paramRow.addView(label("Art modes need Android 13 or newer.", 12f, cMuted)); artSlider.visibility = View.INVISIBLE; return }
         for (m in ArtMode.values()) {
             artRow.addView(chip(m.label, m == recipe.mode) {
-                recipe = Recipe(m, Art.loadValues(prefs, m), recipe.seed); artParam = 0
+                recipe = Recipe(m, Art.loadValues(prefs, m), recipe.seed, recipe.fx, recipe.fy); artParam = 0
                 if (m == ArtMode.HOLGA && ratio != "1:1") { ratio = "1:1"; applyRatio(reset = false) }   // Holga is a square camera
                 crop.recipe = recipe; rememberArt(); applyArtUi(); applyTab()
             }, LinearLayout.LayoutParams(wrap, wrap).apply { rightMargin = dpi(8f) })
@@ -320,11 +327,15 @@ class CropActivity : ComponentActivity() {
             paramRow.addView(label("Pick a look. It's saved as a copy, like the crop.", 11.5f, cMuted))
             artSlider.visibility = View.INVISIBLE; return
         }
-        recipe.mode.sliders.forEachIndexed { i, (name, _) ->
+        recipe.mode.shown.forEach { i ->
             val on = i == artParam
-            paramRow.addView(label(name.uppercase(Locale.US), 10f, if (on) cGold else cMuted, mono, 0.1f).apply {
-                setPadding(0, 0, dpi(14f), 0); setOnClickListener { artParam = i; applyArtUi() }
+            paramRow.addView(label(recipe.mode.sliders[i].first.uppercase(Locale.US), 10f, if (on) cGold else cMuted, mono, 0.1f).apply {
+                setPadding(0, 0, dpi(12f), 0); setOnClickListener { artParam = i; applyArtUi() }
             })
+        }
+        if (!focusHinted && recipe.mode != ArtMode.TILT_SHIFT) {
+            focusHinted = true
+            note("Tap the photo to choose what stays sharp"); crop.postDelayed({ note(null) }, 2600)
         }
         paramRow.addView(View(this), LinearLayout.LayoutParams(0, 1, 1f))
         paramRow.addView(label("${(recipe.values[artParam] * 100).roundToInt()}", 11f, cGold, mono))
@@ -441,7 +452,12 @@ class CropActivity : ComponentActivity() {
         if (busy) return
         busy = true; note("Saving a copy…"); remember()
         val cx = crop.cx; val cy = crop.cy; val cw = crop.cw; val ch = crop.ch; val deg = Math.toDegrees(crop.theta.toDouble()).toFloat()
-        val r = recipe.copy(values = recipe.values.copyOf())
+        // the focus point travels with the crop: from across the photo to across the cropped, straightened copy
+        val ffx = recipe.fx * crop.bw; val ffy = recipe.fy * crop.bh
+        val ct = cos(crop.theta); val stt = sin(crop.theta)
+        val fdx = ffx - cx; val fdy = ffy - cy
+        val r = recipe.copy(values = recipe.values.copyOf(),
+            fx = ((fdx * ct + fdy * stt) + cw / 2) / cw, fy = ((-fdx * stt + fdy * ct) + ch / 2) / ch)
         val dbl = secondUri?.let { u -> arrayOf(u.toString(), crop.blend.name, crop.strength, crop.s2x, crop.s2y, crop.s2w, crop.s2r) }
         val tag = (if (dbl != null) "double_" else "") + (if (ratio == "PHI") "phi" else ratio.replace(":", "x").lowercase(Locale.US)) +
             (if (r.mode != ArtMode.OFF && Art.supported) "_" + r.mode.fileTag else "")
