@@ -28,7 +28,7 @@ final class EditorViewController: UIViewController, PHPickerViewControllerDelega
     private let saveBtn = UIButton(type: .custom)
     private let note = Style.label("", Style.medium(12), Style.gold)
 
-    private var tab = "CROP"
+    private var editTab = "CROP"
     private var recipe = Recipe(mode: .OFF, values: ArtMode.OFF.defaults, seed: Float.random(in: 0..<1000))
     private var artParam = 0
     private var ratio = "PHI"
@@ -172,18 +172,18 @@ final class EditorViewController: UIViewController, PHPickerViewControllerDelega
         let tabs = [("CROP", "CROP"), ("ART", "ART" + (recipe.isOn ? " · " + recipe.mode.label : "")),
                     ("BLEND", second != nil ? "BLEND · " + blend.label : "DOUBLE")]
         for (key, text) in tabs {
-            let on = key == tab
+            let on = key == editTab
             var c = UIButton.Configuration.plain()
             c.attributedTitle = AttributedString(text, attributes: AttributeContainer([.font: Style.medium(11), .kern: 0.6]))
             c.baseForegroundColor = on ? Style.gold : Style.muted; c.titleLineBreakMode = .byTruncatingTail
-            let b = UIButton(configuration: c, primaryAction: UIAction { [weak self] _ in self?.tab = key; self?.applyTab() })
+            let b = UIButton(configuration: c, primaryAction: UIAction { [weak self] _ in self?.editTab = key; self?.applyTab() })
             b.layer.cornerRadius = 10; b.layer.borderWidth = 1
             b.layer.borderColor = (on ? Style.gold.withAlphaComponent(0.7) : Style.line).cgColor
             b.backgroundColor = on ? Style.gold.withAlphaComponent(0.14) : .clear
             tabRow.addArrangedSubview(b)
         }
-        cropLayer.isHidden = tab != "CROP"; artLayer.isHidden = tab != "ART"; blendLayer.isHidden = tab != "BLEND"
-        canvas.editingSecond = tab == "BLEND"      // in Blend your fingers move the second photo; elsewhere, the crop
+        cropLayer.isHidden = editTab != "CROP"; artLayer.isHidden = editTab != "ART"; blendLayer.isHidden = editTab != "BLEND"
+        canvas.editingSecond = editTab == "BLEND"      // in Blend your fingers move the second photo; elsewhere, the crop
     }
 
     // ============================================================ ratio + guide
