@@ -38,7 +38,7 @@ jobs:
           commit: ${{ github.sha }}
           name: Fibonacci Camera — Android (latest)
           body: |
-            Built from ${{ github.sha }}.
+            Build ${{ github.run_number }} · built from ${{ github.sha }}.
             On the phone: open the APK, allow installs from this source when asked, install. New builds install over the old one.
           artifacts: fibonacci-camera.apk
           allowUpdates: true

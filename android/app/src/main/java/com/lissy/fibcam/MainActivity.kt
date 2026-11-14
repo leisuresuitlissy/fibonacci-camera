@@ -41,6 +41,7 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.OptIn
 import androidx.camera.camera2.interop.Camera2Interop
@@ -101,6 +102,7 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
     private lateinit var sourceTxt: TextView
     private lateinit var coachBtn: TextView
     private lateinit var flashBtn: TextView
+    private lateinit var updateBtn: TextView
     private lateinit var thumb: ImageView
     private lateinit var gateMsg: TextView
 
@@ -135,6 +137,10 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
     private lateinit var sensors: SensorManager
     private lateinit var orientation: OrientationEventListener
 
+    private val pickPhoto = registerForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+        if (uri != null) openCrop(uri)
+    }
+
     private val askCamera = registerForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
         if (ok) startCamera() else gate("Camera access was refused. Allow it in Settings → Apps → Fibonacci → Permissions.")
     }
@@ -146,7 +152,10 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
         quadrant = prefs.getInt("quadrant", 0)
         triFlip = prefs.getBoolean("triFlip", false)
         coach = prefs.getBoolean("coach", false)
+        lastUri = prefs.getString("lastUri", null)?.let { Uri.parse(it) }
         setContentView(buildUi())
+        loadThumb()
+        checkForUpdate()
         sensors = getSystemService(Context.SENSOR_SERVICE) as SensorManager
         orientation = object : OrientationEventListener(this) {
             override fun onOrientationChanged(o: Int) {
@@ -227,6 +236,10 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
         top.addView(coachBtn)
         flashBtn = chip("FLASH OFF", false) { cycleFlash() }
         top.addView(flashBtn, LinearLayout.LayoutParams(wrap, wrap).apply { leftMargin = dpi(8f) })
+        updateBtn = chip("UPDATE", true) {
+            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/leisuresuitlissy/fibonacci-camera/releases/download/android-latest/fibonacci-camera.apk")))
+        }.apply { visibility = View.GONE }
+        top.addView(updateBtn, LinearLayout.LayoutParams(wrap, wrap).apply { leftMargin = dpi(8f) })
         root.addView(top, LinearLayout.LayoutParams(match, wrap))
 
         // viewfinder
@@ -276,7 +289,9 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
             background = rounded(cElev, cLine, 12f); scaleType = ImageView.ScaleType.CENTER_CROP
             outlineProvider = object : ViewOutlineProvider() { override fun getOutline(v: View, o: Outline) { o.setRoundRect(0, 0, v.width, v.height, dp(12f)) } }
             clipToOutline = true
-            setOnClickListener { openLast() }
+            contentDescription = "Crop the last photo"
+            setOnClickListener { val u = lastUri; if (u != null) openCrop(u) else pickFromLibrary() }
+            setOnLongClickListener { pickFromLibrary(); true }
         }
         bar.addView(thumb, lp(dpi(54f), dpi(54f), Gravity.CENTER_VERTICAL or Gravity.START).apply { leftMargin = dpi(24f) })
         val shutter = FrameLayout(this).apply {
@@ -634,6 +649,7 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
         cap.takePicture(opts, ContextCompat.getMainExecutor(this), object : ImageCapture.OnImageSavedCallback {
             override fun onImageSaved(out: ImageCapture.OutputFileResults) {
                 lastUri = out.savedUri
+                prefs.edit().putString("lastUri", lastUri?.toString()).apply()
                 loadThumb()
             }
             override fun onError(e: ImageCaptureException) {
@@ -650,10 +666,26 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
         }
     }
 
-    private fun openLast() {
-        val uri = lastUri ?: return
-        runCatching {
-            startActivity(Intent(Intent.ACTION_VIEW).setDataAndType(uri, "image/jpeg").addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION))
+    // The original from the shutter is already saved and is never touched again; cropping makes copies.
+    private fun openCrop(uri: Uri) {
+        startActivity(Intent(this, CropActivity::class.java).setData(uri).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION))
+    }
+
+    private fun pickFromLibrary() {
+        pickPhoto.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+    }
+
+    // ---- updates: compare our build number with the latest one GitHub built
+    private fun checkForUpdate() {
+        analysisExecutor.execute {
+            val latest = runCatching {
+                val c = java.net.URL("https://api.github.com/repos/leisuresuitlissy/fibonacci-camera/releases/tags/android-latest").openConnection() as java.net.HttpURLConnection
+                c.connectTimeout = 6000; c.readTimeout = 6000; c.setRequestProperty("Accept", "application/vnd.github+json")
+                val body = c.inputStream.bufferedReader().use { it.readText() }
+                Regex("Build (\\d+)").find(org.json.JSONObject(body).optString("body"))?.groupValues?.get(1)?.toLong()
+            }.getOrNull() ?: return@execute
+            val mine = runCatching { packageManager.getPackageInfo(packageName, 0).longVersionCode }.getOrDefault(Long.MAX_VALUE)
+            if (latest > mine) runOnUiThread { updateBtn.visibility = View.VISIBLE }
         }
     }
 }

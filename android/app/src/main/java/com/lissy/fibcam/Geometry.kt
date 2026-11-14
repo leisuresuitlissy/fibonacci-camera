@@ -31,9 +31,11 @@ class Spiral(val pts: FloatArray, val bw: Float, val bh: Float, val ox: Float, v
 
     companion object {
         private val cache = HashMap<Int, Spiral>()
-        fun of(quadrant: Int, turns: Double = 2.25): Spiral = cache.getOrPut(quadrant) { build(quadrant, turns) }
+        /** [wide] lays the long side horizontally, for landscape crops. */
+        fun of(quadrant: Int, wide: Boolean = false, turns: Double = 2.25): Spiral =
+            cache.getOrPut(quadrant + if (wide) 4 else 0) { build(quadrant, wide, turns) }
 
-        private fun build(quadrant: Int, turns: Double): Spiral {
+        private fun build(quadrant: Int, wide: Boolean, turns: Double): Spiral {
             val b = ln(PHI) / (PI / 2)
             val n = 600
             val xs = DoubleArray(n + 1); val ys = DoubleArray(n + 1)
@@ -44,6 +46,7 @@ class Spiral(val pts: FloatArray, val bw: Float, val bh: Float, val ox: Float, v
                 val r = exp(b * th)
                 // at 2.25 turns this box is 0.639 wide by 1 tall: long side vertical
                 var x = r * cos(th); var y = r * sin(th)
+                if (wide) { val t = x; x = y; y = t }
                 if (flipX) x = -x
                 if (flipY) y = -y
                 xs[i] = x; ys[i] = y
@@ -87,6 +90,13 @@ object Geo {
     fun spiralEye(s: Spiral, fr: RectF): PointF {
         val sx = fr.width() / s.bw; val sy = fr.height() / s.bh
         return PointF(fr.left - s.ox * sx, fr.top - s.oy * sy)
+    }
+
+    /** The true spiral (no stretching) at the largest size that fits inside the frame, centred. */
+    fun phiEye(s: Spiral, fr: RectF): Pair<PointF, Float> {
+        val u = min(fr.width() / s.bw, fr.height() / s.bh)
+        val left = fr.left + (fr.width() - s.bw * u) / 2; val top = fr.top + (fr.height() - s.bh * u) / 2
+        return PointF(left - s.ox * u, top - s.oy * u) to u
     }
 
     /** Points the subject should land on for a guide, in screen px. */
