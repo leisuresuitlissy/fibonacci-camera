@@ -9,7 +9,7 @@ enum GuidePainter {
         c.setLineCap(.round); c.setLineJoin(.round)
         switch guide {
         case .off: break
-        case .thirds: grid(c, fr, [1 / 3, 2 / 3])
+        case .thirds: grid(c, fr, [CGFloat(1) / 3, CGFloat(2) / 3])
         case .phiGrid: grid(c, fr, [CGFloat(1 - 1 / PHI), CGFloat(1 / PHI)])
         case .spiral: spiral(c, fr, quadrant, trueSpiral)
         case .triangles: triangles(c, fr, triFlip)

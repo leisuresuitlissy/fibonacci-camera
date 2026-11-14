@@ -40,8 +40,14 @@ final class CropCanvas: UIView {
 
     func corners(_ x: CGFloat? = nil, _ y: CGFloat? = nil, _ w: CGFloat? = nil, _ t: CGFloat? = nil) -> [CGPoint] {
         let x = x ?? cx, y = y ?? cy, w = w ?? cw, t = t ?? theta
-        let h = w / aspect, c = cos(t), s = sin(t)
-        return [(-w / 2, -h / 2), (w / 2, -h / 2), (w / 2, h / 2), (-w / 2, h / 2)].map { CGPoint(x: x + $0.0 * c - $0.1 * s, y: y + $0.0 * s + $0.1 * c) }
+        let h: CGFloat = w / aspect, c: CGFloat = cos(t), s: CGFloat = sin(t)
+        let hw: CGFloat = w / 2, hh: CGFloat = h / 2
+        let offs: [(CGFloat, CGFloat)] = [(-hw, -hh), (hw, -hh), (hw, hh), (-hw, hh)]
+        return offs.map { o -> CGPoint in
+            let px: CGFloat = x + o.0 * c - o.1 * s
+            let py: CGFloat = y + o.0 * s + o.1 * c
+            return CGPoint(x: px, y: py)
+        }
     }
     func fits(_ x: CGFloat? = nil, _ y: CGFloat? = nil, _ w: CGFloat? = nil) -> Bool {
         corners(x, y, w).allSatisfy { $0.x >= -0.5 && $0.y >= -0.5 && $0.x <= bw + 0.5 && $0.y <= bh + 0.5 }
