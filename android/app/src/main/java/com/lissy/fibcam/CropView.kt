@@ -45,13 +45,13 @@ class CropView(ctx: Context) : View(ctx) {
     var triFlip = false
     /** The art look, drawn live on the photo. Applied relative to the crop, as the saved copy will be. */
     var recipe: Recipe? = null
+        set(v) { field = v; invalidate() }
     /** Art tab: a quick tap picks the point that stays sharp under Depth (reported 0..1 across the photo). */
     var focusMode = false
         set(v) { field = v; invalidate() }
     var onFocusTap: ((Float, Float) -> Unit)? = null
     private var downX = 0f; private var downY = 0f; private var downT = 0L; private var multi = false
     private val slop = android.view.ViewConfiguration.get(ctx).scaledTouchSlop
-        set(v) { field = v; invalidate() }
     private var artShader: RuntimeShader? = null
     private var artShaderMode: ArtMode? = null
     private val artPaint = Paint(Paint.FILTER_BITMAP_FLAG)

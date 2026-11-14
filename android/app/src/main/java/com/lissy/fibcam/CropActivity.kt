@@ -154,7 +154,10 @@ class CropActivity : ComponentActivity() {
         val stage = FrameLayout(this).apply { setBackgroundColor(Color.BLACK) }
         crop = CropView(this).apply {
             onChange = { syncReadout() }; onSecondChange = { rememberSecond() }
-            onFocusTap = { u, v -> recipe = recipe.copy(fx = u, fy = v); crop.recipe = recipe; crop.invalidate(); rememberArt() }
+            onFocusTap = { u, v ->
+                val r = this@CropActivity.recipe.copy(fx = u, fy = v)
+                this@CropActivity.recipe = r; recipe = r; rememberArt()
+            }
         }
         stage.addView(crop, FrameLayout.LayoutParams(match, match))
         noteView = label("", 12f, cGold, medium).apply {
