@@ -74,11 +74,28 @@ jobs:
           done
           rm -rf build-sim
 
-      - uses: actions/upload-artifact@v4
+      - name: Show the Simulator console
         if: always()
+        run: for f in sim-check/*.log sim-check/*.err; do echo "== $f"; cat "$f" || true; done
+
+      - name: Keep the Simulator screenshots
+        if: always()
+        run: zip -qr sim-check.zip sim-check
+
+      - name: Publish the Simulator check
+        if: always()
+        uses: ncipollo/release-action@v1
         with:
-          name: sim-check
-          path: sim-check
+          tag: ios-sim-check
+          commit: ${{ github.sha }}
+          name: iOS Simulator check (latest)
+          body: Build ${{ github.run_number }} · screenshots and console from an automated Simulator run.
+          artifacts: sim-check.zip
+          allowUpdates: true
+          replacesArtifacts: true
+          removeArtifacts: true
+          makeLatest: false
+          prerelease: true
 
       - name: Package the project
         run: |
