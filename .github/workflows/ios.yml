@@ -44,6 +44,19 @@ jobs:
           zip -qry ../fibonacci-camera.ipa Payload
           rm -rf Payload
 
+      # The Simulator build compiles the demo-camera code that only exists there.
+      - name: Build for the Simulator
+        working-directory: ios
+        run: |
+          set -o pipefail
+          xcodebuild -project FibonacciCamera.xcodeproj -scheme FibonacciCamera -configuration Debug \
+            -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' -derivedDataPath build-sim \
+            CODE_SIGNING_ALLOWED=NO build 2>&1 | grep -E "error:|BUILD (SUCCEEDED|FAILED)" || true
+          xcodebuild -project FibonacciCamera.xcodeproj -scheme FibonacciCamera -configuration Debug \
+            -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' -derivedDataPath build-sim \
+            CODE_SIGNING_ALLOWED=NO build -quiet
+          rm -rf build-sim
+
       - name: Package the project
         run: |
           rm -rf ios/build

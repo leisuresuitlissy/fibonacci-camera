@@ -70,7 +70,13 @@ final class TileView: UIControl {
 }
 
 final class CameraViewController: UIViewController, PHPickerViewControllerDelegate {
-    private let cam = Camera()
+    #if targetEnvironment(simulator)
+    private let demo = DemoCamera()
+    private lazy var cam: CameraSource = demo
+    private var pickingScene = false
+    #else
+    private let cam: CameraSource = Camera()
+    #endif
     private let tracker = Tracker()
     private let haptic = UIImpactFeedbackGenerator(style: .medium)
     private var subject: CGPoint?          // the tapped subject, followed silently (screen points)
@@ -173,17 +179,28 @@ final class CameraViewController: UIViewController, PHPickerViewControllerDelega
             DispatchQueue.main.async { self.onTrack(st) }
         }
         cam.onReady = { [weak self] z, evr in self?.cameraReady(z, evr) }
+        #if targetEnvironment(simulator)
+        gate.isHidden = true; cam.start(front: front)          // no camera hardware here: the demo feed stands in
+        #else
         Camera.requestAccess { [weak self] ok in
             guard let self else { return }
             if ok { self.gate.isHidden = true; self.cam.start(front: self.front) }
             else { self.gate.text = "Camera access is off. Turn it on in Settings › Fibonacci."; self.gate.isHidden = false }
         }
+        #endif
+        Log.info("camera screen ready · guide \(guide.rawValue) · double \(double)")
         NotificationCenter.default.addObserver(self, selector: #selector(wake), name: UIApplication.willEnterForegroundNotification, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(sleep), name: UIApplication.didEnterBackgroundNotification, object: nil)
         UIDevice.current.beginGeneratingDeviceOrientationNotifications()
     }
 
-    @objc private func wake() { if AVCaptureDevice.authorizationStatus(for: .video) == .authorized { cam.start(front: front) } }
+    @objc private func wake() {
+        #if targetEnvironment(simulator)
+        cam.start(front: front)
+        #else
+        if AVCaptureDevice.authorizationStatus(for: .video) == .authorized { cam.start(front: front) }
+        #endif
+    }
     @objc private func sleep() { cam.stop() }
 
     private func save() {
@@ -225,6 +242,10 @@ final class CameraViewController: UIViewController, PHPickerViewControllerDelega
         doubleBtn.accessibilityLabel = "Double exposure"; flashBtn.accessibilityLabel = "Flash"
         doubleBtn.addAction(UIAction { [weak self] _ in self?.toggleDouble() }, for: .touchUpInside)
         flashBtn.addAction(UIAction { [weak self] _ in self?.cycleFlash() }, for: .touchUpInside)
+        #if targetEnvironment(simulator)
+        sourceLbl.isHidden = true
+        titles.addArrangedSubview(makeDemoButton())
+        #endif
         let top = Style.hstack([titles, UIView(), doubleBtn, flashBtn], spacing: 8)
         size(top, nil, 56); root.addArrangedSubview(top)
 
@@ -643,6 +664,39 @@ final class CameraViewController: UIViewController, PHPickerViewControllerDelega
         if let u = URL(string: "photos-redirect://") { UIApplication.shared.open(u) }
     }
 
+    #if targetEnvironment(simulator)
+    /** Simulator only: choose what the demo camera films, and whether it drifts like a hand. */
+    private func makeDemoButton() -> UIButton {
+        var c = UIButton.Configuration.plain()
+        c.contentInsets = .zero
+        c.attributedTitle = AttributedString("DEMO FEED ▾", attributes: AttributeContainer([.font: Style.mono(10), .kern: 1]))
+        c.baseForegroundColor = Style.gold
+        let b = UIButton(configuration: c)
+        b.showsMenuAsPrimaryAction = true
+        b.menu = demoMenu()
+        b.accessibilityLabel = "Demo feed options"
+        return b
+    }
+    private func demoMenu() -> UIMenu {
+        UIMenu(title: "Simulator demo feed", children: [
+            UIAction(title: "Built-in scene", image: UIImage(systemName: "photo"), state: demo.usingBuiltIn ? .on : .off) { [weak self] _ in
+                self?.demo.useScene(nil); self?.refreshDemoMenu()
+            },
+            UIAction(title: "Film a photo from the library…", image: UIImage(systemName: "photo.on.rectangle"), state: demo.usingBuiltIn ? .off : .on) { [weak self] _ in
+                self?.pickingScene = true; self?.pickPhoto()
+            },
+            UIAction(title: "Handheld drift", image: UIImage(systemName: "hand.raised"), state: demo.drift ? .on : .off) { [weak self] _ in
+                guard let self else { return }
+                self.demo.drift.toggle(); self.refreshDemoMenu()
+            }])
+    }
+    private func refreshDemoMenu() {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            for v in self.view.allSubviews() { if let b = v as? UIButton, b.showsMenuAsPrimaryAction { b.menu = self.demoMenu() } }
+        }
+    }
+    #endif
+
     private func pickPhoto() {
         var c = PHPickerConfiguration(); c.filter = .images; c.selectionLimit = 1
         let p = PHPickerViewController(configuration: c); p.delegate = self
@@ -651,10 +705,16 @@ final class CameraViewController: UIViewController, PHPickerViewControllerDelega
 
     func picker(_ picker: PHPickerViewController, didFinishPicking results: [PHPickerResult]) {
         picker.dismiss(animated: true)
+        #if targetEnvironment(simulator)
+        if results.isEmpty { pickingScene = false }
+        #endif
         guard let item = results.first?.itemProvider, item.canLoadObject(ofClass: UIImage.self) else { return }
         item.loadObject(ofClass: UIImage.self) { obj, _ in
             guard let img = obj as? UIImage else { return }
             DispatchQueue.main.async {
+                #if targetEnvironment(simulator)
+                if self.pickingScene { self.pickingScene = false; self.demo.useScene(img); self.refreshDemoMenu(); return }
+                #endif
                 if self.double { self.setFirst(img, data: nil) }
                 else { self.openEditor(img) }
             }
@@ -666,4 +726,8 @@ final class CameraViewController: UIViewController, PHPickerViewControllerDelega
         e.modalPresentationStyle = .fullScreen
         present(e, animated: true)
     }
+}
+
+extension UIView {
+    func allSubviews() -> [UIView] { subviews + subviews.flatMap { $0.allSubviews() } }
 }

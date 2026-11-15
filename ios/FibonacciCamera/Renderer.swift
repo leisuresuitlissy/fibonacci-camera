@@ -40,11 +40,15 @@ final class Renderer {
     private let loader: MTKTextureLoader
 
     private init() {
-        device = MTLCreateSystemDefaultDevice()!
-        queue = device.makeCommandQueue()!
-        library = device.makeDefaultLibrary()!
-        loader = MTKTextureLoader(device: device)
-        CVMetalTextureCacheCreate(nil, nil, device, nil, &textureCache)
+        guard let dev = MTLCreateSystemDefaultDevice() else { fatalError("[Fibcam] This Mac/iPhone has no Metal GPU, so the viewfinder can't run.") }
+        device = dev
+        guard let q = dev.makeCommandQueue() else { fatalError("[Fibcam] Couldn't create a Metal command queue.") }
+        queue = q
+        guard let lib = dev.makeDefaultLibrary() else { fatalError("[Fibcam] Shaders.metal didn't compile into the app (default.metallib missing).") }
+        library = lib
+        loader = MTKTextureLoader(device: dev)
+        let ok = CVMetalTextureCacheCreate(nil, nil, dev, nil, &textureCache)
+        Log.info("Metal \(dev.name) · shaders \(lib.functionNames.count) · camera texture cache \(ok == kCVReturnSuccess ? "ok" : "unavailable (will upload frames instead)")")
     }
 
     func pipe(_ fragment: String) -> MTLRenderPipelineState? {
@@ -54,7 +58,8 @@ final class Renderer {
         guard let f = library.makeFunction(name: fragment) else { return nil }
         d.fragmentFunction = f
         d.colorAttachments[0].pixelFormat = .bgra8Unorm
-        let p = try? device.makeRenderPipelineState(descriptor: d)
+        var p: MTLRenderPipelineState?
+        do { p = try device.makeRenderPipelineState(descriptor: d) } catch { Log.error("pipeline \(fragment): \(error)") }
         pipes[fragment] = p
         return p
     }
@@ -62,16 +67,36 @@ final class Renderer {
     func makeTarget(_ w: Int, _ h: Int) -> MTLTexture? {
         let d = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .bgra8Unorm, width: max(1, w), height: max(1, h), mipmapped: false)
         d.usage = [.renderTarget, .shaderRead]
-        d.storageMode = .shared
+        d.storageMode = .private          // the Simulator refuses shared textures; pixels come back through a buffer instead
         return device.makeTexture(descriptor: d)
     }
 
     func texture(from pb: CVPixelBuffer) -> MTLTexture? {
-        guard let cache = textureCache else { return nil }
-        var t: CVMetalTexture?
         let w = CVPixelBufferGetWidth(pb), h = CVPixelBufferGetHeight(pb)
-        CVMetalTextureCacheCreateTextureFromImage(nil, cache, pb, nil, .bgra8Unorm, w, h, 0, &t)
-        return t.flatMap { CVMetalTextureGetTexture($0) }
+        if let cache = textureCache {
+            var t: CVMetalTexture?
+            CVMetalTextureCacheCreateTextureFromImage(nil, cache, pb, nil, .bgra8Unorm, w, h, 0, &t)
+            if let tex = t.flatMap({ CVMetalTextureGetTexture($0) }) { return tex }
+        }
+        return upload(pb, w, h)       // fallback: copy the frame in through a buffer
+    }
+
+    private var uploadTex: MTLTexture?
+    private func upload(_ pb: CVPixelBuffer, _ w: Int, _ h: Int) -> MTLTexture? {
+        CVPixelBufferLockBaseAddress(pb, .readOnly); defer { CVPixelBufferUnlockBaseAddress(pb, .readOnly) }
+        guard let base = CVPixelBufferGetBaseAddress(pb) else { return nil }
+        let row = CVPixelBufferGetBytesPerRow(pb)
+        guard let buf = device.makeBuffer(bytes: base, length: row * h, options: .storageModeShared) else { return nil }
+        if uploadTex == nil || uploadTex!.width != w || uploadTex!.height != h {
+            let d = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .bgra8Unorm, width: w, height: h, mipmapped: false)
+            d.usage = [.shaderRead]; d.storageMode = .private
+            uploadTex = device.makeTexture(descriptor: d)
+        }
+        guard let tex = uploadTex, let cmd = queue.makeCommandBuffer(), let blit = cmd.makeBlitCommandEncoder() else { return nil }
+        blit.copy(from: buf, sourceOffset: 0, sourceBytesPerRow: row, sourceBytesPerImage: row * h,
+                  sourceSize: MTLSize(width: w, height: h, depth: 1), to: tex, destinationSlice: 0, destinationLevel: 0, destinationOrigin: MTLOrigin())
+        blit.endEncoding(); cmd.commit(); cmd.waitUntilCompleted()
+        return tex
     }
 
     /** Draws the image upright (EXIF orientation applied), optionally shrunk so its long side is <= maxLong. */
@@ -159,8 +184,7 @@ final class Renderer {
         let rp = MTLRenderPassDescriptor()
         rp.colorAttachments[0].texture = out; rp.colorAttachments[0].loadAction = .dontCare; rp.colorAttachments[0].storeAction = .store
         encodeArt(cmd, src: mid, recipe: recipe, pass: rp, viewport: CGRect(x: 0, y: 0, width: w, height: h))
-        cmd.commit(); cmd.waitUntilCompleted()
-        return cgImage(from: out)
+        return finishReadback(cmd, out)
     }
 
     /** Editor preview: the pair at display size, with the look measured against the crop box. */
@@ -171,14 +195,21 @@ final class Renderer {
         let rp = MTLRenderPassDescriptor()
         rp.colorAttachments[0].texture = out; rp.colorAttachments[0].loadAction = .dontCare; rp.colorAttachments[0].storeAction = .store
         encodeArt(cmd, src: mid, recipe: recipe, pass: rp, viewport: CGRect(x: 0, y: 0, width: w, height: h), measure: measure)
-        cmd.commit(); cmd.waitUntilCompleted()
-        return cgImage(from: out)
+        return finishReadback(cmd, out)
     }
 
-    func cgImage(from t: MTLTexture) -> CGImage? {
+    /** Copies the result into a CPU-visible buffer in the same pass (works on iPhone and in the Simulator), then wraps it as an image. */
+    private func finishReadback(_ cmd: MTLCommandBuffer, _ t: MTLTexture) -> CGImage? {
         let w = t.width, h = t.height, row = w * 4
-        var data = Data(count: row * h)
-        data.withUnsafeMutableBytes { p in t.getBytes(p.baseAddress!, bytesPerRow: row, from: MTLRegionMake2D(0, 0, w, h), mipmapLevel: 0) }
+        guard let buf = device.makeBuffer(length: row * h, options: .storageModeShared), let blit = cmd.makeBlitCommandEncoder() else {
+            Log.error("readback: no buffer for \(w)×\(h)"); cmd.commit(); return nil
+        }
+        blit.copy(from: t, sourceSlice: 0, sourceLevel: 0, sourceOrigin: MTLOrigin(), sourceSize: MTLSize(width: w, height: h, depth: 1),
+                  to: buf, destinationOffset: 0, destinationBytesPerRow: row, destinationBytesPerImage: row * h)
+        blit.endEncoding()
+        cmd.commit(); cmd.waitUntilCompleted()
+        if let e = cmd.error { Log.error("GPU: \(e)"); return nil }
+        let data = Data(bytes: buf.contents(), count: row * h)
         guard let prov = CGDataProvider(data: data as CFData) else { return nil }
         return CGImage(width: w, height: h, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: row,
                        space: CGColorSpace(name: CGColorSpace.sRGB)!,
