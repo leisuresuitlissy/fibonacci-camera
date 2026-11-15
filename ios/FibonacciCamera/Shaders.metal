@@ -393,7 +393,7 @@ fragment float4 art_KINO(VOut in [[stage_in]], texture2d<float> T [[texture(0)]]
 float3 drift(float v, float band) {
     // band 0 shadows, 1 mids, 2 highlights; families: 0 warm, 1 magenta, 2 cool
     if (v < 0.5) return band < 0.5 ? float3(0.06, -0.02, 0.03) : (band < 1.5 ? float3(0.0, 0.03, -0.045) : float3(0.05, 0.03, -0.07));
-    if (v < 1.5) return band < 0.5 ? float3(0.07, -0.035, 0.05) : (band < 1.5 ? float3(0.045, -0.02, 0.025) : float3(0.035, 0.02, -0.045));
+    if (v < 1.5) return band < 0.5 ? float3(0.07, -0.035, 0.05) : (band < 1.5 ? float3(-0.01, 0.03, -0.012) : float3(0.05, 0.005, 0.0));
     return band < 0.5 ? float3(-0.04, 0.02, 0.065) : (band < 1.5 ? float3(-0.02, 0.04, 0.0) : float3(0.025, 0.025, -0.035));
 }
 static float4 fx_EXPIRED(texture2d<float> T, constant U& uu, float2 p) {
@@ -416,7 +416,7 @@ static float4 fx_EXPIRED(texture2d<float> T, constant U& uu, float2 p) {
     c = c * (1.0 - 0.16 * k) + 0.09 * k;
     c = mix(c, float3(luma(c)), 0.32 * k);
     c = mix(c, smoothstep(float3(-0.15), float3(1.15), c), -0.4 * k);
-    c += mix(d, d2, mixFam) * k * (2.4 + 1.2 * (fog - 0.5) * age);
+    c += mix(d, d2, mixFam) * pow(a, 0.8) * (1.5 + 1.1 * age) * (1.0 + 0.6 * (fog - 0.5) * age);
     float3 fogCol = mix(drift(fam, 2.0), drift(fam2, 0.0), fog) * 4.0 + 0.6;
     c = screen(c, clamp(fogCol, 0.0, 1.0) * pow(fog, 2.2) * 0.26 * age * a);
     float g = filmGrain(p, l) * (0.02 + 0.08 * p2) * a * (0.7 + 0.6 * age);
