@@ -13,6 +13,7 @@ import android.graphics.ImageDecoder
 import android.graphics.Outline
 import android.graphics.Paint
 import android.graphics.PointF
+import android.graphics.RectF
 import android.graphics.RenderEffect
 import android.graphics.RuntimeShader
 import android.graphics.Typeface
