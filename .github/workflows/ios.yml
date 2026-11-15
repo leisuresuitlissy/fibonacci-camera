@@ -66,11 +66,16 @@ jobs:
           xcrun simctl bootstatus "$UDID" -b
           xcrun simctl install "$UDID" build-sim/Build/Products/Debug-iphonesimulator/FibonacciCamera.app
           mkdir -p ../sim-check
-          for shot in camera art double editor; do
+          SHOTS="camera compose:off compose:thirds compose:phiGrid compose:spiral compose:triangles compose:diagonals compose:dynamic compose:centre compose:marks"
+          SHOTS="$SHOTS art:OFF art:TILT_SHIFT art:HOLGA art:PINHOLE art:GRAINY_FILM art:CROSS_PROCESS art:DREAM_LENS art:INFRARED art:CYANOTYPE art:BLEACH_BYPASS art:KINO art:EXPIRED art:REDSCALE art:SOLARISED art:INSTANT"
+          SHOTS="$SHOTS exposure double editor:CROP editor:ART:KINO editor:BLEND"
+          n=0
+          for shot in $SHOTS; do
+            n=$((n+1)); name=$(printf "%02d-%s" $n "$(echo $shot | tr ':' '-')")
             xcrun simctl terminate "$UDID" com.leisuresuitlissy.fibonaccicamera 2>/dev/null || true
-            xcrun simctl launch --stdout="$PWD/../sim-check/$shot.log" --stderr="$PWD/../sim-check/$shot.err" "$UDID" com.leisuresuitlissy.fibonaccicamera -fibShot $shot
-            sleep 12
-            xcrun simctl io "$UDID" screenshot "../sim-check/$shot.png"
+            xcrun simctl launch --stdout="$PWD/../sim-check/$name.log" --stderr="$PWD/../sim-check/$name.err" "$UDID" com.leisuresuitlissy.fibonaccicamera -fibShot $shot
+            sleep 9
+            xcrun simctl io "$UDID" screenshot "../sim-check/$name.png"
           done
           xcrun simctl spawn "$UDID" log show --last 5m --style compact --predicate 'subsystem == "com.leisuresuitlissy.fibonaccicamera" OR (process == "FibonacciCamera" AND messageType == error)' > ../sim-check/console.txt || true
           rm -rf build-sim

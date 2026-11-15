@@ -803,22 +803,45 @@ final class CameraViewController: UIViewController, PHPickerViewControllerDelega
                 self.demo.drift.toggle(); self.refreshDemoMenu()
             }])
     }
-    /** For automated Simulator screenshots: launch with `-fibShot camera|art|double|editor`. */
+    /** For automated Simulator screenshots: launch with `-fibShot <shot>`, where shot is
+     *  camera · compose:<guide> · art:<MODE> · exposure · double · editor:<TAB>[:<MODE>]. */
     private func runShotScript() {
         let args = ProcessInfo.processInfo.arguments
         guard let i = args.firstIndex(of: "-fibShot"), i + 1 < args.count else { return }
-        let shot = args[i + 1]
-        Log.info("shot script: \(shot)")
-        guide = .spiral; quadrant = 1; applyGuide()
-        switch shot {
+        let parts = args[i + 1].split(separator: ":").map(String.init)
+        Log.info("shot script: \(args[i + 1])")
+        guide = .spiral; quadrant = 1; anchor = 0; guideHidden = false; applyGuide()
+        switch parts[0] {
+        case "compose":
+            if parts.count > 1, let g = Guide(rawValue: parts[1]) { guide = g; applyGuide() }
+            reveal(guideRow, Guide.allCases.firstIndex(of: guide) ?? 0)
         case "art":
-            art = .CROSS_PROCESS; artValues = art.defaults; layer = "ART"; applyArtUi(); applyLayer()
+            let m = parts.count > 1 ? ArtMode(rawValue: parts[1]) ?? .CROSS_PROCESS : .CROSS_PROCESS
+            art = m; artState = ArtState(values: m.defaults, follow: false); artParam = 0
+            layer = "ART"; applyArtUi(); applyLayer()
+            reveal(artRow, ArtMode.allCases.firstIndex(of: m) ?? 0)
+        case "exposure":
+            layer = "EXPOSURE"; applyLayer()
         case "double":
             let mirrored = UIImage(cgImage: DemoCamera.builtIn(), scale: 1, orientation: .upMirrored)
             double = true; layer = "BLEND"; syncDouble(); applyLayer(); setFirst(mirrored, data: nil)
         case "editor":
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { self.openEditor(UIImage(cgImage: DemoCamera.builtIn())) }
+            let tab = parts.count > 1 ? parts[1] : "CROP"
+            let look = parts.count > 2 ? ArtMode(rawValue: parts[2]) : nil
+            let second = tab == "BLEND" ? UIImage(cgImage: DemoCamera.builtIn(), scale: 1, orientation: .upMirrored) : nil
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                let e = EditorViewController(image: UIImage(cgImage: DemoCamera.builtIn()))
+                e.modalPresentationStyle = .fullScreen
+                self.present(e, animated: false) { e.shot(tab: tab, look: look, second: second) }
+            }
         default: break
+        }
+    }
+    /** Scrolls a chip row so the chosen chip is on screen. */
+    private func reveal(_ row: UIStackView, _ index: Int) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+            guard index < row.arrangedSubviews.count, let s = row.superview as? UIScrollView else { return }
+            s.scrollRectToVisible(row.arrangedSubviews[index].frame.insetBy(dx: -80, dy: 0), animated: false)
         }
     }
 

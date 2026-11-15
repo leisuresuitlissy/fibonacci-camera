@@ -387,6 +387,17 @@ final class EditorViewController: UIViewController, PHPickerViewControllerDelega
         }
     }
 
+    #if targetEnvironment(simulator)
+    /** Screenshot hook: open on a tab, optionally with a look and a second photo. */
+    func shot(tab: String, look: ArtMode?, second img: UIImage?) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
+            if let look { self.recipe = Recipe(mode: look, values: look.defaults, seed: self.recipe.seed); self.applyArtUi() }
+            if let img { self.setSecond(img) }
+            self.editTab = tab; self.applyTab(); self.refresh()
+        }
+    }
+    #endif
+
     // ============================================================ preview
     private func refreshIfArt() { if recipe.isOn { refresh() } }
 
