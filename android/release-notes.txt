@@ -1,5 +1,5 @@
+Five new looks: Kino, Expired, Redscale, Solarised, Instant
+Expired colour drift: warm, magenta, cool, random
 Every look keeps its own settings and starts at a calibrated 50%
 Follow guide: link focus effects to your composition
-Holga light leak styles: warm, cool, neutral, mixed, random
 Dial-like haptic ticks on every slider
-In-app updates

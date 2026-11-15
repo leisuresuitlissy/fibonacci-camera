@@ -287,13 +287,13 @@ final class EditorViewController: UIViewController, PHPickerViewControllerDelega
             }, for: .touchUpInside)
             paramRow.addArrangedSubview(b)
         }
-        if mode == .HOLGA {
-            let st = min(max(Int(recipe.values[5].rounded()), 0), 5)
-            paramRow.addArrangedSubview(miniChip("LEAK · " + LEAK_STYLES[st], on: st > 0) { [weak self] in
+        if !mode.variations.isEmpty {
+            let vs = mode.variations, vi = min(max(Int(recipe.values[5].rounded()), 0), vs.count - 1)
+            paramRow.addArrangedSubview(miniChip(mode.variationLabel + " · " + vs[vi], on: vs[vi] != "OFF") { [weak self] in
                 guard let self else { return }
-                let next = (st + 1) % LEAK_STYLES.count
+                let next = (vi + 1) % vs.count
                 self.recipe.values[5] = Float(next)
-                if next == 5 { self.recipe.seed = Float.random(in: 0..<1000) }
+                if mode.isRandom(next) { self.recipe.seed = Float.random(in: 0..<1000) }
                 self.applyArtUi(); self.refresh()
             })
         }

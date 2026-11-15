@@ -75,6 +75,7 @@ out = head + src + "\n"
 for name, body in bodies:
     b = body.replace("half4 main(float2 p) {", f"static float4 fx_{name}(texture2d<float> T, constant U& uu, float2 p) {{")
     b = b.replace("half4(", "float4(")
+    b = re.sub(r'\bmod\(', 'fmod(', b)
     out += b + f"""
 fragment float4 art_{name}(VOut in [[stage_in]], texture2d<float> T [[texture(0)]], constant U& uu [[buffer(0)]]) {{
     return fx_{name}(T, uu, (in.pos.xy - uu.vpo_) * uu.vps_);

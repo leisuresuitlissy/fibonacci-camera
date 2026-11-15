@@ -22,10 +22,19 @@ import androidx.annotation.RequiresApi
  * or Depth (the others), 5 Holga's leak style. Names that are empty are hidden in the UI.
  * Every mode starts at 50% intensity; the shaders map that through each mode's own curve.
  */
-enum class ArtMode(val label: String, val sliders: List<Pair<String, Float>>, val about: String = "") {
+enum class ArtMode(
+    val label: String,
+    val sliders: List<Pair<String, Float>>,
+    val about: String = "",
+    /** A set of named variations kept in values[5] (Holga's leak styles, Expired's colour drift). */
+    val variations: List<String> = emptyList(),
+    val variationLabel: String = "",
+    val defaultVariation: Int = 0,
+) {
     OFF("OFF", emptyList()),
     TILT_SHIFT("TILT SHIFT", listOf("Intensity" to 0.5f, "Focus" to 0.55f, "Width" to 0.22f, "Angle" to 0.5f, "Feather" to 0.5f)),
-    HOLGA("HOLGA", listOf("Intensity" to 0.5f, "Vignette" to 0.55f, "Softness" to 0.4f, "Leaks" to 0.45f, "Depth" to 0.3f)),
+    HOLGA("HOLGA", listOf("Intensity" to 0.5f, "Vignette" to 0.55f, "Softness" to 0.4f, "Leaks" to 0.45f, "Depth" to 0.3f),
+        variations = listOf("OFF", "WARM", "COOL", "NEUTRAL", "MIXED", "RANDOM"), variationLabel = "LEAK", defaultVariation = 1),
     PINHOLE("PINHOLE", listOf("Intensity" to 0.5f, "Softness" to 0.4f, "Vignette" to 0.5f, "" to 0f, "Depth" to 0f)),
     GRAINY_FILM("GRAINY FILM", listOf("Intensity" to 0.5f, "Grain" to 0.5f, "Contrast" to 0.55f, "" to 0f, "Depth" to 0.35f)),
     CROSS_PROCESS("CROSS PROCESS", listOf("Intensity" to 0.5f, "Colour" to 0.5f, "" to 0f, "" to 0f, "Depth" to 0.35f)),
@@ -33,9 +42,18 @@ enum class ArtMode(val label: String, val sliders: List<Pair<String, Float>>, va
     INFRARED("INFRARED", listOf("Intensity" to 0.5f, "Contrast" to 0.5f, "Halation" to 0.3f, "" to 0f, "Depth" to 0.35f),
         about = "Infrared-inspired: a simulation from visible light, not real infrared."),
     CYANOTYPE("CYANOTYPE", listOf("Intensity" to 0.5f, "Contrast" to 0.5f, "Paper" to 0.5f, "" to 0f, "Depth" to 0.35f)),
-    BLEACH_BYPASS("BLEACH BYPASS", listOf("Intensity" to 0.5f, "Saturation" to 0.35f, "Contrast" to 0.5f, "" to 0f, "Depth" to 0.35f));
+    BLEACH_BYPASS("BLEACH BYPASS", listOf("Intensity" to 0.5f, "Saturation" to 0.35f, "Contrast" to 0.5f, "" to 0f, "Depth" to 0.35f)),
+    // The newer looks are colour and tone first: Depth starts at 0 and stays optional.
+    KINO("KINO", listOf("Intensity" to 0.5f, "Halation" to 0.5f, "Coolness" to 0.5f, "Grain" to 0.35f, "Depth" to 0f)),
+    EXPIRED("EXPIRED", listOf("Intensity" to 0.5f, "Age" to 0.5f, "Grain" to 0.45f, "" to 0f, "Depth" to 0f),
+        variations = listOf("WARM", "MAGENTA", "COOL", "RANDOM"), variationLabel = "COLOUR", defaultVariation = 1),
+    REDSCALE("REDSCALE", listOf("Intensity" to 0.5f, "Tone" to 0.45f, "Grain" to 0.3f, "" to 0f, "Depth" to 0f)),
+    SOLARISED("SOLARISED", listOf("Intensity" to 0.5f, "Reversal" to 0.7f, "Threshold" to 0.45f, "Contour" to 0.35f, "Depth" to 0f)),
+    INSTANT("INSTANT", listOf("Intensity" to 0.5f, "Warmth" to 0.55f, "Fade" to 0.5f, "Softness" to 0.4f, "Depth" to 0f));
 
-    val defaults: FloatArray get() = FloatArray(6) { i -> if (i == 5) (if (this == HOLGA) 1f else 0f) else sliders.getOrNull(i)?.second ?: 0f }
+    val defaults: FloatArray get() = FloatArray(6) { i -> if (i == 5) defaultVariation.toFloat() else sliders.getOrNull(i)?.second ?: 0f }
+    /** Whether variation [i] is the random one (it gets a fresh, stable seed when chosen). */
+    fun isRandom(i: Int) = variations.getOrNull(i) == "RANDOM"
     /** The sliders to show: the padding entries (no name) are skipped, but indexes stay put. */
     val shown: List<Int> get() = sliders.indices.filter { sliders[it].first.isNotEmpty() }
     val fileTag: String get() = name.lowercase().replace('_', '-')
@@ -49,8 +67,6 @@ enum class ArtMode(val label: String, val sliders: List<Pair<String, Float>>, va
     fun isFocusSlider(i: Int) = when (this) { TILT_SHIFT -> i in 1..4; else -> i == 4 && hasDepth }
 }
 
-/** Holga leak styles, in the order the chip cycles through them. 0 is Off. */
-val LEAK_STYLES = listOf("OFF", "WARM", "COOL", "NEUTRAL", "MIXED", "RANDOM")
 
 /** A mode's saved shooting preferences: its six values and whether it follows the guide. */
 class ArtState(val values: FloatArray, var follow: Boolean)
@@ -204,6 +220,17 @@ object Art {
         set("seed", seed); set("lks", v.getOrElse(5) { 0f })
         set("msk", m.cx, m.cy, m.angle, m.type.toFloat()); set("msz", m.size, m.feather, m.strength)
     }
+
+    /**
+     * A look's preview thumbnail: the look at its factory defaults on a small copy of a photo, with no
+     * focus effects, so a picker can show what each look does to *this* picture.
+     */
+    @RequiresApi(33)
+    fun thumbnail(src: Bitmap, mode: ArtMode, seed: Float = 0.37f): Bitmap =
+        if (mode == ArtMode.OFF) src else {
+            val v = mode.defaults.also { if (mode != ArtMode.TILT_SHIFT) it[4] = 0f }
+            render(src, Recipe(mode, v, seed), if (mode == ArtMode.TILT_SHIFT) Focus.resolve(mode, v, false, null, null) else FocusMask())
+        }
 
     /** Runs a mode over a whole bitmap on the GPU and returns a new software bitmap. */
     @RequiresApi(33)

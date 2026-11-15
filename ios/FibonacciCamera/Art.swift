@@ -8,6 +8,7 @@ import Foundation
  */
 enum ArtMode: String, CaseIterable {
     case OFF, TILT_SHIFT, HOLGA, PINHOLE, GRAINY_FILM, CROSS_PROCESS, DREAM_LENS, INFRARED, CYANOTYPE, BLEACH_BYPASS
+    case KINO, EXPIRED, REDSCALE, SOLARISED, INSTANT
 
     var label: String { rawValue.replacingOccurrences(of: "_", with: " ") }
     var fileTag: String { rawValue.lowercased().replacingOccurrences(of: "_", with: "-") }
@@ -24,10 +25,27 @@ enum ArtMode: String, CaseIterable {
         case .INFRARED: return [("Intensity", 0.5), ("Contrast", 0.5), ("Halation", 0.3), ("", 0), ("Depth", 0.35)]
         case .CYANOTYPE: return [("Intensity", 0.5), ("Contrast", 0.5), ("Paper", 0.5), ("", 0), ("Depth", 0.35)]
         case .BLEACH_BYPASS: return [("Intensity", 0.5), ("Saturation", 0.35), ("Contrast", 0.5), ("", 0), ("Depth", 0.35)]
+        // the newer looks are colour and tone first: Depth starts at 0 and stays optional
+        case .KINO: return [("Intensity", 0.5), ("Halation", 0.5), ("Coolness", 0.5), ("Grain", 0.35), ("Depth", 0)]
+        case .EXPIRED: return [("Intensity", 0.5), ("Age", 0.5), ("Grain", 0.45), ("", 0), ("Depth", 0)]
+        case .REDSCALE: return [("Intensity", 0.5), ("Tone", 0.45), ("Grain", 0.3), ("", 0), ("Depth", 0)]
+        case .SOLARISED: return [("Intensity", 0.5), ("Reversal", 0.7), ("Threshold", 0.45), ("Contour", 0.35), ("Depth", 0)]
+        case .INSTANT: return [("Intensity", 0.5), ("Warmth", 0.55), ("Fade", 0.5), ("Softness", 0.4), ("Depth", 0)]
         }
     }
+    /** Named variations kept in values[5]: Holga's leak styles, Expired's colour drift. */
+    var variations: [String] {
+        switch self {
+        case .HOLGA: return ["OFF", "WARM", "COOL", "NEUTRAL", "MIXED", "RANDOM"]
+        case .EXPIRED: return ["WARM", "MAGENTA", "COOL", "RANDOM"]
+        default: return []
+        }
+    }
+    var variationLabel: String { self == .HOLGA ? "LEAK" : "COLOUR" }
+    var defaultVariation: Int { (self == .HOLGA || self == .EXPIRED) ? 1 : 0 }
+    func isRandom(_ i: Int) -> Bool { i < variations.count && variations[i] == "RANDOM" }
     var about: String { self == .INFRARED ? "Infrared-inspired: a simulation from visible light, not real infrared." : "" }
-    var defaults: [Float] { (0..<6).map { i in i == 5 ? (self == .HOLGA ? 1 : 0) : (i < sliders.count ? sliders[i].1 : 0) } }
+    var defaults: [Float] { (0..<6).map { i in i == 5 ? Float(defaultVariation) : (i < sliders.count ? sliders[i].1 : 0) } }
     /** Sliders to show; unnamed padding is skipped but indexes stay put. */
     var shown: [Int] { sliders.indices.filter { !sliders[$0].0.isEmpty } }
     var hasDepth: Bool { sliders.count > 4 && sliders[4].0 == "Depth" }
@@ -63,7 +81,6 @@ enum ArtMode: String, CaseIterable {
     }
 }
 
-let LEAK_STYLES = ["OFF", "WARM", "COOL", "NEUTRAL", "MIXED", "RANDOM"]
 
 struct ArtState {
     var values: [Float]

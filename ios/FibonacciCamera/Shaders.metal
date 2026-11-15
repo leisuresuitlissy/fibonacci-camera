@@ -362,3 +362,142 @@ static float4 fx_BLEACH_BYPASS(texture2d<float> T, constant U& uu, float2 p) {
 fragment float4 art_BLEACH_BYPASS(VOut in [[stage_in]], texture2d<float> T [[texture(0)]], constant U& uu [[buffer(0)]]) {
     return fx_BLEACH_BYPASS(T, uu, (in.pos.xy - uu.vpo_) * uu.vps_);
 }
+
+static float4 fx_KINO(texture2d<float> T, constant U& uu, float2 p) {
+    float4 o = px(p);
+    if (!inFrame(p)) return float4(o);
+    float a = 1.0 - pow(1.0 - amt, 1.3);
+    float s = min(res.x, res.y);
+    float3 c = focusAt(p, o.rgb);
+    float l = luma(c);
+    float warmLight = smoothstep(0.45, 0.85, l) * smoothstep(0.02, 0.2, c.r - c.b);
+    float shadow = pow(1.0 - l, 2.0);
+    float cool = (0.35 + 0.65 * p2) * a * (1.0 - warmLight);
+    c += float3(-0.10, 0.01, 0.11) * shadow * cool;
+    c += float3(-0.05, 0.0, 0.045) * (1.0 - shadow) * (1.0 - l) * cool;
+    c = mix(c, c * float3(0.93, 0.98, 1.06), cool * (1.0 - l) * 0.8);
+    c += float3(0.05, 0.015, -0.035) * warmLight * a;
+    c = satur(c, 1.0 - 0.18 * a + 0.25 * warmLight * a);
+    c = mix(c, smoothstep(float3(-0.04), float3(1.1), c), 0.7 * a);
+    float3 b = bloomAt(p, s * (0.012 + 0.035 * p1), 0.66);
+    float glow = luma(b) * (1.0 + 2.6 * p1) * a;
+    c = screen(c, float3(1.0, 0.28, 0.08) * glow * (1.0 - 0.55 * l));
+    c += filmGrain(p, l) * (0.008 + 0.06 * p3) * a;
+    return float4(float4(clamp(c, 0.0, 1.0), o.a));
+}
+
+fragment float4 art_KINO(VOut in [[stage_in]], texture2d<float> T [[texture(0)]], constant U& uu [[buffer(0)]]) {
+    return fx_KINO(T, uu, (in.pos.xy - uu.vpo_) * uu.vps_);
+}
+
+float3 drift(float v, float band) {
+    // band 0 shadows, 1 mids, 2 highlights; families: 0 warm, 1 magenta, 2 cool
+    if (v < 0.5) return band < 0.5 ? float3(0.06, -0.02, 0.03) : (band < 1.5 ? float3(0.0, 0.03, -0.045) : float3(0.05, 0.03, -0.07));
+    if (v < 1.5) return band < 0.5 ? float3(0.07, -0.035, 0.05) : (band < 1.5 ? float3(0.045, -0.02, 0.025) : float3(0.035, 0.02, -0.045));
+    return band < 0.5 ? float3(-0.04, 0.02, 0.065) : (band < 1.5 ? float3(-0.02, 0.04, 0.0) : float3(0.025, 0.025, -0.035));
+}
+static float4 fx_EXPIRED(texture2d<float> T, constant U& uu, float2 p) {
+    float4 o = px(p);
+    if (!inFrame(p)) return float4(o);
+    float a = amt;
+    float age = p1;
+    float3 c = focusAt(p, o.rgb);
+    float l = luma(c);
+    float k = a * (0.75 + 0.7 * age);
+    float fam = lks;
+    float mixFam = 0.0;
+    if (fam > 2.5) { fam = floor(fract(seed * 0.381) * 3.0); mixFam = fract(seed * 0.773) * 0.6; }
+    float fam2 = fmod(fam + 1.0, 3.0);
+    float ws = pow(1.0 - l, 1.6); float wh = smoothstep(0.55, 1.0, l); float wm = 1.0 - max(ws, wh);
+    float3 d = drift(fam, 0.0) * ws + drift(fam, 1.0) * wm + drift(fam, 2.0) * wh;
+    float3 d2 = drift(fam2, 0.0) * ws + drift(fam2, 1.0) * wm + drift(fam2, 2.0) * wh;
+    float2 uv = uvOf(p);
+    float fog = vnoise(uv * float2(1.4, 1.8) + seed * 3.1);
+    c = c * (1.0 - 0.16 * k) + 0.09 * k;
+    c = mix(c, float3(luma(c)), 0.32 * k);
+    c = mix(c, smoothstep(float3(-0.15), float3(1.15), c), -0.4 * k);
+    c += mix(d, d2, mixFam) * k * (2.4 + 1.2 * (fog - 0.5) * age);
+    float3 fogCol = mix(drift(fam, 2.0), drift(fam2, 0.0), fog) * 4.0 + 0.6;
+    c = screen(c, clamp(fogCol, 0.0, 1.0) * pow(fog, 2.2) * 0.26 * age * a);
+    float g = filmGrain(p, l) * (0.02 + 0.08 * p2) * a * (0.7 + 0.6 * age);
+    float gc = (hash(floor(p / max(1.0, res.y / 700.0)) + 5.3) - 0.5) * 0.02 * age * a;
+    c += g + float3(gc, -gc * 0.5, gc * 0.3);
+    return float4(float4(clamp(c, 0.0, 1.0), o.a));
+}
+
+fragment float4 art_EXPIRED(VOut in [[stage_in]], texture2d<float> T [[texture(0)]], constant U& uu [[buffer(0)]]) {
+    return fx_EXPIRED(T, uu, (in.pos.xy - uu.vpo_) * uu.vps_);
+}
+
+static float4 fx_REDSCALE(texture2d<float> T, constant U& uu, float2 p) {
+    float4 o = px(p);
+    if (!inFrame(p)) return float4(o);
+    float a = 1.0 - pow(1.0 - amt, 1.2);
+    float3 c = focusAt(p, o.rgb);
+    float L = 0.52 * c.r + 0.42 * c.g + 0.06 * c.b;
+    L = pow(clamp(L, 0.0, 1.0), mix(1.35, 0.75, p1));
+    float3 sh = mix(float3(0.16, 0.02, 0.015), float3(0.24, 0.06, 0.02), p1);
+    float3 md = mix(float3(0.72, 0.20, 0.04), float3(0.86, 0.40, 0.08), p1);
+    float3 hi = mix(float3(0.98, 0.62, 0.22), float3(1.0, 0.82, 0.42), p1);
+    float3 top = float3(1.0, 0.93, 0.74);
+    float3 r = mix(sh, md, smoothstep(0.0, 0.42, L));
+    r = mix(r, hi, smoothstep(0.38, 0.78, L));
+    r = mix(r, top, smoothstep(0.82, 1.0, L));
+    r.g += 0.14 * max(c.g - c.r, 0.0) * (1.0 - L);
+    r *= 1.0 - 0.25 * max(c.b - max(c.r, c.g), 0.0);
+    r.r = min(r.r, 0.985);
+    r += filmGrain(p, L) * (0.01 + 0.05 * p2);
+    return float4(float4(mix(o.rgb, clamp(r, 0.0, 1.0), a), o.a));
+}
+
+fragment float4 art_REDSCALE(VOut in [[stage_in]], texture2d<float> T [[texture(0)]], constant U& uu [[buffer(0)]]) {
+    return fx_REDSCALE(T, uu, (in.pos.xy - uu.vpo_) * uu.vps_);
+}
+
+static float4 fx_SOLARISED(texture2d<float> T, constant U& uu, float2 p) {
+    float4 o = px(p);
+    if (!inFrame(p)) return float4(o);
+    float a = amt;
+    float3 c = focusAt(p, o.rgb);
+    float l = luma(c);
+    float t = 0.3 + 0.45 * p2;
+    float fold = smoothstep(t - 0.1, t + 0.1, l);
+    float y = mix(l, abs(2.0 * t - l), fold * (0.35 + 0.65 * p1));
+    y = clamp(y, 0.0, 1.0);
+    y = smoothstep(0.02, 0.92, mix(y, pow(y, 0.85), 0.5));
+    float d = max(1.0, res.y / 900.0) * 1.5;
+    float gx = luma(px(p + float2(d, 0.0)).rgb) - luma(px(p - float2(d, 0.0)).rgb);
+    float gy = luma(px(p + float2(0.0, d)).rgb) - luma(px(p - float2(0.0, d)).rgb);
+    float edge = smoothstep(0.03, 0.18, length(float2(gx, gy)));
+    float near = exp(-pow((l - t) / 0.09, 2.0));
+    y = clamp(y + edge * near * p3 * 0.55, 0.0, 1.0);
+    float3 silver = float3(y) * float3(0.97, 0.99, 1.03);
+    float3 base = mix(o.rgb, float3(luma(o.rgb)), smoothstep(0.0, 0.7, a));
+    return float4(float4(mix(base, clamp(silver, 0.0, 1.0), pow(a, 0.8)), o.a));
+}
+
+fragment float4 art_SOLARISED(VOut in [[stage_in]], texture2d<float> T [[texture(0)]], constant U& uu [[buffer(0)]]) {
+    return fx_SOLARISED(T, uu, (in.pos.xy - uu.vpo_) * uu.vps_);
+}
+
+static float4 fx_INSTANT(texture2d<float> T, constant U& uu, float2 p) {
+    float4 o = px(p);
+    if (!inFrame(p)) return float4(o);
+    float a = 1.0 - pow(1.0 - amt, 1.3);
+    float s = min(res.x, res.y);
+    float3 c = focusAt(p, o.rgb);
+    c = mix(c, blurAt(p, s * (0.001 + p3 * 0.004)), (0.4 + 0.5 * p3) * a);
+    float l = luma(c);
+    c = satur(c, 1.0 - 0.3 * a);
+    c += float3(0.05, 0.018, -0.05) * (p1 * 2.0 - 0.3) * a * (1.0 - abs(l - 0.5) * 1.2);
+    c = mix(c, c * 0.84 + float3(0.17, 0.15, 0.09), smoothstep(0.45, 1.0, l) * a);
+    c = c * (1.0 - 0.2 * p2 * a) + float3(0.07, 0.09, 0.1) * p2 * a;
+    c = mix(c, smoothstep(float3(-0.1), float3(1.1), c), -0.3 * a);
+    c *= vig(p, 0.16 * a);
+    c += filmGrain(p, l) * 0.015 * a;
+    return float4(float4(clamp(c, 0.0, 1.0), o.a));
+}
+
+fragment float4 art_INSTANT(VOut in [[stage_in]], texture2d<float> T [[texture(0)]], constant U& uu [[buffer(0)]]) {
+    return fx_INSTANT(T, uu, (in.pos.xy - uu.vpo_) * uu.vps_);
+}

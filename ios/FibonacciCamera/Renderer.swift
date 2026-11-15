@@ -218,6 +218,18 @@ final class Renderer {
                        provider: prov, decode: nil, shouldInterpolate: true, intent: .defaultIntent)
     }
 
+    /**
+     * A look's preview thumbnail: the look at its factory defaults on a small copy of a photo, with no
+     * focus effects, so a picker can show what each look does to this picture.
+     */
+    func thumbnail(_ src: CGImage, _ mode: ArtMode, seed: Float = 0.37) -> CGImage? {
+        guard mode != .OFF else { return src }
+        var v = mode.defaults
+        if mode != .TILT_SHIFT { v[4] = 0 }
+        let r = Recipe(mode: mode, values: v, seed: seed)
+        return renderStill(base: src, recipe: r, mask: mode == .TILT_SHIFT ? Focus.resolve(mode, v, follow: false, guide: nil, subject: nil) : FocusMask())
+    }
+
     /** Holga is a square camera: its copies come out 1:1. */
     static func finish(_ cg: CGImage, _ mode: ArtMode) -> CGImage {
         guard mode == .HOLGA, cg.width != cg.height else { return cg }

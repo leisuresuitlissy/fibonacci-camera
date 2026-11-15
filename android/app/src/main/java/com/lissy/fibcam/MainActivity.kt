@@ -703,11 +703,15 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
                 setPadding(0, dpi(8f), dpi(12f), dpi(8f)); setOnClickListener { artParam = i; applyArtUi(); if (art.isFocusSlider(i)) showMask() }
             })
         }
-        if (art == ArtMode.HOLGA) paramRow.addView(miniChip("LEAK · " + LEAK_STYLES[artValues[5].roundToInt().coerceIn(0, 5)], artValues[5] > 0.5f) {
-            artValues[5] = ((artValues[5].roundToInt() + 1) % LEAK_STYLES.size).toFloat()
-            if (artValues[5].roundToInt() == 5) liveSeed = (Math.random() * 1000).toFloat()   // Random: a fresh, stable variant
-            Art.saveState(prefs, art, artState); applyArtUi(); applyLiveArt()
-        })
+        if (art.variations.isNotEmpty()) {
+            val vi = artValues[5].roundToInt().coerceIn(0, art.variations.size - 1)
+            paramRow.addView(miniChip(art.variationLabel + " · " + art.variations[vi], art.variations[vi] != "OFF") {
+                val next = (vi + 1) % art.variations.size
+                artValues[5] = next.toFloat()
+                if (art.isRandom(next)) liveSeed = (Math.random() * 1000).toFloat()   // Random: a fresh, stable variant
+                Art.saveState(prefs, art, artState); applyArtUi(); applyLiveArt()
+            })
+        }
         if (art.follows) paramRow.addView(miniChip("FOLLOW GUIDE", artState.follow) {
             artState.follow = !artState.follow
             if (!artState.follow && art == ArtMode.TILT_SHIFT) unlinkTiltBand()

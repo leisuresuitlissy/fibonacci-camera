@@ -352,11 +352,15 @@ class CropActivity : ComponentActivity() {
                 setPadding(0, dpi(8f), dpi(12f), dpi(8f)); setOnClickListener { artParam = i; applyArtUi(); if (mode.isFocusSlider(i)) crop.flashMask() }
             })
         }
-        if (mode == ArtMode.HOLGA) paramRow.addView(miniChip("LEAK · " + LEAK_STYLES[recipe.values[5].roundToInt().coerceIn(0, 5)], recipe.values[5] > 0.5f) {
-            recipe.values[5] = ((recipe.values[5].roundToInt() + 1) % LEAK_STYLES.size).toFloat()
-            if (recipe.values[5].roundToInt() == 5) recipe = recipe.copy(seed = (Math.random() * 1000).toFloat())
-            crop.recipe = recipe; rememberArt(); applyArtUi()
-        })
+        if (mode.variations.isNotEmpty()) {
+            val vi = recipe.values[5].roundToInt().coerceIn(0, mode.variations.size - 1)
+            paramRow.addView(miniChip(mode.variationLabel + " · " + mode.variations[vi], mode.variations[vi] != "OFF") {
+                val next = (vi + 1) % mode.variations.size
+                recipe.values[5] = next.toFloat()
+                if (mode.isRandom(next)) recipe = recipe.copy(seed = (Math.random() * 1000).toFloat())
+                crop.recipe = recipe; rememberArt(); applyArtUi()
+            })
+        }
         if (mode.follows) paramRow.addView(miniChip("FOLLOW GUIDE", recipe.follow) {
             // switching off keeps the region where the guide had put it, now pinned to the photo
             val m = crop.cropMask(recipe)

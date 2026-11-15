@@ -481,13 +481,13 @@ final class CameraViewController: UIViewController, PHPickerViewControllerDelega
             b.addAction(UIAction { [weak self] _ in self?.artParam = i; self?.applyArtUi(); if self?.art.isFocusSlider(i) == true { self?.showMask() } }, for: .touchUpInside)
             paramRow.addArrangedSubview(b)
         }
-        if art == .HOLGA {
-            let st = min(max(Int(artValues[5].rounded()), 0), 5)
-            paramRow.addArrangedSubview(miniChip("LEAK · " + LEAK_STYLES[st], on: st > 0) { [weak self] in
+        if !art.variations.isEmpty {
+            let vs = art.variations, vi = min(max(Int(artValues[5].rounded()), 0), vs.count - 1)
+            paramRow.addArrangedSubview(miniChip(art.variationLabel + " · " + vs[vi], on: vs[vi] != "OFF") { [weak self] in
                 guard let self else { return }
-                let next = (st + 1) % LEAK_STYLES.count
+                let next = (vi + 1) % vs.count
                 self.artValues[5] = Float(next)
-                if next == 5 { self.seed = Float.random(in: 0..<1000) }          // Random: a fresh, stable variant
+                if self.art.isRandom(next) { self.seed = Float.random(in: 0..<1000) }   // Random: a fresh, stable variant
                 self.art.saveState(self.artState); self.applyArtUi()
             })
         }
