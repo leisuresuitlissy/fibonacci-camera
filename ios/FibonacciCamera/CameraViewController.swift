@@ -432,7 +432,8 @@ final class CameraViewController: UIViewController, PHPickerViewControllerDelega
         case .thirds, .phiGrid, .diagonals:
             // which point (or corner diagonal) a guide-linked focus sits on
             secondRow.addArrangedSubview(Style.label(guide == .diagonals ? "DIAGONAL" : "POINT", Style.mono(10), Style.muted, kern: 1.3)); secondRow.addArrangedSubview(UIView())
-            for (a, n) in (guide == .diagonals ? ["↘", "↙", "↗", "↖"] : ["↖", "↗", "↙", "↘"]).enumerated() {
+            let arrows = guide == .diagonals ? ["↘", "↙", "↗", "↖"] : ["↖", "↗", "↙", "↘"]
+            for (a, n) in arrows.enumerated() {
                 secondRow.addArrangedSubview(Style.chip(n, on: a == anchor) { [weak self] in self?.anchor = a; self?.save(); self?.applyGuide(); self?.guideMoved() })
             }
         default:
