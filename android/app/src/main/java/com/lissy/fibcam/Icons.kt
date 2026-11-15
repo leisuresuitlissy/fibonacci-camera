@@ -9,7 +9,7 @@ import android.view.View
 
 /** Small line icons drawn on a 24-unit grid, so there are no image assets to manage. */
 class IconButton(ctx: Context, var icon: Icon, var tint: Int) : View(ctx) {
-    enum class Icon { FLASH_OFF, FLASH_AUTO, FLASH_ON, COACH, FLIP, PHOTO, DOUBLE }
+    enum class Icon { FLASH_OFF, FLASH_AUTO, FLASH_ON, COACH, FLIP, PHOTO, DOUBLE, MORE }
 
     private val p = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeCap = Paint.Cap.ROUND; strokeJoin = Paint.Join.ROUND }
     private val path = Path()
@@ -55,6 +55,7 @@ class IconButton(ctx: Context, var icon: Icon, var tint: Int) : View(ctx) {
                 // two exposures overlapping
                 c.drawCircle(9.5f, 12f, 6f, p); c.drawCircle(14.5f, 12f, 6f, p)
             }
+            Icon.MORE -> { p.style = Paint.Style.FILL; for (x in listOf(6f, 12f, 18f)) c.drawCircle(x, 12f, 1.7f, p); p.style = Paint.Style.STROKE }
             Icon.PHOTO -> {
                 c.drawRoundRect(RectF(3f, 5f, 21f, 19f), 2.5f, 2.5f, p)
                 path.reset(); path.moveTo(4f, 17f); path.lineTo(9.5f, 11.5f); path.lineTo(13f, 15f); path.lineTo(15.5f, 12.5f); path.lineTo(20f, 17f)

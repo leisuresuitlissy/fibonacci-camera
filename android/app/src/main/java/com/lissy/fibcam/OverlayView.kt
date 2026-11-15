@@ -24,6 +24,9 @@ class OverlayView @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? =
         fun onSubjectTap(sx: Float, sy: Float)
         fun onDoubleTap()
         fun onPinch(factor: Float)
+        /** A drag on the picture; return true if it moved the focus region. */
+        fun onFocusDrag(dy: Float): Boolean = false
+        fun onFocusDragEnd() {}
     }
 
     var listener: Listener? = null
@@ -41,6 +44,15 @@ class OverlayView @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? =
     var targetLost = false
     var goal: PointF? = null
     var aligned = false
+    /** Hide the guide lines (the guide still drives any linked focus). */
+    var hidden = false
+        set(v) { field = v; invalidate() }
+    private var mask: FocusMask? = null
+    private var maskAlpha = 0f
+    private var maskAnim: ValueAnimator? = null
+    private var dragging = false
+    private val maskLine = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; color = 0xFFE0B252.toInt() }
+    private val maskSoft = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; color = 0xFFE0B252.toInt() }
 
     private val d = resources.displayMetrics.density
     private val painter = GuidePainter(d)
@@ -64,6 +76,10 @@ class OverlayView @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? =
         override fun onDown(e: MotionEvent) = true
         override fun onSingleTapConfirmed(e: MotionEvent): Boolean { listener?.onSubjectTap(e.x, e.y); return true }
         override fun onDoubleTap(e: MotionEvent): Boolean { listener?.onDoubleTap(); return true }
+        override fun onScroll(e1: MotionEvent?, e2: MotionEvent, dx: Float, dy: Float): Boolean {
+            if (listener?.onFocusDrag(-dy) == true) { dragging = true; return true }
+            return false
+        }
     })
     private val pinch = ScaleGestureDetector(ctx, object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
         override fun onScale(det: ScaleGestureDetector): Boolean { listener?.onPinch(det.scaleFactor); return true }
@@ -73,6 +89,9 @@ class OverlayView @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? =
     override fun onTouchEvent(event: MotionEvent): Boolean {
         pinch.onTouchEvent(event)
         if (!pinch.isInProgress) taps.onTouchEvent(event)
+        if ((event.actionMasked == MotionEvent.ACTION_UP || event.actionMasked == MotionEvent.ACTION_CANCEL) && dragging) {
+            dragging = false; listener?.onFocusDragEnd()
+        }
         return true
     }
 
@@ -90,9 +109,46 @@ class OverlayView @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? =
     override fun onDraw(c: Canvas) {
         if (frame.isEmpty) return
         c.drawRect(frame, edge)
-        painter.draw(c, guideFrame, guide, quadrant, triFlip, trueSpiral = false, align = align)
+        if (!hidden) painter.draw(c, guideFrame, guide, quadrant, triFlip, trueSpiral = false, align = align)
+        drawMask(c)
         drawFocus(c)
         if (coach) drawCoach(c)
+    }
+
+    /** Shows the simulated focus region while it's being adjusted; it fades away by itself. */
+    fun showMask(m: FocusMask) {
+        mask = m
+        maskAnim?.cancel(); maskAlpha = 1f; invalidate()
+        maskAnim = ValueAnimator.ofFloat(1f, 0f).apply {
+            startDelay = 1400; duration = 500
+            addUpdateListener { maskAlpha = it.animatedValue as Float; invalidate() }
+            start()
+        }
+    }
+    fun fadeMask() { if (maskAlpha > 0f && maskAnim?.isRunning != true) showMask(mask ?: return) }
+
+    private fun drawMask(c: Canvas) {
+        val m = mask ?: return
+        if (maskAlpha <= 0.01f || frame.isEmpty) return
+        val h = frame.height()
+        val cx = frame.left + m.cx * frame.width(); val cy = frame.top + m.cy * h
+        val inner = m.size * h; val outer = (m.size + 0.03f + m.feather * 0.55f) * h
+        maskLine.alpha = (220 * maskAlpha).toInt(); maskLine.strokeWidth = 1.3f * d; maskLine.pathEffect = null
+        maskSoft.alpha = (140 * maskAlpha).toInt(); maskSoft.strokeWidth = 1f * d; maskSoft.pathEffect = DashPathEffect(floatArrayOf(4 * d, 5 * d), 0f)
+        c.save(); c.clipRect(frame)
+        if (m.type == 2) {
+            c.drawCircle(cx, cy, inner, maskLine); c.drawCircle(cx, cy, outer, maskSoft)
+            c.drawCircle(cx, cy, 3 * d, maskLine)
+        } else if (m.type == 1) {
+            val ux = kotlin.math.cos(m.angle); val uy = kotlin.math.sin(m.angle)
+            val nx = -uy; val ny = ux
+            val len = frame.width() + frame.height()
+            for ((off, p) in listOf(inner to maskLine, -inner to maskLine, outer to maskSoft, -outer to maskSoft)) {
+                val ox = cx + nx * off; val oy = cy + ny * off
+                c.drawLine(ox - ux * len, oy - uy * len, ox + ux * len, oy + uy * len, p)
+            }
+        }
+        c.restore()
     }
 
     private fun drawFocus(c: Canvas) {

@@ -106,6 +106,7 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
     private lateinit var artRow: LinearLayout
     private lateinit var paramRow: LinearLayout
     private lateinit var artSlider: SeekBar
+    private lateinit var artValue: TextView
     private lateinit var evValue: TextView
     private lateinit var evSlider: SeekBar
     private lateinit var zoomRow: LinearLayout
@@ -129,8 +130,11 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
     private var flashMode = ImageCapture.FLASH_MODE_OFF
     private var layer = "COMPOSE"         // COMPOSE, ART, EXPOSURE — switching never clears the others
     private var art = ArtMode.OFF
-    private var artValues = FloatArray(5)
+    private var artState = ArtState(ArtMode.OFF.defaults, false)
+    private val artValues: FloatArray get() = artState.values
     private var artParam = 0
+    private var anchor = 0                // which thirds/φ point, or which corner's diagonal, the focus follows
+    private var guideHidden = false       // hide the overlay without changing (or unlinking) the guide
     private var liveSeed = (Math.random() * 1000).toFloat()
     private var liveShader: RuntimeShader? = null
     // double exposure
@@ -192,7 +196,10 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
         layer = if (restoring) prefs.getString("layer", "COMPOSE") ?: "COMPOSE" else "COMPOSE"
         art = if (restoring) runCatching { ArtMode.valueOf(prefs.getString("art", ArtMode.OFF.name)!!) }.getOrDefault(ArtMode.OFF) else ArtMode.OFF
         if (!Art.supported) art = ArtMode.OFF
-        artValues = Art.loadValues(prefs, art)
+        artState = Art.loadState(prefs, art)
+        anchor = prefs.getInt("anchor", 0)
+        guideHidden = prefs.getBoolean("guideHidden", false)
+        Haptics.enabled = prefs.getBoolean("haptics", true)
         lastUri = prefs.getString("lastUri", null)?.let { Uri.parse(it) }
         double = prefs.getBoolean("double", false)
         firstUri = prefs.getString("firstUri", null)?.let { Uri.parse(it) }
@@ -240,6 +247,7 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
         prefs.edit().putString("guide", guide.name).putInt("quadrant", quadrant)
             .putBoolean("triFlip", triFlip).putBoolean("coach", coach)
             .putString("layer", layer).putString("art", art.name)
+            .putInt("anchor", anchor).putBoolean("guideHidden", guideHidden).putBoolean("haptics", Haptics.enabled)
             .putBoolean("double", double).putString("firstUri", firstUri?.toString())
             .putString("blend", blend.name).putFloat("blendStrength", blendStrength).apply()
     }
@@ -269,15 +277,20 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
         layoutParams = LinearLayout.LayoutParams(dpi(size), dpi(size))
     }
 
-    private fun slider(onMove: (Int) -> Unit) = SeekBar(this).apply {
+    /** A slider with dial-like detents every 10% (a firmer one at [neutral], e.g. 0 EV). It never snaps. */
+    private fun slider(neutral: Float? = null, onStop: (() -> Unit)? = null, onMove: (Int) -> Unit) = SeekBar(this).apply {
         max = 100
         progressTintList = ColorStateList.valueOf(cGold)
         progressBackgroundTintList = ColorStateList.valueOf(cLine)
         thumbTintList = ColorStateList.valueOf(Color.WHITE)
+        val det = Detents(neutral)
         setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-            override fun onProgressChanged(s: SeekBar, v: Int, fromUser: Boolean) { if (fromUser) onMove(v) }
-            override fun onStartTrackingTouch(s: SeekBar) {}
-            override fun onStopTrackingTouch(s: SeekBar) {}
+            override fun onProgressChanged(s: SeekBar, v: Int, fromUser: Boolean) {
+                if (!fromUser) return
+                det.move(s, v.toFloat() / s.max.coerceAtLeast(1)); onMove(v)
+            }
+            override fun onStartTrackingTouch(s: SeekBar) { det.begin(s.progress.toFloat() / s.max.coerceAtLeast(1)) }
+            override fun onStopTrackingTouch(s: SeekBar) { onStop?.invoke() }
         })
     }
 
@@ -316,6 +329,9 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
         top.addView(coachBtn)
         flashBtn = iconButton(IconButton.Icon.FLASH_OFF, 40f) { cycleFlash() }.apply { contentDescription = "Flash" }
         top.addView(flashBtn, (flashBtn.layoutParams as LinearLayout.LayoutParams).apply { leftMargin = dpi(8f) })
+        val more = iconButton(IconButton.Icon.MORE, 40f) {}.apply { contentDescription = "Settings" }
+        more.setOnClickListener { showSettings(more) }
+        top.addView(more, (more.layoutParams as LinearLayout.LayoutParams).apply { leftMargin = dpi(8f) })
         root.addView(top, LinearLayout.LayoutParams(match, wrap))
 
         // viewfinder
@@ -368,9 +384,15 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
         val ascroll = HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false }
         artRow = hrow(); ascroll.addView(artRow)
         artLayer.addView(ascroll, LinearLayout.LayoutParams(match, dpi(48f)))
-        paramRow = hrow(); artLayer.addView(paramRow, LinearLayout.LayoutParams(match, dpi(28f)))
-        artSlider = slider { v -> onArtSlider(v / 100f) }
-        artLayer.addView(artSlider, LinearLayout.LayoutParams(match, dpi(28f)).apply { leftMargin = dpi(4f); rightMargin = dpi(4f) })
+        val pscroll = HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false }
+        paramRow = hrow(); pscroll.addView(paramRow)
+        artLayer.addView(pscroll, LinearLayout.LayoutParams(match, dpi(34f)))
+        val sRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(dpi(4f), 0, dpi(16f), 0) }
+        artSlider = slider(onStop = { overlay.fadeMask() }) { v -> onArtSlider(v / 100f) }
+        sRow.addView(artSlider, LinearLayout.LayoutParams(0, dpi(32f), 1f))
+        artValue = label("", 11f, cGold, mono).apply { gravity = Gravity.END }
+        sRow.addView(artValue, LinearLayout.LayoutParams(dpi(30f), wrap))
+        artLayer.addView(sRow, LinearLayout.LayoutParams(match, dpi(32f)))
         layers.addView(artLayer, lp(match, match))
 
         exposureLayer = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
@@ -379,7 +401,7 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
         evValue = label("0.0 EV", 13f, cGold, mono)
         evHead.addView(evValue)
         exposureLayer.addView(evHead, LinearLayout.LayoutParams(match, dpi(34f)))
-        evSlider = slider { v -> onEvSlider(v) }
+        evSlider = slider(neutral = 0.5f) { v -> onEvSlider(v) }
         exposureLayer.addView(evSlider, LinearLayout.LayoutParams(match, dpi(36f)).apply { leftMargin = dpi(4f); rightMargin = dpi(4f) })
         val evFoot = hrow()
         evFoot.addView(label("−2", 11f, cMuted, mono)); evFoot.addView(spacer())
@@ -397,7 +419,7 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
         blendSlider = slider { v -> blendStrength = v / 100f; blendValue.text = "$v%"; applyGhost(); save() }
         blendLayer.addView(blendSlider, LinearLayout.LayoutParams(match, dpi(32f)).apply { leftMargin = dpi(4f); rightMargin = dpi(4f) })
         layers.addView(blendLayer, lp(match, match))
-        root.addView(layers, LinearLayout.LayoutParams(match, dpi(104f)))
+        root.addView(layers, LinearLayout.LayoutParams(match, dpi(116f)))
 
         // zoom, then the shutter bar
         zoomRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER }
@@ -564,21 +586,24 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
         if (::preview.isInitialized) overlay.post { applyLiveArt() }
         guideRow.removeAllViews()
         for (g in Guide.values()) {
-            guideRow.addView(chip(g.label, g == guide) { guide = g; aligned = false; save(); applyGuide() },
+            guideRow.addView(chip(g.label, g == guide) { guide = g; aligned = false; save(); applyGuide(); guideMoved() },
                 LinearLayout.LayoutParams(wrap, wrap).apply { rightMargin = dpi(8f) })
         }
         secondRow.removeAllViews()
+        val tileLp = { LinearLayout.LayoutParams(dpi(52f), dpi(40f)).apply { rightMargin = dpi(8f) } }
         when (guide) {
-            Guide.SPIRAL -> {
-                for (q in 0..3) secondRow.addView(tile(q == quadrant, { c, p, on -> drawMiniSpiral(c, p, q, on) }) { quadrant = q; aligned = false; save(); applyGuide() },
-                    LinearLayout.LayoutParams(dpi(52f), dpi(40f)).apply { rightMargin = dpi(8f) })
-            }
-            Guide.TRIANGLES -> {
-                for (f in listOf(false, true)) secondRow.addView(tile(f == triFlip, { c, p, on -> drawDir(c, p, f, on) }) { triFlip = f; aligned = false; save(); applyGuide() },
-                    LinearLayout.LayoutParams(dpi(52f), dpi(40f)).apply { rightMargin = dpi(8f) })
-            }
+            Guide.SPIRAL -> for (q in 0..3) secondRow.addView(tile(q == quadrant, { c, p, on -> drawMiniSpiral(c, p, q, on) }) { quadrant = q; aligned = false; save(); applyGuide(); guideMoved() }, tileLp())
+            Guide.TRIANGLES, Guide.DYNAMIC -> for (f in listOf(false, true)) secondRow.addView(tile(f == triFlip, { c, p, on -> drawDir(c, p, f, on) }) { triFlip = f; aligned = false; save(); applyGuide(); guideMoved() }, tileLp())
+            Guide.THIRDS, Guide.PHI_GRID, Guide.DIAGONALS ->
+                // which point (or corner diagonal) a guide-linked focus sits on
+                for (a in 0..3) secondRow.addView(tile(a == anchor, { c, p, on -> drawAnchor(c, p, a, on, guide == Guide.DIAGONALS) }) { anchor = a; save(); applyGuide(); guideMoved() }, tileLp())
             else -> {}
         }
+        secondRow.addView(spacer())
+        if (guide != Guide.OFF) secondRow.addView(chip(if (guideHidden) "SHOW" else "HIDE", guideHidden) {
+            guideHidden = !guideHidden; save(); applyGuide()       // hiding never unlinks the focus
+        })
+        overlay.hidden = guideHidden
         overlay.invalidate(); updateHud()
     }
 
@@ -588,6 +613,22 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
     }.apply {
         background = if (on) rounded(withAlpha(cGold, 0.14f), cGold, 10f) else rounded(cElev, cLine, 10f)
         setOnClickListener { onClick() }
+    }
+
+    /** A mini frame with the chosen thirds point (or corner diagonal) marked. */
+    private fun View.drawAnchor(c: Canvas, p: Paint, a: Int, on: Boolean, diagonal: Boolean) {
+        val h = height * 0.62f; val w = h * 0.75f
+        val l = (width - w) / 2; val t = (height - h) / 2
+        p.style = Paint.Style.STROKE; p.strokeWidth = dp(1f); p.color = if (on) cGold else cMuted
+        c.drawRect(l, t, l + w, t + h, p)
+        val x = if (a % 2 == 0) l else l + w; val y = if (a < 2) t else t + h
+        if (diagonal) {
+            val dx = if (a % 2 == 0) 1f else -1f; val dy = if (a < 2) 1f else -1f
+            val k = minOf(w, h); c.drawLine(x, y, x + dx * k, y + dy * k, p)
+        } else {
+            val px = if (a % 2 == 0) l + w / 3 else l + w * 2 / 3; val py = if (a < 2) t + h / 3 else t + h * 2 / 3
+            p.style = Paint.Style.FILL; c.drawCircle(px, py, dp(2.6f), p)
+        }
     }
 
     private fun View.drawMiniSpiral(c: Canvas, p: Paint, q: Int, on: Boolean) {
@@ -637,52 +678,100 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
         }
         for (m in ArtMode.values()) {
             artRow.addView(chip(m.label, m == art) {
-                art = m; artValues = Art.loadValues(prefs, m); artParam = 0
+                // each look keeps its own settings; Off just pauses the look, nothing is forgotten
+                art = m; artState = Art.loadState(prefs, m); artParam = 0
                 overlay.squareGuide = art == ArtMode.HOLGA; overlay.invalidate(); updateHud()
                 save(); applyArtUi(); applyLiveArt(); applyLayer()
             }, LinearLayout.LayoutParams(wrap, wrap).apply { rightMargin = dpi(8f) })
         }
         if (art == ArtMode.OFF) {
             paramRow.addView(label("Pick a look. The untouched original is always saved too.", 11.5f, cMuted))
-            artSlider.visibility = View.INVISIBLE
+            artSlider.visibility = View.INVISIBLE; artValue.text = ""
             return
         }
         art.shown.forEach { i ->
             val on = i == artParam
             paramRow.addView(label(art.sliders[i].first.uppercase(Locale.US), 10f, if (on) cGold else cMuted, mono, 0.1f).apply {
-                setPadding(0, 0, dpi(12f), 0); setOnClickListener { artParam = i; applyArtUi() }
+                setPadding(0, dpi(8f), dpi(12f), dpi(8f)); setOnClickListener { artParam = i; applyArtUi(); if (art.isFocusSlider(i)) showMask() }
             })
         }
-        paramRow.addView(spacer())
-        paramRow.addView(label("${(artValues[artParam] * 100).roundToInt()}", 11f, cGold, mono))
+        if (art == ArtMode.HOLGA) paramRow.addView(miniChip("LEAK · " + LEAK_STYLES[artValues[5].roundToInt().coerceIn(0, 5)], artValues[5] > 0.5f) {
+            artValues[5] = ((artValues[5].roundToInt() + 1) % LEAK_STYLES.size).toFloat()
+            if (artValues[5].roundToInt() == 5) liveSeed = (Math.random() * 1000).toFloat()   // Random: a fresh, stable variant
+            Art.saveState(prefs, art, artState); applyArtUi(); applyLiveArt()
+        })
+        if (art.follows) paramRow.addView(miniChip("FOLLOW GUIDE", artState.follow) {
+            artState.follow = !artState.follow
+            if (!artState.follow && art == ArtMode.TILT_SHIFT) unlinkTiltBand()
+            Art.saveState(prefs, art, artState); applyArtUi(); applyLiveArt(); showMask()
+        })
+        paramRow.addView(miniChip("RESET", false) {
+            artState = Art.resetState(prefs, art); artParam = 0; applyArtUi(); applyLiveArt(); applyLayer()
+        })
+        if (art.about.isNotEmpty() && artParam == 0) paramRow.addView(label(art.about, 10.5f, cMuted).apply { setPadding(dpi(6f), 0, 0, 0) })
         artSlider.visibility = View.VISIBLE
         artSlider.progress = (artValues[artParam] * 100).roundToInt()
+        artValue.text = "${(artValues[artParam] * 100).roundToInt()}"
+    }
+
+    private fun miniChip(text: String, on: Boolean, onClick: () -> Unit) = label(text, 9.5f, if (on) cGold else cMuted, mono, 0.1f).apply {
+        setPadding(dpi(9f), dpi(5f), dpi(9f), dpi(5f))
+        background = if (on) rounded(withAlpha(cGold, 0.16f), withAlpha(cGold, 0.8f), 8f) else rounded(cElev, cLine, 8f)
+        setOnClickListener { onClick() }
+        layoutParams = LinearLayout.LayoutParams(wrap, wrap).apply { leftMargin = dpi(6f) }
     }
 
     private fun onArtSlider(v: Float) {
         artValues[artParam] = v
-        Art.saveValues(prefs, art, artValues)
-        (paramRow.getChildAt(paramRow.childCount - 1) as? TextView)?.text = "${(v * 100).roundToInt()}"
+        Art.saveState(prefs, art, artState)
+        artValue.text = "${(v * 100).roundToInt()}"
         applyLiveArt()
+        if (art.isFocusSlider(artParam)) showMask()
+    }
+
+    /** Turning Follow guide off leaves Tilt Shift's band where the guide had put it, ready to adjust by hand. */
+    private fun unlinkTiltBand() {
+        val g = guideCtx() ?: return
+        val m = Focus.linked(g) ?: return
+        if (m.type == 1) {
+            artValues[1] = m.cy.coerceIn(0f, 1f)
+            artValues[3] = (m.angle / 1.5707964f + 0.5f).coerceIn(0f, 1f)
+        } else artValues[1] = m.cy.coerceIn(0f, 1f)
+    }
+
+    private fun guideCtx(): GuideCtx? {
+        val fr = overlay.frame
+        if (fr.isEmpty) return null
+        return GuideCtx(guide, quadrant, triFlip, anchor, RectF(fr), RectF(overlay.guideFrame))
+    }
+
+    /** The mask the look uses right now (frame uv). */
+    private fun liveMask(): FocusMask = Focus.resolve(art, artValues, artState.follow, guideCtx(), liveSubject())
+
+    /** The guide changed: a guide-linked focus moves with it (and shows briefly); a manual one stays put. */
+    private fun guideMoved() {
+        if (art != ArtMode.OFF && art.follows && artState.follow) { applyLiveArt(); showMask() }
+    }
+
+    /** Briefly outlines the simulated focus region: never part of the photo. */
+    private fun showMask() {
+        if (art == ArtMode.OFF) return
+        val m = liveMask()
+        if (m.type == 0 || (art != ArtMode.TILT_SHIFT && m.strength <= 0f)) return
+        overlay.showMask(m)
     }
 
     /** The art mode runs on the preview itself, so the viewfinder shows the finished look. */
     private var lastFocus = PointF(0.5f, 0.5f)
 
-    /**
-     * What stays sharp under Depth (0..1 across the frame): the subject you tapped, followed as you move;
-     * before any tap, the spiral's eye, or the middle for other guides.
-     */
-    private fun liveFocus(): PointF {
+    /** The subject you tapped (0..1 across the frame), followed as you move. Null before any tap. */
+    private fun liveSubject(): PointF? {
         val fr = overlay.frame
-        if (fr.isEmpty) return PointF(0.5f, 0.5f)
+        if (fr.isEmpty) return null
         val t = overlay.target; val st = trackState
-        if (t != null && st != null && !st.lost) return PointF((t.x - fr.left) / fr.width(), (t.y - fr.top) / fr.height())
-        if (guide == Guide.SPIRAL) Geo.goals(Guide.SPIRAL, overlay.guideFrame, quadrant, triFlip, align).firstOrNull()?.let {
-            return PointF((it.x - fr.left) / fr.width(), (it.y - fr.top) / fr.height())
-        }
-        return PointF(0.5f, 0.5f)
+        return if (t != null && st != null && !st.lost) PointF((t.x - fr.left) / fr.width(), (t.y - fr.top) / fr.height()) else null
     }
+    private fun liveFocus(): PointF = liveMask().let { PointF(it.cx, it.cy) }
 
     private fun applyLiveArt() {
         if (!::preview.isInitialized) return
@@ -692,7 +781,7 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
         if (sh == null) { camLayer.setRenderEffect(null); return }
         val f = overlay.frame
         val fp = liveFocus(); lastFocus = fp
-        Art.setUniforms(sh, artValues, f.left, f.top, f.width(), f.height(), liveSeed, fp.x, fp.y)
+        Art.setUniforms(sh, artValues, f.left, f.top, f.width(), f.height(), liveSeed, liveMask())
         camLayer.setRenderEffect(RenderEffect.createRuntimeShaderEffect(sh, "content"))   // live picture and first exposure together
     }
     private var liveMode: ArtMode? = null
@@ -888,6 +977,16 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
         }
     }
 
+    /** In Art with Tilt Shift on (and not following the guide), a vertical drag on the picture moves the band. */
+    override fun onFocusDrag(dy: Float): Boolean {
+        if (layer != "ART" || art != ArtMode.TILT_SHIFT || artState.follow || overlay.frame.isEmpty) return false
+        artValues[1] = (artValues[1] + dy / overlay.frame.height()).coerceIn(0f, 1f)
+        if (artParam == 1) { artSlider.progress = (artValues[1] * 100).roundToInt(); artValue.text = "${(artValues[1] * 100).roundToInt()}" }
+        Art.saveState(prefs, art, artState); applyLiveArt(); showMask()
+        return true
+    }
+    override fun onFocusDragEnd() { overlay.fadeMask() }
+
     override fun onPinch(factor: Float) {
         val cam = camera ?: return
         cam.cameraControl.setZoomRatio((zoomRatio * factor).coerceIn(zoomMin, zoomMax))
@@ -916,9 +1015,17 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
         nice.animate().alpha(0f).setStartDelay(900).setDuration(350).withEndAction { nice.visibility = View.GONE }.start()
     }
 
-    private fun buzz() {
-        val fb = if (Build.VERSION.SDK_INT >= 30) HapticFeedbackConstants.CONFIRM else HapticFeedbackConstants.VIRTUAL_KEY
-        overlay.performHapticFeedback(fb)
+    private fun buzz() = Haptics.confirm(overlay)
+
+    /** Settings: just what isn't worth a button. */
+    private fun showSettings(anchorView: View) {
+        val m = android.widget.PopupMenu(this, anchorView)
+        m.menu.add(0, 1, 0, "Haptic feedback").apply { isCheckable = true; isChecked = Haptics.enabled }
+        m.setOnMenuItemClickListener { item ->
+            if (item.itemId == 1) { Haptics.enabled = !Haptics.enabled; save(); if (Haptics.enabled) Haptics.confirm(anchorView) }
+            true
+        }
+        m.show()
     }
 
     /** Screen offset (subject minus goal) → the move that fixes it, in the world's terms. */
@@ -1000,8 +1107,8 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
             put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/Fibonacci Camera")
         }
         // The art look at the moment of the shot. The original is saved as-is; the look becomes a copy.
-        val fp = liveFocus()
-        val recipe = if (Art.supported && art != ArtMode.OFF) Recipe(art, artValues.copyOf(), liveSeed, fp.x, fp.y) else null
+        // the frame is the whole photo, so the live mask (frame uv) is already in the photo's own coordinates
+        val recipe = if (Art.supported && art != ArtMode.OFF) Recipe(art, artValues.copyOf(), liveSeed, artState.follow, liveMask()) else null
         val first = if (double) firstUri else null
         val takingFirst = double && first == null
         val blendNow = blend; val strengthNow = blendStrength

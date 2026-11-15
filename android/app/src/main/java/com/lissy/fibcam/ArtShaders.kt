@@ -1,17 +1,21 @@
 package com.lissy.fibcam
 
 /**
- * Art modes as AGSL. The same source runs live on the viewfinder (as a RenderEffect) and on the
- * full-resolution photo (offscreen), so the saved picture matches what you saw.
+ * Art modes as AGSL. The same source runs live on the viewfinder (as a RenderEffect), on the
+ * full-resolution photo (offscreen) and, translated to Metal by tools/gen_metal.py, on iOS — so the
+ * saved picture matches what you saw.
  *
- * Every shader shares these uniforms:
- *   org, res  – the image's top-left and size, in the coordinates the shader is drawn in
- *   amt       – intensity, 0..1
+ * Shared uniforms:
+ *   org, res  – the photo's top-left and size (the frame the look is measured against, never the screen)
+ *   amt       – the intensity slider, 0..1. Each mode maps it through its own curve (A) so 50% looks right.
  *   p1..p3    – the mode's own sliders, 0..1
- *   seed      – per-photo randomness (light leaks, grain)
+ *   seed      – per-photo randomness (leak placement, grain). Stable until the next shot.
+ *   msk, msz  – the focus mask: centre (x, y in 0..1 of the frame), angle (radians), type
+ *               (0 none, 1 band, 2 radial); size (half-width or radius, in frame heights), feather, strength
+ *   lks       – Holga leak style: 0 off, 1 warm, 2 cool, 3 neutral, 4 mixed, 5 random
  *
- * Each mode defines fx(); the shared main() only runs it inside the image, so the letterbox
- * around the viewfinder stays black.
+ * Every mode starts with `if (!inFrame(p)) return` so letterboxing is never touched, and every curve
+ * returns the untouched photo at 0%.
  */
 object ArtShaders {
     const val COMMON = """
@@ -23,14 +27,16 @@ uniform float p1;
 uniform float p2;
 uniform float p3;
 uniform float seed;
-uniform float2 foc;
-uniform float dep;
+uniform float4 msk;
+uniform float3 msz;
+uniform float lks;
 
 float luma(float3 c) { return dot(c, float3(0.299, 0.587, 0.114)); }
 float hash(float2 p) { return fract(sin(dot(p, float2(12.9898, 78.233)) + seed * 17.0) * 43758.5453); }
 float3 satur(float3 c, float s) { return mix(float3(luma(c)), c, s); }
 float3 contrast(float3 c, float k) { return clamp((c - 0.5) * k + 0.5, 0.0, 1.0); }
 float3 scurve(float3 c, float k) { float3 x = clamp(c, 0.0, 1.0); return clamp(mix(x, x * x * (3.0 - 2.0 * x), k), 0.0, 1.0); }
+float3 screen(float3 a, float3 b) { return 1.0 - (1.0 - a) * (1.0 - clamp(b, 0.0, 1.0)); }
 float4 px(float2 p) { return float4(content.eval(p)); }
 float2 uvOf(float2 p) { return (p - org) / res; }
 bool inFrame(float2 p) { float2 u = uvOf(p); return u.x >= 0.0 && u.y >= 0.0 && u.x <= 1.0 && u.y <= 1.0; }
@@ -51,19 +57,39 @@ float3 blurAt(float2 p, float r) {
     }
     return acc / 25.0;
 }
-// Depth: sharp around the focus point (your subject), gently softer with distance, like a fast lens.
-// dep 0 = off; the default is subtle. Returns a blur radius in px.
+// A wider, smoother disc for big lens blur (Tilt Shift): 40 taps.
+float3 blurWide(float2 p, float r) {
+    float3 acc = px(p).rgb;
+    float j = hash(p + 3.3) * 6.2831853;
+    for (int i = 0; i < 40; i++) {
+        float fi = float(i);
+        float a = fi * 2.3999632 + j;
+        float k = sqrt((fi + 0.5) / 40.0);
+        acc += px(p + float2(cos(a), sin(a)) * r * k).rgb;
+    }
+    return acc / 41.0;
+}
+// The focus mask: 0 inside the sharp region, rising smoothly to 1 across the feather.
+// Measured in frame heights from the mask's centre (radial) or centre line (band).
+float maskSoft(float2 p) {
+    if (msk.w < 0.5) return 0.0;
+    float2 d = (uvOf(p) - msk.xy) * float2(res.x / res.y, 1.0);
+    float dist = msk.w < 1.5 ? abs(dot(d, float2(-sin(msk.z), cos(msk.z)))) : length(d);
+    float f = 0.03 + msz.y * 0.55;
+    float t = clamp((dist - msz.x) / f, 0.0, 1.0);
+    return t * t * (3.0 - 2.0 * t);
+}
+// Depth: gently softer away from the sharp region, like a fast lens. msz.z is the strength.
 float depthR(float2 p) {
-    if (dep <= 0.001) return 0.0;
-    float2 d = (uvOf(p) - foc) * float2(res.x / res.y, 1.0);
-    float f = smoothstep(0.1, 0.8, length(d));
-    return f * f * dep * 0.02 * min(res.x, res.y);
+    if (msz.z <= 0.001) return 0.0;
+    float s = maskSoft(p);
+    return s * s * msz.z * 0.02 * min(res.x, res.y);
 }
 float3 focusAt(float2 p, float3 c) {
     float r = depthR(p);
     return r < 0.6 ? c : blurAt(p, r);
 }
-// Only what's brighter than thr spreads out: a highlight halo, not a wash.
+// Highlights spread out, with a smooth threshold: a halo around bright things, never a wash.
 float3 bloomAt(float2 p, float r, float thr) {
     float3 acc = float3(0.0);
     float j = hash(p + 1.7) * 6.2831853;
@@ -71,9 +97,10 @@ float3 bloomAt(float2 p, float r, float thr) {
         float fi = float(i);
         float a = fi * 2.3999632 + j;
         float k = sqrt((fi + 0.5) / 16.0);
-        acc += max(px(p + float2(cos(a), sin(a)) * r * k).rgb - thr, 0.0);
+        float3 s = px(p + float2(cos(a), sin(a)) * r * k).rgb;
+        acc += s * smoothstep(thr, thr + 0.22, luma(s));
     }
-    return acc / (16.0 * (1.0 - thr));
+    return acc / 16.0;
 }
 float grainAt(float2 p) {
     float g = max(1.0, res.y / 900.0);
@@ -84,137 +111,185 @@ float vnoise(float2 x) {
     float a = hash(i); float b = hash(i + float2(1.0, 0.0)); float c = hash(i + float2(0.0, 1.0)); float d = hash(i + float2(1.0, 1.0));
     return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
 }
+// Film grain that clumps a little and sits mostly in the midtones; sized to the frame so preview and export match.
+float filmGrain(float2 p, float l) {
+    float g = max(1.0, res.y / 900.0);
+    float fine = hash(floor(p / g)) - 0.5;
+    float clump = vnoise(p / (g * 2.6)) - 0.5;
+    return (fine * 0.75 + clump * 0.9) * (1.0 - abs(l - 0.45) * 1.1);
+}
 """
 
     val BODIES: Map<ArtMode, String> = mapOf(
+        // Intensity drives the blur; the mask (band by default, or the guide's shape) says where it's sharp.
         ArtMode.TILT_SHIFT to """
 half4 main(float2 p) {
     float4 o = px(p);
     if (!inFrame(p)) return half4(o);
-    float2 uv = uvOf(p);
-    float ang = (p3 - 0.5) * 1.5708;
-    float2 n = float2(-sin(ang), cos(ang));
-    float d = abs(dot(uv - float2(0.5, p1), n));
-    float w = 0.02 + p2 * 0.25;
-    float b = smoothstep(w, w + 0.15, d);
-    float far = smoothstep(w, w + 0.55, d);
-    float r = (b * 0.012 + far * 0.032) * amt * min(res.x, res.y);
-    float3 base = mix(o.rgb, blurAt(p, r), smoothstep(0.0, 0.25, b));
-    float3 c = satur(scurve(base, 0.5 * amt), 1.0 + 0.65 * amt);
-    return half4(float4(mix(o.rgb, c, min(1.0, amt * 1.4)), o.a));
+    float A = amt;
+    float s = min(res.x, res.y);
+    float soft = maskSoft(p);
+    float r = pow(soft, 1.35) * s * 0.055 * pow(A, 1.2);
+    float3 base = r < 0.6 ? o.rgb : blurWide(p, r);
+    float3 c = satur(scurve(base, 0.35 * A), 1.0 + 0.32 * A);
+    return half4(float4(c, o.a));
 }
 """,
+        // A plastic lens on a square camera: soft, uneven edges, colour fringing, a vignette that isn't
+        // perfectly round, film colour, grain and the odd light leak creeping in from an edge.
         ArtMode.HOLGA to """
+float3 leakColour(float style, float along, float depth, float pick) {
+    float3 warm = mix(float3(1.0, 0.36, 0.10), float3(1.0, 0.72, 0.30), along);
+    float3 cool = mix(float3(0.20, 0.55, 1.0), float3(0.45, 0.92, 1.0), along);
+    float3 neut = float3(1.0, 0.95, 0.84);
+    if (style < 1.5) return warm;
+    if (style < 2.5) return cool;
+    if (style < 3.5) return neut;
+    if (style < 4.5) return mix(warm, cool, smoothstep(0.25, 0.9, depth));
+    float3 a = pick < 0.33 ? warm : (pick < 0.66 ? float3(1.0, 0.30, 0.42) : cool);
+    float3 b = pick < 0.5 ? neut : float3(1.0, 0.62, 0.20);
+    return mix(a, b, along * 0.6);
+}
 half4 main(float2 p) {
     float4 o = px(p);
     if (!inFrame(p)) return half4(o);
-    o.rgb = focusAt(p, o.rgb);
+    float a = 1.0 - pow(1.0 - amt, 1.5);
     float s = min(res.x, res.y);
     float2 sq = (p - org - 0.5 * (res - float2(s))) / s;
     float inside = step(0.0, sq.x) * step(sq.x, 1.0) * step(0.0, sq.y) * step(sq.y, 1.0);
     float2 cd = sq - 0.5;
-    float edge = length(cd) * 1.414;
-    float k = amt;
-    float rad = s * (0.0008 + (0.006 + p2 * 0.03) * pow(smoothstep(0.2, 1.1, edge), 1.3)) * (0.3 + 0.7 * k);
+    float wob = vnoise(sq * 3.0 + seed) - 0.5;
+    float edge = length(cd) * 1.414 * (1.0 + wob * 0.18);
+    float rad = s * (0.0008 + (0.006 + p2 * 0.03) * pow(smoothstep(0.2, 1.1, edge), 1.3)) * a;
     float3 c = blurAt(p, max(rad, depthR(p)));
-    float ca = s * 0.006 * edge * edge * (0.4 + k);
-    c.r = mix(c.r, px(p + cd * ca).r, 0.55);
-    c.b = mix(c.b, px(p - cd * ca).b, 0.55);
-    c = satur(scurve(c, 0.55 + 0.45 * k), 1.2 + 0.3 * k);
+    float ca = s * 0.005 * edge * edge * a;
+    c.r = mix(c.r, px(p + cd * ca).r, 0.6);
+    c.b = mix(c.b, px(p - cd * ca).b, 0.6);
+    c = satur(scurve(c, 0.5 * a), 1.0 + 0.22 * a);
     float l = luma(c);
-    c += float3(-0.03, 0.02, 0.05) * (1.0 - l) + float3(0.06, 0.02, -0.05) * l;
-    c *= 1.0 - (0.45 + p1 * 0.55) * pow(smoothstep(0.3, 1.05, edge), 1.5) * (0.55 + 0.45 * k);
-    float2 l1 = float2(0.15 + 0.7 * hash(float2(seed, 1.0)), 0.12);
-    float leak = exp(-pow(length((sq - l1) * float2(1.0, 2.2)) * 3.0, 2.0));
-    leak += 0.7 * exp(-pow((1.0 - sq.x) * 5.0, 2.0)) * hash(float2(seed, 7.0));
-    c += p3 * leak * float3(1.0, 0.42, 0.12) * 0.9;
-    c += grainAt(p) * (0.015 + 0.075 * k);
+    c += (float3(-0.025, 0.02, 0.045) * (1.0 - l) + float3(0.05, 0.02, -0.04) * l) * a;
+    c *= 1.0 - (0.45 + p1 * 0.55) * a * pow(smoothstep(0.28, 1.12, edge), 1.5);
+    if (lks > 0.5 && p3 > 0.001) {
+        float side = floor(hash(float2(seed, 3.0)) * 4.0);
+        float2 q = side < 1.0 ? sq : (side < 2.0 ? float2(sq.y, 1.0 - sq.x) : (side < 3.0 ? float2(1.0 - sq.x, 1.0 - sq.y) : float2(1.0 - sq.y, sq.x)));
+        float along = q.x;
+        float reach = 0.10 + 0.22 * hash(float2(seed, 5.0));
+        float ragged = (vnoise(float2(along * 4.0, seed)) - 0.5) * 0.14 + (vnoise(q * 9.0 + seed) - 0.5) * 0.05;
+        float d = max(q.y + ragged, 0.0) / reach;
+        float body = exp(-pow(d, 1.6)) * (0.45 + 0.55 * vnoise(float2(along * 2.2, seed * 1.3)));
+        float2 core = float2(0.15 + 0.7 * hash(float2(seed, 9.0)), 0.0);
+        body += 0.55 * exp(-pow(length((q - core) * float2(1.4, 3.2)) * 3.2, 2.0));
+        float corner = exp(-pow(length(1.0 - q) * 2.6, 2.0)) * step(0.5, hash(float2(seed, 11.0)));
+        float pick = fract(seed * 0.618);
+        float3 lc = leakColour(lks, along, d, pick) * body + leakColour(lks, 1.0 - along, 0.9, pick) * corner * 0.6;
+        c = screen(c, lc * p3 * (0.55 + 0.45 * a));
+    }
+    c += filmGrain(p, l) * (0.012 + 0.06 * a);
     float3 fx = clamp(c, 0.0, 1.0) * inside;
-    return half4(float4(mix(o.rgb, fx, max(amt, 1.0 - inside)), o.a));
+    return half4(float4(mix(o.rgb, fx, max(a, 1.0 - inside)), o.a));
 }
 """,
+        // A lensless camera: soft all over, softer and darker towards the edges, slightly muted, fine grain.
         ArtMode.PINHOLE to """
 half4 main(float2 p) {
     float4 o = px(p);
     if (!inFrame(p)) return half4(o);
-    o.rgb = focusAt(p, o.rgb);
+    float a = amt;
     float s = min(res.x, res.y);
     float e = edgeOf(p);
-    float3 c = blurAt(p, max(s * (0.0015 + p1 * 0.004 + e * e * (0.006 + p1 * 0.022)), depthR(p)));
-    c = mix(c, blurAt(p, s * 0.022), 0.2);
-    c += bloomAt(p, s * 0.03, 0.72) * 0.25;
-    c = satur(c, 1.18) * float3(1.06, 1.0, 0.9) + float3(0.012, 0.004, 0.0);
-    c *= 1.0 - (0.5 + p2 * 0.45) * pow(smoothstep(0.0, 1.15, e), 1.7);
-    return half4(float4(mix(o.rgb, clamp(c, 0.0, 1.0), amt), o.a));
+    float rad = s * (0.0012 + p1 * 0.005 + e * e * (0.004 + p1 * 0.014)) * (0.3 + 0.7 * a);
+    float3 c = blurAt(p, max(rad, depthR(p)));
+    c = mix(c, blurAt(p, s * 0.012), 0.1 * a);
+    c *= 1.0 + (vnoise(uvOf(p) * 2.5 + seed) - 0.5) * 0.06 * a;
+    c = satur(c, 1.0 - 0.18 * a) * mix(float3(1.0), float3(1.03, 1.0, 0.94), a);
+    c *= 1.0 - (0.35 + p2 * 0.4) * a * pow(smoothstep(0.1, 1.2, e), 1.7);
+    c += filmGrain(p, luma(c)) * 0.025 * a;
+    return half4(float4(mix(o.rgb, clamp(c, 0.0, 1.0), min(1.0, a * 2.0)), o.a));
 }
 """,
+        // Pushed black-and-white film: colour drains away as intensity rises, contrast and organic grain build.
         ArtMode.GRAINY_FILM to """
 half4 main(float2 p) {
     float4 o = px(p);
     if (!inFrame(p)) return half4(o);
     o.rgb = focusAt(p, o.rgb);
+    float a = amt;
     float l = luma(o.rgb);
-    l = clamp((l - 0.5) * (1.0 + p2 * 1.1) + 0.5, 0.0, 1.0);
-    l = smoothstep(0.04, 0.99, l);
-    float g = grainAt(p) + 0.6 * (hash(floor(p / max(1.0, res.y / 420.0)) + 3.1) - 0.5);
-    l += g * (0.05 + p1 * 0.24) * (1.0 - abs(l - 0.5) * 0.9);
-    return half4(float4(mix(o.rgb, float3(clamp(l, 0.0, 1.0)), amt), o.a));
+    l = (l - 0.5) * (1.0 + (0.3 + p2 * 1.1) * a) + 0.5;
+    l = smoothstep(-0.06, 1.04, l);
+    l += filmGrain(p, l) * (0.04 + p1 * 0.24) * a;
+    float3 mono = float3(clamp(l, 0.0, 1.0));
+    return half4(float4(mix(o.rgb, mono, pow(a, 0.7)), o.a));
 }
 """,
+        // Film in the wrong chemistry: yellow-green highlights, blue-cyan shadows, a film-like curve.
         ArtMode.CROSS_PROCESS to """
 half4 main(float2 p) {
     float4 o = px(p);
     if (!inFrame(p)) return half4(o);
     o.rgb = focusAt(p, o.rgb);
+    float a = amt;
     float3 c = o.rgb;
-    float3 x = float3(smoothstep(0.05, 0.85, c.r), clamp(c.g * 1.08 + 0.04, 0.0, 1.0), c.b * 0.6 + 0.15);
-    x.g = mix(x.g, smoothstep(0.0, 1.0, x.g), 0.6);
+    float k = 0.55 + 0.45 * a;
+    float3 x = float3(mix(c.r, smoothstep(0.05, 0.9, c.r), k), clamp(c.g * (1.0 + 0.08 * k) + 0.03 * k, 0.0, 1.0), mix(c.b, c.b * 0.6 + 0.15, k));
+    x.g = mix(x.g, smoothstep(0.0, 1.0, x.g), 0.6 * k);
     float l = luma(c);
     float bias = (p1 - 0.5) * 2.0;
-    x += float3(-0.05, 0.07, -0.06) * (1.0 - l) * (1.0 + bias);
-    x += float3(0.07, 0.05, -0.09) * l;
-    x += float3(0.06, -0.06, 0.06) * max(-bias, 0.0);
-    x = satur(contrast(x, 1.15), 1.3);
-    return half4(float4(mix(c, clamp(x, 0.0, 1.0), amt), o.a));
+    x += float3(-0.05, 0.06, 0.02) * (1.0 - l) * (1.0 + bias) * k;
+    x += float3(0.07, 0.05, -0.09) * l * k;
+    x += float3(0.05, -0.05, 0.07) * max(-bias, 0.0) * (1.0 - l) * k;
+    x = satur(contrast(x, 1.0 + 0.15 * a), 1.0 + 0.3 * a);
+    return half4(float4(mix(c, clamp(x, 0.0, 1.0), pow(a, 0.8)), o.a));
 }
 """,
+        // A diffusion filter: the picture stays sharp underneath; light from bright things spills softly
+        // into its surroundings, local contrast relaxes. No overall brightening.
         ArtMode.DREAM_LENS to """
 half4 main(float2 p) {
     float4 o = px(p);
     if (!inFrame(p)) return half4(o);
-    o.rgb = focusAt(p, o.rgb);
+    float a = 1.0 - pow(1.0 - amt, 1.4);
     float s = min(res.x, res.y);
-    float3 halo = bloomAt(p, s * (0.012 + p1 * 0.05), 0.55) * (0.9 + p1 * 1.8);
-    float3 soft = mix(o.rgb, blurAt(p, s * (0.0015 + p2 * 0.005)), 0.85);
-    float3 c = mix(o.rgb, soft, 0.15 + 0.5 * p2);
-    c = c + clamp(halo, 0.0, 1.0) * (1.0 - c);
-    c = mix(c, c * 0.93 + 0.035, 0.7);
-    c = satur(c, 0.93);
-    return half4(float4(mix(o.rgb, clamp(c, 0.0, 1.0), amt), o.a));
+    float3 base = focusAt(p, o.rgb);
+    float3 soft = blurAt(p, s * (0.0015 + p2 * 0.0055));
+    float3 c = mix(base, soft, (0.18 + 0.42 * p2) * a);
+    float3 halo = bloomAt(p, s * (0.012 + p1 * 0.035), 0.55);
+    c = screen(c, halo * (0.9 + 1.8 * p1) * a);
+    c = mix(c, c * 0.96 + 0.015, a);
+    c = satur(c, 1.0 - 0.08 * a);
+    return half4(float4(clamp(c, 0.0, 1.0), o.a));
 }
 """,
+        // Infrared-inspired: foliage glows, blue skies go dark, smooth tonal separation, optional halation.
         ArtMode.INFRARED to """
 half4 main(float2 p) {
     float4 o = px(p);
     if (!inFrame(p)) return half4(o);
     o.rgb = focusAt(p, o.rgb);
+    float a = amt;
     float3 c = o.rgb;
     float l = luma(c);
-    float veg = smoothstep(-0.02, 0.16, c.g - 0.5 * (c.r + c.b));
-    float sky = smoothstep(0.0, 0.18, c.b - max(c.r, c.g) + 0.02) * smoothstep(0.15, 0.5, l);
-    float ir = l * 0.85 + 0.08 + veg * (0.4 + 0.4 * l) - sky * 0.55;
-    ir = clamp((ir - 0.5) * (1.0 + p1 * 1.0) + 0.5, 0.0, 1.0);
-    ir += luma(bloomAt(p, min(res.x, res.y) * 0.02, 0.62)) * p2 * 1.6;
-    return half4(float4(mix(c, float3(clamp(ir, 0.0, 1.0)), amt), o.a));
+    float veg = smoothstep(-0.06, 0.24, c.g - 0.52 * (c.r + c.b)) * smoothstep(0.03, 0.3, l);
+    float sky = smoothstep(-0.04, 0.26, c.b - 0.5 * (c.r + c.g)) * smoothstep(0.08, 0.45, l);
+    float ir = 0.42 * c.r + 0.5 * c.g + 0.08 * c.b;
+    ir = ir + veg * (0.32 + 0.38 * l);
+    ir = ir * (1.0 - 0.55 * sky);
+    ir = (ir - 0.5) * (0.92 + p1 * 0.6) + 0.5;
+    ir = smoothstep(-0.08, 1.06, ir);
+    float glow = luma(bloomAt(p, min(res.x, res.y) * 0.02, 0.62));
+    ir = 1.0 - (1.0 - ir) * (1.0 - glow * p2 * 0.7);
+    return half4(float4(mix(c, float3(clamp(ir, 0.0, 1.0)), a), o.a));
 }
 """,
+        // A cyanotype print: Prussian-blue shadows, warm paper whites, a little paper grain.
         ArtMode.CYANOTYPE to """
 half4 main(float2 p) {
     float4 o = px(p);
     if (!inFrame(p)) return half4(o);
     o.rgb = focusAt(p, o.rgb);
+    float a = amt;
     float l = luma(o.rgb);
-    l = clamp((l - 0.5) * (0.95 + p1 * 0.8 + amt * 0.35) + 0.5, 0.0, 1.0);
+    l = clamp((l - 0.5) * (0.95 + p1 * 0.8 + a * 0.3) + 0.5, 0.0, 1.0);
     l = mix(l, smoothstep(0.0, 1.0, l), 0.45);
     float3 sh = float3(0.02, 0.16, 0.40);
     float3 md = float3(0.17, 0.40, 0.66);
@@ -225,24 +300,26 @@ half4 main(float2 p) {
     float fib = vnoise(float2(p.x / (g * 0.12), p.y / (g * 2.5)));
     c *= 1.0 + ((n - 0.5) * 0.08 + (fib - 0.5) * 0.03) * p2 * (0.4 + 0.6 * l);
     c *= vig(p, 0.12);
-    return half4(float4(mix(o.rgb, clamp(c, 0.0, 1.0), amt), o.a));
+    return half4(float4(mix(o.rgb, clamp(c, 0.0, 1.0), pow(a, 0.8)), o.a));
 }
 """,
+        // Bleach bypass: colour pulled back, silvery highlights, dense but not crushed blacks.
         ArtMode.BLEACH_BYPASS to """
 half4 main(float2 p) {
     float4 o = px(p);
     if (!inFrame(p)) return half4(o);
     o.rgb = focusAt(p, o.rgb);
+    float a = 1.0 - pow(1.0 - amt, 1.3);
     float3 c = o.rgb;
     float3 lum = float3(luma(c));
     float3 ov = mix(2.0 * c * lum, 1.0 - 2.0 * (1.0 - c) * (1.0 - lum), step(float3(0.5), lum));
-    float3 x = mix(lum, ov, 0.08 + p1 * 0.6);
-    x = scurve(x, 0.55 + p2 * 0.6);
-    x = max(x - 0.025, 0.0) / 0.975;
+    float3 x = mix(lum, ov, 0.12 + p1 * 0.6);
+    x = scurve(x, 0.5 + p2 * 0.6);
+    x = max(x - 0.02, 0.0) / 0.98;
     x = mix(x, 1.0 - (1.0 - x) * (1.0 - x) * 1.02, 0.12);
     x *= float3(0.98, 1.0, 1.03);
-    x += grainAt(p) * 0.03;
-    return half4(float4(mix(c, clamp(x, 0.0, 1.0), amt), o.a));
+    x += filmGrain(p, luma(x)) * 0.03;
+    return half4(float4(mix(c, clamp(x, 0.0, 1.0), a), o.a));
 }
 """,
     )

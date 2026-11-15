@@ -50,6 +50,40 @@ class CropView(ctx: Context) : View(ctx) {
     var focusMode = false
         set(v) { field = v; invalidate() }
     var onFocusTap: ((Float, Float) -> Unit)? = null
+    /** Which thirds/φ point or corner diagonal a guide-linked focus uses (from the camera's setting). */
+    var anchor = 0
+    private var maskUntil = 0L
+    /** Briefly outline the focus region (after a tap or a focus slider). */
+    fun flashMask() { maskUntil = System.currentTimeMillis() + 1600; invalidate(); postInvalidateDelayed(1700) }
+
+    // ---- focus coordinates: image uv (0..1 across the photo) <-> crop uv (0..1 across the tilted crop)
+    fun imageToCrop(u: Float, v: Float): PointF {
+        val dx = u * bw - cx; val dy = v * bh - cy
+        val c = cos(theta); val s = sin(theta)
+        return PointF(((dx * c + dy * s) + cw / 2) / cw, ((-dx * s + dy * c) + ch / 2) / ch)
+    }
+    fun cropToImage(a: Float, b: Float): PointF {
+        val x = (a - 0.5f) * cw; val y = (b - 0.5f) * ch
+        val c = cos(theta); val s = sin(theta)
+        return PointF((cx + x * c - y * s) / bw, (cy + x * s + y * c) / bh)
+    }
+
+    /**
+     * The look's focus region in crop uv (what the saved copy uses). Follow guide on: worked out from the
+     * crop's own guide, so it moves with the crop. Off: the point you chose stays on the same part of the
+     * photo however you crop or straighten.
+     */
+    fun cropMask(r: Recipe): FocusMask {
+        if (r.follow && r.mode.follows) {
+            val fr = RectF(0f, 0f, cw, ch)
+            val g = GuideCtx(guide, quadrant, triFlip, anchor, fr, fr)
+            val m = Focus.resolve(r.mode, r.values, true, g, null)
+            if (Focus.linked(g) != null) return m
+        }
+        val p = imageToCrop(r.mask.cx, r.mask.cy)
+        val m = Focus.resolve(r.mode, r.values, false, null, p)
+        return if (r.mode == ArtMode.TILT_SHIFT) m.copy(cx = p.x, cy = p.y) else m
+    }
     private var downX = 0f; private var downY = 0f; private var downT = 0L; private var multi = false
     private val slop = android.view.ViewConfiguration.get(ctx).scaledTouchSlop
     private var artShader: RuntimeShader? = null
@@ -187,11 +221,29 @@ class CropView(ctx: Context) : View(ctx) {
         painter.draw(c, RectF(-w / 2, -h / 2, w / 2, h / 2), guide, quadrant, triFlip, trueSpiral = true)
         c.restore()
         recipe?.let { r ->
-            // Art tab: show what stays sharp
-            if (focusMode && r.mode != ArtMode.OFF && r.mode != ArtMode.TILT_SHIFT && r.values.getOrElse(4) { 0f } > 0f) {
-                val fx = ox + r.fx * bw * k; val fy = oy + r.fy * bh * k
-                focusRing.strokeWidth = 1.6f * d
-                c.drawCircle(fx, fy, 18 * d, focusRing); c.drawCircle(fx, fy, 2.5f * d, focusDot)
+            // Art tab: briefly show the simulated focus region, in the crop's tilted frame (never saved)
+            if (focusMode && System.currentTimeMillis() < maskUntil && r.mode != ArtMode.OFF) {
+                val m = cropMask(r)
+                if (m.type != 0 && (r.mode == ArtMode.TILT_SHIFT || m.strength > 0f)) {
+                    c.save(); c.translate(sc.x, sc.y); c.rotate(Math.toDegrees(theta.toDouble()).toFloat())
+                    c.clipRect(-w / 2, -h / 2, w / 2, h / 2)
+                    val mx = -w / 2 + m.cx * w; val my = -h / 2 + m.cy * h
+                    val inner = m.size * h; val outer = (m.size + 0.03f + m.feather * 0.55f) * h
+                    focusRing.strokeWidth = 1.4f * d; focusRing.pathEffect = null
+                    if (m.type == 2) {
+                        c.drawCircle(mx, my, inner, focusRing); c.drawCircle(mx, my, 2.5f * d, focusDot)
+                        focusRing.pathEffect = DashPathEffect(floatArrayOf(4 * d, 5 * d), 0f); c.drawCircle(mx, my, outer, focusRing)
+                    } else {
+                        val ux = cos(m.angle); val uy = sin(m.angle); val L = w + h
+                        for ((off, dash) in listOf(inner to false, -inner to false, outer to true, -outer to true)) {
+                            focusRing.pathEffect = if (dash) DashPathEffect(floatArrayOf(4 * d, 5 * d), 0f) else null
+                            val px0 = mx - uy * off; val py0 = my + ux * off
+                            c.drawLine(px0 - ux * L, py0 - uy * L, px0 + ux * L, py0 + uy * L, focusRing)
+                        }
+                    }
+                    focusRing.pathEffect = null
+                    c.restore()
+                }
             }
         }
         if (editingSecond && second != null) {
@@ -215,8 +267,13 @@ class CropView(ctx: Context) : View(ctx) {
         val sh = artShader ?: return false
         sh.setInputShader("content", BitmapShader(b, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP).apply { setLocalMatrix(m) })
         val x0 = q.minOf { it.x }; val y0 = q.minOf { it.y }; val x1 = q.maxOf { it.x }; val y1 = q.maxOf { it.y }
-        val sfx = ox + r.fx * bw * k; val sfy = oy + r.fy * bh * k
-        Art.setUniforms(sh, r.values, x0, y0, x1 - x0, y1 - y0, r.seed, (sfx - x0) / (x1 - x0), (sfy - y0) / (y1 - y0))
+        // the look is measured against the crop's bounding box on screen; move the crop-space mask into it
+        val m = cropMask(r)
+        val ip = cropToImage(m.cx, m.cy)
+        val sx = ox + ip.x * bw * k; val sy = oy + ip.y * bh * k
+        val scale = (ch * k) / (y1 - y0)
+        val shown = m.copy(cx = (sx - x0) / (x1 - x0), cy = (sy - y0) / (y1 - y0), angle = m.angle + theta, size = m.size * scale, feather = m.feather * scale)
+        Art.setUniforms(sh, r.values, x0, y0, x1 - x0, y1 - y0, r.seed, shown)
         artPaint.shader = sh
         c.drawRect(ox, oy, ox + b.width * k, oy + b.height * k, artPaint)
         return true
