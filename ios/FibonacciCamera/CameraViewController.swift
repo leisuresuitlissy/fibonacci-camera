@@ -165,7 +165,7 @@ final class CameraViewController: UIViewController, PHPickerViewControllerDelega
         art = .OFF; artValues = art.loadValues()
         flash = AVCaptureDevice.FlashMode(rawValue: d.integer(forKey: "flash")) ?? .off
         double = d.bool(forKey: "double")
-        blend = Blend(rawValue: d.integer(forKey: "blend")) ?? .screen
+        blend = (d.object(forKey: "blend") as? Int).flatMap { Blend(rawValue: $0) } ?? .screen   // Screen until the user picks another
         strength = d.object(forKey: "strength") as? Float ?? 0.6
         if double, let data = try? Data(contentsOf: Self.firstURL) { first = UIImage(data: data) }
         if layer == "BLEND" && !double { layer = "COMPOSE" }
@@ -349,8 +349,8 @@ final class CameraViewController: UIViewController, PHPickerViewControllerDelega
 
     private func frameChanged(_ fr: CGRect) {
         overlay.frameRect = fr
-        exposureTag.sizeToFit()
-        exposureTag.frame.origin = CGPoint(x: fr.minX + 12, y: fr.maxY - exposureTag.bounds.height - 12)
+        let tag = exposureTag.intrinsicContentSize
+        exposureTag.frame = CGRect(x: fr.minX + 12, y: fr.maxY - tag.height - 12, width: tag.width + 6, height: tag.height)
         nice.frame = CGRect(x: fr.midX - 34, y: fr.minY + 12, width: 68, height: 30)
     }
 
@@ -475,6 +475,7 @@ final class CameraViewController: UIViewController, PHPickerViewControllerDelega
         exposureTag.isHidden = !double
         var c = exposureTag.configuration
         c?.attributedTitle = AttributedString(first == nil ? "EXPOSURE 1 OF 2" : "EXPOSURE 2 OF 2  ✕", attributes: AttributeContainer([.font: Style.mono(10.5), .kern: 1]))
+        c?.titleLineBreakMode = .byClipping
         exposureTag.configuration = c
         frameChanged(live.frameRect)
     }

@@ -163,7 +163,10 @@ final class EditorViewController: UIViewController, PHPickerViewControllerDelega
         saveBtn.setTitleColor(Style.base, for: .normal); saveBtn.titleLabel?.font = .boldSystemFont(ofSize: 14)
         saveBtn.addAction(UIAction { [weak self] _ in self?.save() }, for: .touchUpInside)
         size(saveBtn, nil, 50)
-        let bar = Style.hstack([reset, saveBtn], spacing: 10); size(bar, nil, 70)
+        reset.widthAnchor.constraint(equalToConstant: 96).isActive = true
+        reset.setContentHuggingPriority(.required, for: .horizontal)
+        saveBtn.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        let bar = Style.hstack([reset, saveBtn], spacing: 10); bar.alignment = .center; size(bar, nil, 70)
         root.addArrangedSubview(bar)
     }
 

@@ -72,6 +72,7 @@ jobs:
             sleep 12
             xcrun simctl io "$UDID" screenshot "../sim-check/$shot.png"
           done
+          xcrun simctl spawn "$UDID" log show --last 5m --style compact --predicate 'subsystem == "com.leisuresuitlissy.fibonaccicamera" OR (process == "FibonacciCamera" AND messageType == error)' > ../sim-check/console.txt || true
           rm -rf build-sim
 
       - name: Show the Simulator console
