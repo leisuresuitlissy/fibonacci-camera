@@ -14,7 +14,18 @@ android {
         minSdk = 29
         targetSdk = 35
         versionCode = runNumber
-        versionName = "0.1.$runNumber"
+        // The readable version: the line in version.txt (e.g. 0.2) plus the build number, e.g. 0.2.18.
+        versionName = rootProject.file("version.txt").takeIf { it.exists() }?.readText()?.trim()?.let { "$it.$runNumber" } ?: "0.1.$runNumber"
+    }
+
+    buildFeatures { buildConfig = true }
+
+    // direct: sideloaded beta builds with the in-app updater (the APK behind the QR code).
+    // play:   for Google Play, where Play handles updates: no updater, no install permission.
+    flavorDimensions += "distribution"
+    productFlavors {
+        create("direct") { dimension = "distribution"; buildConfigField("boolean", "UPDATER_ENABLED", "true") }
+        create("play") { dimension = "distribution"; buildConfigField("boolean", "UPDATER_ENABLED", "false") }
     }
 
     // One fixed key, committed on purpose: every build is signed the same way, so a new APK

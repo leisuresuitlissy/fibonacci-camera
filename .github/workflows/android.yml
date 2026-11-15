@@ -1,5 +1,14 @@
 name: Android APK
 
+# Release workflow for direct-distribution beta builds. Every push that touches android/ publishes:
+#   1. a signed APK (same app id, same key) with versionCode = the run number, versionName = version.txt + run number
+#   2. that APK at its own permanent address:  releases/download/android-b<code>/fibonacci-camera-<version>.apk
+#   3. once that address answers, the manifest the app checks, plus the stable APK the QR code points to:
+#        releases/download/android-latest/latest.json
+#        releases/download/android-latest/fibonacci-camera.apk
+# To publish an update: change android/version.txt if the version should move (e.g. 0.3), write the
+# bullet points in android/release-notes.txt, push. Nothing else.
+
 on:
   push:
     paths: ['android/**', '.github/workflows/android.yml']
@@ -23,14 +32,53 @@ jobs:
         with:
           gradle-version: '8.11.1'
 
-      - name: Build the APK
+      - name: Build the direct-distribution APK
         working-directory: android
-        run: gradle assembleRelease --stacktrace
+        run: gradle assembleDirectRelease --stacktrace
 
-      - name: Name it
-        run: cp android/app/build/outputs/apk/release/app-release.apk fibonacci-camera.apk
+      - name: Name it, checksum it, write the manifest
+        id: meta
+        run: |
+          set -e
+          CODE=${{ github.run_number }}
+          NAME="$(tr -d ' \n' < android/version.txt).$CODE"
+          FILE="fibonacci-camera-$NAME.apk"
+          cp android/app/build/outputs/apk/direct/release/app-direct-release.apk "$FILE"
+          cp "$FILE" fibonacci-camera.apk
+          SHA=$(sha256sum "$FILE" | cut -d' ' -f1)
+          URL="https://github.com/${{ github.repository }}/releases/download/android-b$CODE/$FILE"
+          python3 - "$CODE" "$NAME" "$URL" "$SHA" <<'PY'
+          import json, sys, datetime
+          code, name, url, sha = sys.argv[1:]
+          notes = [l.strip() for l in open("android/release-notes.txt") if l.strip()]
+          json.dump({"versionCode": int(code), "versionName": name, "downloadUrl": url, "releaseNotes": notes,
+                     "releaseDate": datetime.date.today().isoformat(), "minSdk": 29, "sha256": sha}, open("latest.json", "w"), indent=2)
+          PY
+          cat latest.json
+          echo "code=$CODE" >> "$GITHUB_OUTPUT"; echo "name=$NAME" >> "$GITHUB_OUTPUT"
+          echo "file=$FILE" >> "$GITHUB_OUTPUT"; echo "url=$URL" >> "$GITHUB_OUTPUT"
 
-      # Same tag and file name every time, so the download link (and its QR code) never changes.
+      # The permanent, version-specific address first.
+      - name: Publish this version
+        uses: ncipollo/release-action@v1
+        with:
+          tag: android-b${{ steps.meta.outputs.code }}
+          commit: ${{ github.sha }}
+          name: Fibonacci Camera ${{ steps.meta.outputs.name }} (Android)
+          bodyFile: android/release-notes.txt
+          artifacts: ${{ steps.meta.outputs.file }}
+          makeLatest: false
+          prerelease: true
+
+      - name: Check the APK is reachable before telling anyone about it
+        run: |
+          for i in 1 2 3 4 5 6; do
+            if curl -fsIL "${{ steps.meta.outputs.url }}" > /dev/null; then echo "reachable"; exit 0; fi
+            sleep 10
+          done
+          echo "APK not reachable"; exit 1
+
+      # Then the manifest and the stable QR-code APK.
       - name: Publish to the android-latest release
         uses: ncipollo/release-action@v1
         with:
@@ -38,9 +86,9 @@ jobs:
           commit: ${{ github.sha }}
           name: Fibonacci Camera — Android (latest)
           body: |
-            Build ${{ github.run_number }} · built from ${{ github.sha }}.
-            On the phone: open the APK, allow installs from this source when asked, install. New builds install over the old one.
-          artifacts: fibonacci-camera.apk
+            Build ${{ steps.meta.outputs.code }} · v${{ steps.meta.outputs.name }} · built from ${{ github.sha }}.
+            On the phone: open the APK, allow installs from this source when asked, install. New builds install over the old one, and the app offers future updates itself.
+          artifacts: fibonacci-camera.apk,latest.json
           allowUpdates: true
           replacesArtifacts: true
           removeArtifacts: true

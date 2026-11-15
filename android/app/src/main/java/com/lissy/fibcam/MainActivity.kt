@@ -220,7 +220,8 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
         applyGuide(); applyArtUi(); applyBlendUi(); applyLayer(); syncCoachBtn(); syncFlashBtn(); syncDoubleBtn()
         firstUri?.let { if (double) loadFirst(it) }
         loadThumb()
-        checkForUpdate()
+        Updater.listener = { st -> runOnUiThread { onUpdateStatus(st) } }
+        analysisExecutor.execute { Updater.cleanUp(this) }     // the first check happens in onResume
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) startCamera()
         else askCamera.launch(Manifest.permission.CAMERA)
     }
@@ -231,6 +232,14 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
         if (g != null) sensors.registerListener(this, g, SensorManager.SENSOR_DELAY_UI)
         if (orientation.canDetectOrientation()) orientation.enable()
         loadThumb()
+        checkForUpdate(manual = false)                 // throttled to every six hours inside
+        pendingInstall?.let { f -> if (canInstall()) { pendingInstall = null; launchInstall(f) } }
+        overlay.postDelayed({ maybeOfferUpdate() }, 1500)
+    }
+
+    override fun dispatchTouchEvent(ev: android.view.MotionEvent): Boolean {
+        lastTouch = SystemClock.uptimeMillis()
+        return super.dispatchTouchEvent(ev)
     }
 
     override fun onPause() {
@@ -316,9 +325,7 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
         sourceTxt = label("LIVE · REAR", 10f, cMuted, mono, 0.1f).apply { setPadding(0, dpi(3f), 0, 0) }
         titles.addView(sourceTxt)
         top.addView(titles, LinearLayout.LayoutParams(0, wrap, 1f))
-        updateBtn = chip("UPDATE", true) {
-            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/leisuresuitlissy/fibonacci-camera/releases/download/android-latest/fibonacci-camera.apk")))
-        }.apply { visibility = View.GONE }
+        updateBtn = chip("UPDATE", true) { onUpdateChip() }.apply { visibility = View.GONE }
         top.addView(updateBtn, LinearLayout.LayoutParams(wrap, wrap).apply { rightMargin = dpi(8f) })
         coachBtn = iconButton(IconButton.Icon.COACH, 40f) {
             coach = !coach
@@ -1018,15 +1025,200 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
 
     private fun buzz() = Haptics.confirm(overlay)
 
-    /** Settings: just what isn't worth a button. */
-    private fun showSettings(anchorView: View) {
-        val m = android.widget.PopupMenu(this, anchorView)
-        m.menu.add(0, 1, 0, "Haptic feedback").apply { isCheckable = true; isChecked = Haptics.enabled }
-        m.setOnMenuItemClickListener { item ->
-            if (item.itemId == 1) { Haptics.enabled = !Haptics.enabled; save(); if (Haptics.enabled) Haptics.confirm(anchorView) }
-            true
+    // =========================================================== settings + updates
+    private var lastTouch = 0L
+    private var offered: Updater.Release? = null      // the release waiting for a quiet moment to be offered
+    private var pendingInstall: java.io.File? = null  // a verified APK waiting on the "install unknown apps" permission
+    private var settingsStatus: TextView? = null
+    private var settingsAction: TextView? = null
+
+    /** A dark sheet in the app's own style. */
+    private fun sheet(build: (LinearLayout, android.app.Dialog) -> Unit): android.app.Dialog {
+        val dlg = android.app.Dialog(this)
+        val box = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL; setPadding(dpi(22f), dpi(20f), dpi(22f), dpi(16f))
+            background = rounded(cBase, withAlpha(cGold, 0.5f), 18f)
         }
-        m.show()
+        build(box, dlg)
+        dlg.setContentView(box)
+        dlg.window?.setBackgroundDrawable(android.graphics.drawable.ColorDrawable(Color.TRANSPARENT))
+        dlg.window?.setLayout((resources.displayMetrics.widthPixels * 0.88f).toInt(), ViewGroup.LayoutParams.WRAP_CONTENT)
+        dlg.show()
+        return dlg
+    }
+    private fun sheetButton(text: String, primary: Boolean, onClick: () -> Unit) = label(text, 14f, if (primary) cBase else cText, medium).apply {
+        gravity = Gravity.CENTER; setPadding(dpi(16f), dpi(12f), dpi(16f), dpi(12f))
+        background = if (primary) rounded(cGold, null, 12f) else rounded(cElev, cLine, 12f)
+        setOnClickListener { onClick() }
+    }
+
+    private fun showSettings(anchorView: View) {
+        sheet { box, dlg ->
+            box.addView(label("Settings", 17f, cText, Typeface.DEFAULT_BOLD))
+            val hRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(0, dpi(16f), 0, dpi(8f)) }
+            hRow.addView(LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                addView(label("Haptic feedback", 14f, cText, medium))
+                addView(label("Slider ticks and the composition buzz", 11.5f, cMuted))
+            }, LinearLayout.LayoutParams(0, wrap, 1f))
+            val sw = android.widget.Switch(this).apply {
+                isChecked = Haptics.enabled
+                thumbTintList = ColorStateList.valueOf(Color.WHITE); trackTintList = ColorStateList.valueOf(cGold)
+                setOnCheckedChangeListener { v, on -> Haptics.enabled = on; save(); if (on) Haptics.confirm(v) }
+            }
+            hRow.addView(sw); box.addView(hRow)
+            box.addView(View(this).apply { setBackgroundColor(cLine) }, LinearLayout.LayoutParams(match, 1).apply { topMargin = dpi(8f); bottomMargin = dpi(14f) })
+            box.addView(label("UPDATES", 10f, cMuted, mono, 0.13f))
+            box.addView(label("Version ${Updater.installedName(this)} (build ${Updater.installedCode(this)})", 13f, cText).apply { setPadding(0, dpi(8f), 0, 0) })
+            if (!Updater.enabled) {
+                box.addView(label("Updates come through Google Play.", 12f, cMuted).apply { setPadding(0, dpi(6f), 0, 0) })
+            } else {
+                settingsStatus = label("", 12.5f, cGold).apply { setPadding(0, dpi(6f), 0, dpi(12f)) }
+                box.addView(settingsStatus)
+                settingsAction = sheetButton("Check for updates", false) { onSettingsAction() }
+                box.addView(settingsAction, LinearLayout.LayoutParams(match, wrap))
+                onUpdateStatus(Updater.status)
+            }
+            box.addView(sheetButton("Done", false) { dlg.dismiss() }, LinearLayout.LayoutParams(match, wrap).apply { topMargin = dpi(8f) })
+            dlg.setOnDismissListener { settingsStatus = null; settingsAction = null }
+        }
+    }
+
+    private fun onSettingsAction() {
+        when (val st = Updater.status) {
+            is Updater.Status.Available -> startDownload(st.r)
+            is Updater.Status.Downloading -> confirmCancel()
+            is Updater.Status.Ready -> installOrAsk(st.apk)
+            is Updater.Status.Checking -> {}
+            else -> checkForUpdate(manual = true)
+        }
+    }
+
+    private fun checkForUpdate(manual: Boolean) {
+        if (!Updater.enabled) return
+        analysisExecutor.execute {
+            val r = Updater.check(this, prefs, manual)
+            runOnUiThread {
+                if (r != null) { offered = r; if (manual) showUpdateOffer(r) else maybeOfferUpdate() }
+            }
+        }
+    }
+
+    /** Offers an update only at a quiet moment: the camera screen in front, and no touches for a few seconds. */
+    private fun maybeOfferUpdate() {
+        val r = offered ?: return
+        if (isFinishing || !hasWindowFocus() || SystemClock.uptimeMillis() - lastTouch < 5000) {
+            overlay.postDelayed({ maybeOfferUpdate() }, 4000); return
+        }
+        showUpdateOffer(r)
+    }
+
+    private fun showUpdateOffer(r: Updater.Release) {
+        offered = null
+        sheet { box, dlg ->
+            box.addView(label("Update available", 17f, cText, Typeface.DEFAULT_BOLD))
+            box.addView(label("Fibonacci Camera v${r.versionName} is ready to install.", 13f, cMuted).apply { setPadding(0, dpi(6f), 0, dpi(12f)) })
+            if (r.notes.isNotEmpty()) {
+                box.addView(label("WHAT'S NEW", 10f, cGold, mono, 0.13f))
+                for (n in r.notes) box.addView(label("·  $n", 13f, cText).apply { setPadding(0, dpi(5f), 0, 0) })
+            }
+            val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(0, dpi(18f), 0, 0) }
+            row.addView(sheetButton("Not now", false) { Updater.dismiss(prefs, r); updateBtn.visibility = View.GONE; dlg.dismiss() },
+                LinearLayout.LayoutParams(0, wrap, 1f).apply { rightMargin = dpi(10f) })
+            row.addView(sheetButton("Download update", true) { dlg.dismiss(); startDownload(r) }, LinearLayout.LayoutParams(0, wrap, 1.4f))
+            box.addView(row)
+        }
+    }
+
+    private fun startDownload(r: Updater.Release) {
+        if (Updater.status is Updater.Status.Downloading) return
+        Thread {
+            val (apk, err) = Updater.download(this, r)
+            runOnUiThread {
+                when {
+                    apk != null -> installOrAsk(apk)
+                    err != null -> sheet { box, dlg ->
+                        box.addView(label("Update not installed", 17f, cText, Typeface.DEFAULT_BOLD))
+                        box.addView(label(err, 13f, cMuted).apply { setPadding(0, dpi(8f), 0, dpi(16f)) })
+                        box.addView(sheetButton("Open the download page instead", false) {
+                            dlg.dismiss(); startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(r.url)))
+                        }, LinearLayout.LayoutParams(match, wrap))
+                        box.addView(sheetButton("Close", false) { dlg.dismiss() }, LinearLayout.LayoutParams(match, wrap).apply { topMargin = dpi(8f) })
+                    }
+                }
+            }
+        }.start()
+    }
+
+    private fun confirmCancel() {
+        sheet { box, dlg ->
+            box.addView(label("Stop the download?", 17f, cText, Typeface.DEFAULT_BOLD))
+            val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(0, dpi(18f), 0, 0) }
+            row.addView(sheetButton("Keep going", false) { dlg.dismiss() }, LinearLayout.LayoutParams(0, wrap, 1f).apply { rightMargin = dpi(10f) })
+            row.addView(sheetButton("Stop", true) { Updater.cancelDownload(); dlg.dismiss() }, LinearLayout.LayoutParams(0, wrap, 1f))
+            box.addView(row)
+        }
+    }
+
+    private fun canInstall() = Build.VERSION.SDK_INT < 26 || packageManager.canRequestPackageInstalls()
+
+    /** Android has to allow installs from this app once. Explain, open the right setting, carry on when they're back. */
+    private fun installOrAsk(apk: java.io.File) {
+        if (canInstall()) { launchInstall(apk); return }
+        pendingInstall = apk
+        sheet { box, dlg ->
+            box.addView(label("One permission", 17f, cText, Typeface.DEFAULT_BOLD))
+            box.addView(label("Android requires permission to install updates downloaded directly from Fibonacci Camera. Enable this permission to continue.",
+                13f, cMuted).apply { setPadding(0, dpi(8f), 0, dpi(16f)) })
+            box.addView(sheetButton("Open settings", true) {
+                dlg.dismiss()
+                startActivity(Intent(android.provider.Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:$packageName")))
+            }, LinearLayout.LayoutParams(match, wrap))
+            box.addView(sheetButton("Not now", false) { pendingInstall = null; dlg.dismiss() }, LinearLayout.LayoutParams(match, wrap).apply { topMargin = dpi(8f) })
+        }
+    }
+
+    /** Hands the verified APK to Android's own installer; the user confirms there. Nothing installs silently. */
+    private fun launchInstall(apk: java.io.File) {
+        runCatching {
+            val uri = androidx.core.content.FileProvider.getUriForFile(this, "$packageName.updates", apk)
+            startActivity(Intent(Intent.ACTION_VIEW).apply {
+                setDataAndType(uri, "application/vnd.android.package-archive")
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+            })
+        }.onFailure {
+            Toast.makeText(this, "Couldn't open the installer: opening the download page instead.", Toast.LENGTH_LONG).show()
+            (Updater.status as? Updater.Status.Ready)?.let { st -> startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(st.r.url))) }
+        }
+    }
+
+    private fun onUpdateChip() {
+        when (val st = Updater.status) {
+            is Updater.Status.Available -> showUpdateOffer(st.r)
+            is Updater.Status.Downloading -> confirmCancel()
+            is Updater.Status.Ready -> installOrAsk(st.apk)
+            else -> {}
+        }
+    }
+
+    private fun onUpdateStatus(st: Updater.Status) {
+        val (text, action) = when (st) {
+            is Updater.Status.Checking -> "Checking for updates…" to "Checking…"
+            is Updater.Status.UpToDate -> "You're up to date." to "Check for updates"
+            is Updater.Status.Failed -> "Unable to check for updates. Try again later." to "Check for updates"
+            is Updater.Status.Available -> "Update available: v${st.r.versionName}" + (if (st.r.notes.isNotEmpty()) "\n" + st.r.notes.joinToString("\n") { "·  $it" } else "") to "Download update"
+            is Updater.Status.Downloading -> "Downloading update…" + (if (st.pct >= 0) " ${st.pct}%" else "") to "Stop download"
+            is Updater.Status.Ready -> "Update downloaded and checked: v${st.r.versionName}" to "Install update"
+            else -> "" to "Check for updates"
+        }
+        settingsStatus?.text = text; settingsAction?.text = action
+        // the chip in the top bar: progress while downloading, a way back to an offer you skipped
+        when (st) {
+            is Updater.Status.Downloading -> { updateBtn.visibility = View.VISIBLE; updateBtn.text = if (st.pct >= 0) "UPDATE ${st.pct}%" else "UPDATE…" }
+            is Updater.Status.Ready -> { updateBtn.visibility = View.VISIBLE; updateBtn.text = "INSTALL" }
+            is Updater.Status.Available -> updateBtn.text = "UPDATE"
+            else -> updateBtn.visibility = View.GONE
+        }
     }
 
     /** Screen offset (subject minus goal) → the move that fixes it, in the world's terms. */
@@ -1214,16 +1406,5 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
     }
 
     // ---- updates: compare our build number with the latest one GitHub built
-    private fun checkForUpdate() {
-        analysisExecutor.execute {
-            val latest = runCatching {
-                val c = java.net.URL("https://api.github.com/repos/leisuresuitlissy/fibonacci-camera/releases/tags/android-latest").openConnection() as java.net.HttpURLConnection
-                c.connectTimeout = 6000; c.readTimeout = 6000; c.setRequestProperty("Accept", "application/vnd.github+json")
-                val body = c.inputStream.bufferedReader().use { it.readText() }
-                Regex("Build (\\d+)").find(org.json.JSONObject(body).optString("body"))?.groupValues?.get(1)?.toLong()
-            }.getOrNull() ?: return@execute
-            val mine = runCatching { packageManager.getPackageInfo(packageName, 0).longVersionCode }.getOrDefault(Long.MAX_VALUE)
-            if (latest > mine) runOnUiThread { updateBtn.visibility = View.VISIBLE }
-        }
-    }
+
 }
