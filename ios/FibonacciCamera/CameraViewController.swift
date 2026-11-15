@@ -189,6 +189,9 @@ final class CameraViewController: UIViewController, PHPickerViewControllerDelega
         }
         #endif
         Log.info("camera screen ready · guide \(guide.rawValue) · double \(double)")
+        #if targetEnvironment(simulator)
+        runShotScript()
+        #endif
         NotificationCenter.default.addObserver(self, selector: #selector(wake), name: UIApplication.willEnterForegroundNotification, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(sleep), name: UIApplication.didEnterBackgroundNotification, object: nil)
         UIDevice.current.beginGeneratingDeviceOrientationNotifications()
@@ -690,6 +693,25 @@ final class CameraViewController: UIViewController, PHPickerViewControllerDelega
                 self.demo.drift.toggle(); self.refreshDemoMenu()
             }])
     }
+    /** For automated Simulator screenshots: launch with `-fibShot camera|art|double|editor`. */
+    private func runShotScript() {
+        let args = ProcessInfo.processInfo.arguments
+        guard let i = args.firstIndex(of: "-fibShot"), i + 1 < args.count else { return }
+        let shot = args[i + 1]
+        Log.info("shot script: \(shot)")
+        guide = .spiral; quadrant = 1; applyGuide()
+        switch shot {
+        case "art":
+            art = .CROSS_PROCESS; artValues = art.defaults; layer = "ART"; applyArtUi(); applyLayer()
+        case "double":
+            let mirrored = UIImage(cgImage: DemoCamera.builtIn(), scale: 1, orientation: .upMirrored)
+            double = true; layer = "BLEND"; syncDouble(); applyLayer(); setFirst(mirrored, data: nil)
+        case "editor":
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { self.openEditor(UIImage(cgImage: DemoCamera.builtIn())) }
+        default: break
+        }
+    }
+
     private func refreshDemoMenu() {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
             for v in self.view.allSubviews() { if let b = v as? UIButton, b.showsMenuAsPrimaryAction { b.menu = self.demoMenu() } }

@@ -55,7 +55,30 @@ jobs:
           xcodebuild -project FibonacciCamera.xcodeproj -scheme FibonacciCamera -configuration Debug \
             -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' -derivedDataPath build-sim \
             CODE_SIGNING_ALLOWED=NO build -quiet
+
+      # Run it: boot a Simulator, launch a few scripted screens, keep screenshots and console output.
+      - name: Smoke-test in the Simulator
+        working-directory: ios
+        run: |
+          UDID=$(xcrun simctl list devices available -j | python3 -c "import json,sys; d=json.load(sys.stdin)['devices']; print(next(x['udid'] for k,v in d.items() if 'iOS' in k for x in v if x['name'].startswith('iPhone')))")
+          echo "Simulator $UDID"
+          xcrun simctl boot "$UDID" || true
+          xcrun simctl bootstatus "$UDID" -b
+          xcrun simctl install "$UDID" build-sim/Build/Products/Debug-iphonesimulator/FibonacciCamera.app
+          mkdir -p ../sim-check
+          for shot in camera art double editor; do
+            xcrun simctl terminate "$UDID" com.leisuresuitlissy.fibonaccicamera 2>/dev/null || true
+            xcrun simctl launch --stdout="$PWD/../sim-check/$shot.log" --stderr="$PWD/../sim-check/$shot.err" "$UDID" com.leisuresuitlissy.fibonaccicamera -fibShot $shot
+            sleep 12
+            xcrun simctl io "$UDID" screenshot "../sim-check/$shot.png"
+          done
           rm -rf build-sim
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: sim-check
+          path: sim-check
 
       - name: Package the project
         run: |
