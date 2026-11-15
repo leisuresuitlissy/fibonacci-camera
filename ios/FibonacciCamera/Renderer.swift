@@ -11,8 +11,9 @@ struct ArtUniforms {
     var amt: Float = 0, p1: Float = 0, p2: Float = 0, p3: Float = 0, seed: Float = 0
     var vpo = SIMD2<Float>(0, 0)
     var vps = SIMD2<Float>(1, 1)
-    var foc = SIMD2<Float>(0.5, 0.5)
-    var dep: Float = 0
+    var msk = SIMD4<Float>(0.5, 0.5, 0, 0)    // centre x, y, angle, type
+    var msz = SIMD4<Float>(0.08, 1, 0, 0)     // size, feather, strength
+    var lks: Float = 0
 }
 
 /** Layout must match `struct B` in Shaders.metal. */
@@ -128,17 +129,17 @@ final class Renderer {
     }
 
     /** Runs the look (or a plain copy) from src into a pass, inside `viewport` (px). The look is measured against src. */
-    func encodeArt(_ cmd: MTLCommandBuffer, src: MTLTexture, recipe: Recipe?, pass rp: MTLRenderPassDescriptor, viewport: CGRect, measure: CGRect? = nil) {
+    func encodeArt(_ cmd: MTLCommandBuffer, src: MTLTexture, recipe: Recipe?, mask: FocusMask? = nil, pass rp: MTLRenderPassDescriptor, viewport: CGRect, measure: CGRect? = nil) {
         guard let enc = cmd.makeRenderCommandEncoder(descriptor: rp) else { return }
         enc.setViewport(MTLViewport(originX: Double(viewport.minX), originY: Double(viewport.minY), width: Double(viewport.width), height: Double(viewport.height), znear: 0, zfar: 1))
         if let r = recipe, r.isOn, let p = pipe("art_\(r.mode.rawValue)") {
             var u = ArtUniforms()
             u.res = SIMD2(Float(src.width), Float(src.height))
-            u.dep = r.values.count > 4 ? r.values[4] : 0
-            u.foc = SIMD2(r.fx, r.fy)
-            if let m = measure {          // the look is measured against this box; the focus point moves into it
-                u.org = SIMD2(Float(m.minX), Float(m.minY)); u.res = SIMD2(Float(m.width), Float(m.height))
-                u.foc = SIMD2((r.fx * Float(src.width) - Float(m.minX)) / Float(m.width), (r.fy * Float(src.height) - Float(m.minY)) / Float(m.height))
+            let m = mask ?? r.mask
+            u.msk = SIMD4(m.cx, m.cy, m.angle, Float(m.type)); u.msz = SIMD4(m.size, m.feather, m.strength, 0)
+            u.lks = r.values.count > 5 ? r.values[5] : 0
+            if let b = measure {          // the look is measured against this box (the mask is already in its coordinates)
+                u.org = SIMD2(Float(b.minX), Float(b.minY)); u.res = SIMD2(Float(b.width), Float(b.height))
             }
             u.amt = r.values[0]; u.p1 = r.values[1]; u.p2 = r.values[2]; u.p3 = r.values[3]; u.seed = r.seed
             u.vpo = SIMD2(Float(viewport.minX), Float(viewport.minY))
@@ -174,7 +175,7 @@ final class Renderer {
 
     // ---------------------------------------------------------------- stills
     /** Full-size, offscreen: base, optionally with a second exposure on top, then the look. */
-    func renderStill(base: CGImage, top: CGImage? = nil, m: simd_float3x3? = nil, blend: Blend = .screen, strength: Float = 0.6, recipe: Recipe?) -> CGImage? {
+    func renderStill(base: CGImage, top: CGImage? = nil, m: simd_float3x3? = nil, blend: Blend = .screen, strength: Float = 0.6, recipe: Recipe?, mask: FocusMask? = nil) -> CGImage? {
         guard let bt = texture(from: base) else { return nil }
         let w = bt.width, h = bt.height
         guard let mid = makeTarget(w, h), let out = makeTarget(w, h), let cmd = queue.makeCommandBuffer() else { return nil }
@@ -183,18 +184,18 @@ final class Renderer {
         encodeComposite(cmd, base: bt, top: tt, m: mm, blend: blend, strength: strength, into: mid)
         let rp = MTLRenderPassDescriptor()
         rp.colorAttachments[0].texture = out; rp.colorAttachments[0].loadAction = .dontCare; rp.colorAttachments[0].storeAction = .store
-        encodeArt(cmd, src: mid, recipe: recipe, pass: rp, viewport: CGRect(x: 0, y: 0, width: w, height: h))
+        encodeArt(cmd, src: mid, recipe: recipe, mask: mask, pass: rp, viewport: CGRect(x: 0, y: 0, width: w, height: h))
         return finishReadback(cmd, out)
     }
 
     /** Editor preview: the pair at display size, with the look measured against the crop box. */
-    func renderDisplay(base: MTLTexture, top: MTLTexture?, m: simd_float3x3, blend: Blend, strength: Float, recipe: Recipe?, measure: CGRect?) -> CGImage? {
+    func renderDisplay(base: MTLTexture, top: MTLTexture?, m: simd_float3x3, blend: Blend, strength: Float, recipe: Recipe?, mask: FocusMask?, measure: CGRect?) -> CGImage? {
         let w = base.width, h = base.height
         guard let mid = makeTarget(w, h), let out = makeTarget(w, h), let cmd = queue.makeCommandBuffer() else { return nil }
         encodeComposite(cmd, base: base, top: top, m: m, blend: blend, strength: strength, into: mid)
         let rp = MTLRenderPassDescriptor()
         rp.colorAttachments[0].texture = out; rp.colorAttachments[0].loadAction = .dontCare; rp.colorAttachments[0].storeAction = .store
-        encodeArt(cmd, src: mid, recipe: recipe, pass: rp, viewport: CGRect(x: 0, y: 0, width: w, height: h), measure: measure)
+        encodeArt(cmd, src: mid, recipe: recipe, mask: mask, pass: rp, viewport: CGRect(x: 0, y: 0, width: w, height: h), measure: measure)
         return finishReadback(cmd, out)
     }
 

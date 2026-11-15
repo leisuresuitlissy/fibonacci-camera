@@ -21,6 +21,7 @@ final class EditorViewController: UIViewController, PHPickerViewControllerDelega
     private let dial = DialView()
     private let artRow = Style.hstack(), paramRow = Style.hstack(spacing: 14)
     private let artSlider = Style.slider()
+    private let artValueLbl = Style.label("", Style.mono(11), Style.gold)
     private let blendActions = Style.hstack(), blendRow = Style.hstack()
     private let blendHead = Style.hstack()
     private let blendValue = Style.label("60%", Style.mono(11), Style.gold)
@@ -115,10 +116,13 @@ final class EditorViewController: UIViewController, PHPickerViewControllerDelega
         canvas.onChange = { [weak self] in self?.syncReadout(); self?.refreshIfArt() }
         canvas.onSecondChange = { [weak self] in self?.refresh() }
         canvas.onFocusTap = { [weak self] p in
-            guard let self else { return }
-            self.recipe.fx = Float(p.x); self.recipe.fy = Float(p.y)
-            self.canvas.focus = p; self.refresh()
+            // a tap pins what stays sharp to this spot of the photo (and turns Follow guide off: you chose)
+            guard let self, self.recipe.mode.follows else { return }
+            self.recipe.mask.cx = Float(p.x); self.recipe.mask.cy = Float(p.y); self.recipe.follow = false
+            if self.recipe.mode == .TILT_SHIFT { self.recipe.values[1] = Float(min(max(self.canvas.imageToCrop(p.x, p.y).y, 0), 1)) }
+            self.canvas.flashMask(self.canvas.cropMask(self.recipe)); self.applyArtUi(); self.refresh()
         }
+        canvas.anchor = UserDefaults.standard.integer(forKey: "anchor")
         note.backgroundColor = Style.base.withAlphaComponent(0.85); note.textAlignment = .center; note.layer.cornerRadius = 14
         note.layer.borderWidth = 1; note.layer.borderColor = Style.gold.withAlphaComponent(0.8).cgColor; note.clipsToBounds = true; note.isHidden = true
         note.translatesAutoresizingMaskIntoConstraints = false; stage.addSubview(note)
@@ -142,10 +146,11 @@ final class EditorViewController: UIViewController, PHPickerViewControllerDelega
         size(dial, nil, 64)
         [rs, eyeRow, dial, UIView()].forEach(cropLayer.addArrangedSubview)
         let ars = scroll(artRow); size(ars, nil, 48)
-        size(paramRow, nil, 32)
+        let ps = scroll(paramRow); size(ps, nil, 36)
         artSlider.addAction(UIAction { [weak self] _ in self?.onArtSlider() }, for: .valueChanged)
-        let asr = Style.hstack([artSlider]); size(asr, nil, 40)
-        [ars, paramRow, asr, UIView()].forEach(artLayer.addArrangedSubview)
+        artValueLbl.textAlignment = .right; size(artValueLbl, 32, nil)
+        let asr = Style.hstack([artSlider, artValueLbl]); size(asr, nil, 40)
+        [ars, ps, asr, UIView()].forEach(artLayer.addArrangedSubview)
         size(blendActions, nil, 48); size(blendRow, nil, 48)
         let bs = scroll(blendRow); size(bs, nil, 48)
         blendHead.addArrangedSubview(Style.label("BLEND STRENGTH", Style.mono(10), Style.muted, kern: 1.3)); blendHead.addArrangedSubview(UIView()); blendHead.addArrangedSubview(blendValue)
@@ -194,7 +199,7 @@ final class EditorViewController: UIViewController, PHPickerViewControllerDelega
         cropLayer.isHidden = editTab != "CROP"; artLayer.isHidden = editTab != "ART"; blendLayer.isHidden = editTab != "BLEND"
         canvas.editingSecond = editTab == "BLEND"      // in Blend your fingers move the second photo; elsewhere, the crop
         canvas.focusMode = editTab == "ART"            // in Art, a tap picks what stays sharp
-        canvas.focus = recipe.isOn && recipe.mode.hasDepth && recipe.values[4] > 0 ? CGPoint(x: CGFloat(recipe.fx), y: CGFloat(recipe.fy)) : nil
+
     }
 
     // ============================================================ ratio + guide
@@ -254,7 +259,9 @@ final class EditorViewController: UIViewController, PHPickerViewControllerDelega
         for m in ArtMode.allCases {
             artRow.addArrangedSubview(Style.chip(m.label, on: m == recipe.mode) { [weak self] in
                 guard let self else { return }
-                self.recipe = Recipe(mode: m, values: m.loadValues(), seed: self.recipe.seed, fx: self.recipe.fx, fy: self.recipe.fy); self.artParam = 0
+                // starts from your shooting settings for this look, but never writes back to them
+                let st = m.loadState()
+                self.recipe = Recipe(mode: m, values: st.values, seed: self.recipe.seed, follow: st.follow, mask: self.recipe.mask); self.artParam = 0
                 if m == .HOLGA && self.ratio != "1:1" { self.ratio = "1:1"; self.applyRatio(reset: false) }   // Holga is a square camera
                 self.applyArtUi(); self.applyTab(); self.refresh()
             })
@@ -268,21 +275,73 @@ final class EditorViewController: UIViewController, PHPickerViewControllerDelega
             focusHinted = true; showNote("Tap the photo to choose what stays sharp")
             DispatchQueue.main.asyncAfter(deadline: .now() + 2.6) { self.showNote(nil) }
         }
-        for i in recipe.mode.shown {
-            let s = recipe.mode.sliders[i]
+        let mode = recipe.mode
+        for i in mode.shown {
+            let s = mode.sliders[i]
             let b = UIButton(type: .system)
             b.setAttributedTitle(NSAttributedString(string: s.0.uppercased(), attributes: [.font: Style.mono(10), .kern: 1, .foregroundColor: i == artParam ? Style.gold : Style.muted]), for: .normal)
-            b.addAction(UIAction { [weak self] _ in self?.artParam = i; self?.applyArtUi() }, for: .touchUpInside)
+            b.addAction(UIAction { [weak self] _ in
+                guard let self else { return }
+                self.artParam = i; self.applyArtUi()
+                if mode.isFocusSlider(i) { self.canvas.flashMask(self.canvas.cropMask(self.recipe)) }
+            }, for: .touchUpInside)
             paramRow.addArrangedSubview(b)
         }
-        paramRow.addArrangedSubview(UIView())
-        paramRow.addArrangedSubview(Style.label("\(Int((recipe.values[artParam] * 100).rounded()))", Style.mono(11), Style.gold))
+        if mode == .HOLGA {
+            let st = min(max(Int(recipe.values[5].rounded()), 0), 5)
+            paramRow.addArrangedSubview(miniChip("LEAK · " + LEAK_STYLES[st], on: st > 0) { [weak self] in
+                guard let self else { return }
+                let next = (st + 1) % LEAK_STYLES.count
+                self.recipe.values[5] = Float(next)
+                if next == 5 { self.recipe.seed = Float.random(in: 0..<1000) }
+                self.applyArtUi(); self.refresh()
+            })
+        }
+        if mode.follows {
+            paramRow.addArrangedSubview(miniChip("FOLLOW GUIDE", on: recipe.follow) { [weak self] in
+                guard let self else { return }
+                // switching off keeps the region where the guide had put it, now pinned to the photo
+                let m = self.canvas.cropMask(self.recipe)
+                let ip = self.canvas.cropToImage(CGFloat(m.cx), CGFloat(m.cy))
+                self.recipe.mask.cx = Float(ip.x); self.recipe.mask.cy = Float(ip.y)
+                if self.recipe.follow && mode == .TILT_SHIFT && m.type == 1 {
+                    self.recipe.values[1] = min(max(m.cy, 0), 1); self.recipe.values[3] = min(max(m.angle / (.pi / 2) + 0.5, 0), 1)
+                }
+                self.recipe.follow.toggle()
+                self.canvas.flashMask(self.canvas.cropMask(self.recipe)); self.applyArtUi(); self.refresh()
+            })
+        }
+        paramRow.addArrangedSubview(miniChip("RESET", on: false) { [weak self] in
+            // this photo's look back to the mode's factory defaults; your shooting settings are untouched
+            guard let self else { return }
+            self.recipe.values = mode.defaults; self.recipe.follow = false; self.artParam = 0
+            self.applyArtUi(); self.refresh()
+        })
         artSlider.isHidden = false; artSlider.value = recipe.values[artParam]
+        artValueLbl.text = "\(Int((recipe.values[artParam] * 100).rounded()))"
+    }
+    private func miniChip(_ t: String, on: Bool, action: @escaping () -> Void) -> UIButton {
+        var c = UIButton.Configuration.filled()
+        c.baseBackgroundColor = on ? Style.gold.withAlphaComponent(0.16) : Style.elev
+        c.baseForegroundColor = on ? Style.gold : Style.muted
+        c.cornerStyle = .medium
+        c.contentInsets = NSDirectionalEdgeInsets(top: 5, leading: 9, bottom: 5, trailing: 9)
+        c.attributedTitle = AttributedString(t, attributes: AttributeContainer([.font: Style.mono(9.5), .kern: 1]))
+        let b = UIButton(configuration: c, primaryAction: UIAction { _ in action() })
+        b.layer.borderWidth = 1; b.layer.cornerRadius = 8
+        b.layer.borderColor = (on ? Style.gold.withAlphaComponent(0.8) : Style.line).cgColor
+        return b
     }
     private func onArtSlider() {
         recipe.values[artParam] = artSlider.value
-        (paramRow.arrangedSubviews.last as? UILabel)?.text = "\(Int((artSlider.value * 100).rounded()))"
-        recipe.mode.saveValues(recipe.values); refresh()
+        if recipe.mode == .TILT_SHIFT && artParam == 1 && !recipe.follow {
+            // Focus moves the band up and down the crop; from there it stays pinned to the photo
+            let ip = canvas.cropToImage(0.5, CGFloat(artSlider.value))
+            recipe.mask.cx = Float(ip.x); recipe.mask.cy = Float(ip.y)
+        }
+        artValueLbl.text = "\(Int((artSlider.value * 100).rounded()))"
+        if recipe.mode.isFocusSlider(artParam) { canvas.flashMask(canvas.cropMask(recipe)) }
+        refresh()
     }
 
     // ============================================================ double exposure
@@ -340,8 +399,9 @@ final class EditorViewController: UIViewController, PHPickerViewControllerDelega
         let m = top.map { _ in Renderer.place(out: CGSize(width: base.width, height: base.height), top: canvas.secondSize ?? .zero,
                                                c: CGPoint(x: canvas.s2x, y: canvas.s2y), widthFrac: canvas.s2w, rotDeg: canvas.s2r) } ?? matrix_identity_float3x3
         let box = canvas.cropBox
+        let mask = rc.map { canvas.boxMask(canvas.cropMask($0)) }
         renderQ.async {
-            let cg = self.r.renderDisplay(base: base, top: top, m: m, blend: b, strength: st, recipe: rc, measure: box)
+            let cg = self.r.renderDisplay(base: base, top: top, m: m, blend: b, strength: st, recipe: rc, mask: mask, measure: box)
             DispatchQueue.main.async {
                 if let cg { self.canvas.pic = cg }
                 self.rendering = false
@@ -376,13 +436,8 @@ final class EditorViewController: UIViewController, PHPickerViewControllerDelega
         let c = canvas, f = scale
         let cx = c.cx, cy = c.cy, cw = c.cw, ch = c.ch, th = c.theta
         let s2 = (c.s2x, c.s2y, c.s2w, c.s2r)
-        var rc = recipe.isOn ? recipe : nil
-        if rc != nil {
-            // the focus point travels with the crop: from across the photo to across the cropped, straightened copy
-            let dx = CGFloat(recipe.fx) * c.bw - cx, dy = CGFloat(recipe.fy) * c.bh - cy
-            rc!.fx = Float(((dx * cos(th) + dy * sin(th)) + cw / 2) / cw)
-            rc!.fy = Float(((-dx * sin(th) + dy * cos(th)) + ch / 2) / ch)
-        }
+        let rc = recipe.isOn ? recipe : nil
+        let saveMask = rc.map { c.cropMask($0) }          // the copy is rendered on the cropped picture: crop-space mask
         let img = image, sec = second, b = blend, st = strength
         Library.ensure { ok in
             guard ok else { self.busy = false; self.showNote("Photos access is off. Turn it on in Settings › Fibonacci."); return }
@@ -405,7 +460,7 @@ final class EditorViewController: UIViewController, PHPickerViewControllerDelega
                         UIImage(cgImage: full).draw(at: .zero)
                     }.cgImage
                     guard var o = cropped else { return }
-                    if let rc, let styled = self.r.renderStill(base: o, recipe: rc) { o = Renderer.finish(styled, rc.mode) }
+                    if let rc, let styled = self.r.renderStill(base: o, recipe: rc, mask: saveMask) { o = Renderer.finish(styled, rc.mode) }
                     out = o
                 }
                 DispatchQueue.main.async {

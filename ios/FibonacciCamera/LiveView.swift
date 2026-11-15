@@ -15,6 +15,8 @@ final class LiveView: MTKView, MTKViewDelegate {
     var blend: Blend = .screen
     var strength: Float = 0.6
     var recipe: Recipe?
+    /** The look's focus region, in frame uv. */
+    var mask = FocusMask()
     /** Width / height of the camera picture (3:4 portrait). */
     var aspect: CGFloat = 3.0 / 4.0 { didSet { if aspect != oldValue { setNeedsLayout() } } }
     var onFrame: ((CGRect) -> Void)?
@@ -62,7 +64,7 @@ final class LiveView: MTKView, MTKViewDelegate {
         rp.colorAttachments[0].loadAction = .clear
         let k = contentScaleFactor
         let vp = CGRect(x: frameRect.minX * k, y: frameRect.minY * k, width: frameRect.width * k, height: frameRect.height * k)
-        r.encodeArt(cmd, src: mid, recipe: recipe, pass: rp, viewport: vp)
+        r.encodeArt(cmd, src: mid, recipe: recipe, mask: mask, pass: rp, viewport: vp)
         cmd.present(drawable)
         cmd.commit()
     }

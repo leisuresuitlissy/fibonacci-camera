@@ -56,8 +56,8 @@ enum Style {
         return b
     }
 
-    static func slider() -> UISlider {
-        let s = UISlider(); s.minimumTrackTintColor = gold; s.maximumTrackTintColor = line; s.thumbTintColor = .white
+    static func slider() -> DetentSlider {
+        let s = DetentSlider(); s.minimumTrackTintColor = gold; s.maximumTrackTintColor = line; s.thumbTintColor = .white
         return s
     }
 

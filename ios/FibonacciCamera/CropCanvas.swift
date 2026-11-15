@@ -26,7 +26,49 @@ final class CropCanvas: UIView {
     var editingSecond = false { didSet { setNeedsDisplay() } }
     /** Art tab: a quick tap picks what stays sharp (reported 0...1 across the photo). */
     var focusMode = false { didSet { setNeedsDisplay() } }
-    var focus: CGPoint? { didSet { setNeedsDisplay() } }
+    /** The focus region to outline (crop uv), shown briefly after a tap or a focus slider. */
+    var mask: FocusMask? { didSet { setNeedsDisplay() } }
+    var anchor = 0
+    private var maskUntil: CFTimeInterval = 0
+    func flashMask(_ m: FocusMask) {
+        mask = m; maskUntil = CACurrentMediaTime() + 1.6
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.7) { [weak self] in self?.setNeedsDisplay() }
+    }
+
+    // ---- focus coordinates: image uv (0...1 across the photo) <-> crop uv (0...1 across the tilted crop)
+    func imageToCrop(_ u: CGFloat, _ v: CGFloat) -> CGPoint {
+        let dx = u * bw - cx, dy = v * bh - cy, c = cos(theta), s = sin(theta)
+        return CGPoint(x: ((dx * c + dy * s) + cw / 2) / cw, y: ((-dx * s + dy * c) + ch / 2) / ch)
+    }
+    func cropToImage(_ a: CGFloat, _ b: CGFloat) -> CGPoint {
+        let x = (a - 0.5) * cw, y = (b - 0.5) * ch, c = cos(theta), s = sin(theta)
+        return CGPoint(x: (cx + x * c - y * s) / bw, y: (cy + x * s + y * c) / bh)
+    }
+    /**
+     * The look's focus region in crop uv (what the saved copy uses). Follow guide on: from the crop's own
+     * guide, so it moves with the crop. Off: the chosen spot stays on the same part of the photo.
+     */
+    func cropMask(_ r: Recipe) -> FocusMask {
+        if r.follow && r.mode.follows {
+            let fr = CGRect(x: 0, y: 0, width: cw, height: ch)
+            let g = GuideCtx(guide: guide, quadrant: quadrant, triFlip: triFlip, anchor: anchor, frame: fr, guideFrame: fr)
+            if Focus.linked(g) != nil { return Focus.resolve(r.mode, r.values, follow: true, guide: g, subject: nil) }
+        }
+        let p = imageToCrop(CGFloat(r.mask.cx), CGFloat(r.mask.cy))
+        var m = Focus.resolve(r.mode, r.values, follow: false, guide: nil, subject: p)
+        if r.mode == .TILT_SHIFT { m.cx = Float(p.x); m.cy = Float(p.y) }
+        return m
+    }
+    /** The same mask moved into the crop's bounding box in display pixels (how the preview measures the look). */
+    func boxMask(_ m: FocusMask) -> FocusMask {
+        let b = cropBox
+        let ip = cropToImage(CGFloat(m.cx), CGFloat(m.cy))
+        var o = m
+        o.cx = Float((ip.x * bw - b.minX) / b.width); o.cy = Float((ip.y * bh - b.minY) / b.height)
+        o.angle = m.angle + Float(theta)
+        let s = Float(ch / b.height); o.size = m.size * s; o.feather = m.feather * s
+        return o
+    }
     var onFocusTap: ((CGPoint) -> Void)?
     private var downAt = CGPoint.zero, downT: TimeInterval = 0, multi = false
 
@@ -101,11 +143,26 @@ final class CropCanvas: UIView {
         c.clip(to: fr)
         GuidePainter.draw(c, fr, guide, quadrant: quadrant, triFlip: triFlip, trueSpiral: true)
         c.restoreGState()
-        if focusMode, let f = focus {
-            let p = toScreen(CGPoint(x: f.x * bw, y: f.y * bh))
-            c.setStrokeColor(Style.gold.cgColor); c.setLineWidth(1.6)
-            c.strokeEllipse(in: CGRect(x: p.x - 18, y: p.y - 18, width: 36, height: 36))
-            c.setFillColor(Style.gold.cgColor); c.fillEllipse(in: CGRect(x: p.x - 2.5, y: p.y - 2.5, width: 5, height: 5))
+        if focusMode, let m = mask, m.type != 0, CACurrentMediaTime() < maskUntil {
+            // the simulated focus region, briefly, in the crop's tilted frame (never saved)
+            c.saveGState(); c.translateBy(x: sc.x, y: sc.y); c.rotate(by: theta); c.clip(to: fr)
+            let mx = -w / 2 + CGFloat(m.cx) * w, my = -h / 2 + CGFloat(m.cy) * h
+            let inner = CGFloat(m.size) * h, outer = CGFloat(m.size + 0.03 + m.feather * 0.55) * h
+            c.setStrokeColor(Style.gold.cgColor); c.setLineWidth(1.4)
+            if m.type == 2 {
+                c.strokeEllipse(in: CGRect(x: mx - inner, y: my - inner, width: inner * 2, height: inner * 2))
+                c.setFillColor(Style.gold.cgColor); c.fillEllipse(in: CGRect(x: mx - 2.5, y: my - 2.5, width: 5, height: 5))
+                c.setLineDash(phase: 0, lengths: [4, 5]); c.strokeEllipse(in: CGRect(x: mx - outer, y: my - outer, width: outer * 2, height: outer * 2))
+            } else {
+                let ux = CGFloat(cos(m.angle)), uy = CGFloat(sin(m.angle)), L = w + h
+                for (off, dashed) in [(inner, false), (-inner, false), (outer, true), (-outer, true)] {
+                    c.setLineDash(phase: 0, lengths: dashed ? [4, 5] : [])
+                    let px = mx - uy * off, py = my + ux * off
+                    c.move(to: CGPoint(x: px - ux * L, y: py - uy * L)); c.addLine(to: CGPoint(x: px + ux * L, y: py + uy * L)); c.strokePath()
+                }
+            }
+            c.setLineDash(phase: 0, lengths: [])
+            c.restoreGState()
         }
         if editingSecond, let t = secondSize {
             let g = s2w * bw / t.width, r = s2r * .pi / 180

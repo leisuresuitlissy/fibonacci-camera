@@ -4,7 +4,7 @@ kt = open(sys.argv[1]).read()
 common = re.search(r'const val COMMON = """(.*?)"""', kt, re.S).group(1)
 bodies = re.findall(r'ArtMode\.(\w+) to """(.*?)"""', kt, re.S)
 common = "\n".join(l for l in common.splitlines() if not l.strip().startswith("uniform "))
-helpers = ["hash", "px", "uvOf", "inFrame", "edgeOf", "vig", "blurAt", "depthR", "focusAt", "bloomAt", "grainAt", "vnoise"]
+helpers = ["hash", "px", "uvOf", "inFrame", "edgeOf", "vig", "blurAt", "blurWide", "maskSoft", "depthR", "focusAt", "bloomAt", "grainAt", "vnoise", "filmGrain"]
 out_common = []
 lines = common.splitlines()
 i = 0
@@ -25,13 +25,13 @@ for h in helpers:
     body = src[m.end():j]
     src = src[:start] + new + body + f"\n#define {h}(...) {h}_(T, uu, __VA_ARGS__)" + src[j:]
 src = src.replace("float4(content.eval(p))", "T.sample(smp, p / float2(T.get_width(), T.get_height()))")
-for f in ["luma", "satur", "contrast", "scurve"]:
+for f in ["luma", "satur", "contrast", "scurve", "screen"]:
     src = re.sub(r'^(float3?) ' + f + r'\(', r'static \1 ' + f + '(', src, flags=re.M)
 head = """// GENERATED from android/.../ArtShaders.kt by tools/gen_metal.py — edit the Kotlin, then regenerate.
 #include <metal_stdlib>
 using namespace metal;
 
-struct U { float2 org_; float2 res_; float amt_; float p1_; float p2_; float p3_; float seed_; float2 vpo_; float2 vps_; float2 foc_; float dep_; };
+struct U { float2 org_; float2 res_; float amt_; float p1_; float p2_; float p3_; float seed_; float2 vpo_; float2 vps_; float4 msk_; float4 msz_; float lks_; };
 struct VOut { float4 pos [[position]]; float2 uv; };
 constexpr sampler smp(coord::normalized, address::clamp_to_edge, filter::linear);
 
@@ -42,8 +42,9 @@ constexpr sampler smp(coord::normalized, address::clamp_to_edge, filter::linear)
 #define p2 uu.p2_
 #define p3 uu.p3_
 #define seed uu.seed_
-#define foc uu.foc_
-#define dep uu.dep_
+#define msk uu.msk_
+#define msz uu.msz_
+#define lks uu.lks_
 
 vertex VOut vfull(uint vid [[vertex_id]]) {
     float2 p = float2((vid << 1) & 2, vid & 2);

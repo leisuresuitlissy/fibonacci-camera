@@ -93,7 +93,8 @@ final class CameraViewController: UIViewController, PHPickerViewControllerDelega
     private let tabRow = Style.hstack(spacing: 6)
     private let composeLayer = UIStackView(), artLayer = UIStackView(), exposureLayer = UIStackView(), blendLayer = UIStackView()
     private let guideRow = Style.hstack(), secondRow = Style.hstack()
-    private let artRow = Style.hstack(), paramRow = Style.hstack(spacing: 14)
+    private let artRow = Style.hstack(), paramRow = Style.hstack(spacing: 12)
+    private let artValueLbl = Style.label("", Style.mono(11), Style.gold)
     private let artSlider = Style.slider()
     private let evValue = Style.label("0.0 EV", Style.mono(12), Style.gold)
     private let evSlider = Style.slider()
@@ -114,9 +115,12 @@ final class CameraViewController: UIViewController, PHPickerViewControllerDelega
     private var triFlip = false
     private var layer = "COMPOSE"
     private var art = ArtMode.OFF
-    private var artValues: [Float] = ArtMode.OFF.defaults
+    private var artState = ArtState(values: ArtMode.OFF.defaults, follow: false)
+    private var artValues: [Float] { get { artState.values } set { artState.values = newValue } }
     private var artParam = 0
-    private let seed = Float.random(in: 0..<1000)
+    private var anchor = 0              // which thirds/φ point, or corner diagonal, a guide-linked focus uses
+    private var guideHidden = false
+    private var seed = Float.random(in: 0..<1000)   // stable until the next shot, so the saved leak matches the preview
     private var ev: Float = 0
     private var evRange: ClosedRange<Float> = -2...2
     private var flash = AVCaptureDevice.FlashMode.off
@@ -131,25 +135,40 @@ final class CameraViewController: UIViewController, PHPickerViewControllerDelega
 
     private var recipe: Recipe? {
         guard art != .OFF else { return nil }
-        let f = liveFocus()
-        return Recipe(mode: art, values: artValues, seed: seed, fx: Float(f.x), fy: Float(f.y))
+        return Recipe(mode: art, values: artValues, seed: seed, follow: artState.follow, mask: liveMask())
     }
     private var lastFocus = CGPoint(x: 0.5, y: 0.5)
 
-    /** What stays sharp under Depth: the subject you tapped, followed as you move; before that, the spiral's eye or the middle. */
-    private func liveFocus() -> CGPoint {
+    private func guideCtx() -> GuideCtx? {
         let fr = live.frameRect
-        guard !fr.isEmpty else { return CGPoint(x: 0.5, y: 0.5) }
-        if let s = subject { return CGPoint(x: (s.x - fr.minX) / fr.width, y: (s.y - fr.minY) / fr.height) }
-        if guide == .spiral, let e = Geo.goals(.spiral, overlay.guideFrame, quadrant: quadrant, triFlip: triFlip).first {
-            return CGPoint(x: (e.x - fr.minX) / fr.width, y: (e.y - fr.minY) / fr.height)
-        }
-        return CGPoint(x: 0.5, y: 0.5)
+        return fr.isEmpty ? nil : GuideCtx(guide: guide, quadrant: quadrant, triFlip: triFlip, anchor: anchor, frame: fr, guideFrame: overlay.guideFrame)
     }
+    /** The subject you tapped (0...1 across the frame), followed as you move. Nil before any tap. */
+    private func liveSubject() -> CGPoint? {
+        let fr = live.frameRect
+        guard let s = subject, !fr.isEmpty else { return nil }
+        return CGPoint(x: (s.x - fr.minX) / fr.width, y: (s.y - fr.minY) / fr.height)
+    }
+    /** The look's focus region right now (frame uv): the guide's geometry with Follow guide, otherwise its own. */
+    private func liveMask() -> FocusMask { Focus.resolve(art, artValues, follow: artState.follow, guide: guideCtx(), subject: liveSubject()) }
+
+    private func pushArt() { live.recipe = recipe; live.mask = liveMask() }
     private func refreshFocus() {
         guard art != .OFF else { return }
-        let f = liveFocus()
-        if hypot(f.x - lastFocus.x, f.y - lastFocus.y) > 0.004 { lastFocus = f; live.recipe = recipe }
+        let m = liveMask(), f = CGPoint(x: CGFloat(m.cx), y: CGFloat(m.cy))
+        if hypot(f.x - lastFocus.x, f.y - lastFocus.y) > 0.004 { lastFocus = f; pushArt() }
+    }
+    /** The guide changed: a linked focus moves with it (and shows briefly); a manual one stays put. */
+    private func guideMoved() {
+        guard art != .OFF, art.follows, artState.follow else { return }
+        pushArt(); showMask()
+    }
+    /** Briefly outlines the simulated focus region; never part of the photo. */
+    private func showMask() {
+        guard art != .OFF else { return }
+        let m = liveMask()
+        guard m.type != 0, art == .TILT_SHIFT || m.strength > 0 else { return }
+        overlay.showMask(m)
     }
     private static var firstURL: URL { FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0].appendingPathComponent("first-exposure.jpg") }
 
@@ -162,7 +181,8 @@ final class CameraViewController: UIViewController, PHPickerViewControllerDelega
         quadrant = d.integer(forKey: "quadrant"); triFlip = d.bool(forKey: "triFlip")
         // A fresh launch always opens on Compose with no look; slider positions per look are kept.
         layer = "COMPOSE"
-        art = .OFF; artValues = art.loadValues()
+        art = .OFF; artState = art.loadState()
+        anchor = d.integer(forKey: "anchor"); guideHidden = d.bool(forKey: "guideHidden")
         flash = AVCaptureDevice.FlashMode(rawValue: d.integer(forKey: "flash")) ?? .off
         double = d.bool(forKey: "double")
         blend = (d.object(forKey: "blend") as? Int).flatMap { Blend(rawValue: $0) } ?? .screen   // Screen until the user picks another
@@ -209,6 +229,7 @@ final class CameraViewController: UIViewController, PHPickerViewControllerDelega
     private func save() {
         d.set(guide.rawValue, forKey: "guide"); d.set(quadrant, forKey: "quadrant"); d.set(triFlip, forKey: "triFlip")
         d.set(layer, forKey: "layer"); d.set(art.rawValue, forKey: "art"); d.set(flash.rawValue, forKey: "flash")
+        d.set(anchor, forKey: "anchor"); d.set(guideHidden, forKey: "guideHidden")
         d.set(double, forKey: "double"); d.set(blend.rawValue, forKey: "blend"); d.set(strength, forKey: "strength")
     }
 
@@ -249,7 +270,14 @@ final class CameraViewController: UIViewController, PHPickerViewControllerDelega
         sourceLbl.isHidden = true
         titles.addArrangedSubview(makeDemoButton())
         #endif
-        let top = Style.hstack([titles, UIView(), doubleBtn, flashBtn], spacing: 8)
+        let more = UIButton(type: .system)
+        more.setImage(UIImage(systemName: "ellipsis"), for: .normal); more.tintColor = Style.muted
+        more.backgroundColor = Style.elev; more.layer.cornerRadius = 20; size(more, 40, 40)
+        more.accessibilityLabel = "Settings"
+        more.showsMenuAsPrimaryAction = true
+        more.menu = settingsMenu()
+        settingsBtn = more
+        let top = Style.hstack([titles, UIView(), doubleBtn, flashBtn, more], spacing: 8)
         size(top, nil, 56); root.addArrangedSubview(top)
 
         // stage
@@ -259,6 +287,7 @@ final class CameraViewController: UIViewController, PHPickerViewControllerDelega
         overlay.onTap = { [weak self] p in self?.tapFocus(p) }
         overlay.onDoubleTap = { [weak self] in self?.doubleTap() }
         overlay.onPinch = { [weak self] s in self?.pinch(s) }
+        overlay.onFocusDrag = { [weak self] dy in self?.focusDrag(dy) ?? false }
         var tc = UIButton.Configuration.filled()
         tc.baseBackgroundColor = Style.base.withAlphaComponent(0.7); tc.baseForegroundColor = Style.gold; tc.cornerStyle = .capsule
         tc.contentInsets = NSDirectionalEdgeInsets(top: 6, leading: 10, bottom: 6, trailing: 10)
@@ -290,14 +319,16 @@ final class CameraViewController: UIViewController, PHPickerViewControllerDelega
         composeLayer.addArrangedSubview(secondRow); composeLayer.addArrangedSubview(UIView())
         // art
         let artScroll = scroll(artRow); size(artScroll, nil, 48)
-        artLayer.addArrangedSubview(artScroll); size(paramRow, nil, 28); artLayer.addArrangedSubview(paramRow)
+        let pScroll = scroll(paramRow); size(pScroll, nil, 34)
+        artLayer.addArrangedSubview(artScroll); artLayer.addArrangedSubview(pScroll)
         artSlider.minimumValue = 0; artSlider.maximumValue = 1
         artSlider.addAction(UIAction { [weak self] _ in self?.onArtSlider() }, for: .valueChanged)
-        let artSliderRow = Style.hstack([artSlider]); size(artSliderRow, nil, 36); artLayer.addArrangedSubview(artSliderRow)
+        artValueLbl.textAlignment = .right; size(artValueLbl, 32, nil)
+        let artSliderRow = Style.hstack([artSlider, artValueLbl]); size(artSliderRow, nil, 34); artLayer.addArrangedSubview(artSliderRow)
         artLayer.addArrangedSubview(UIView())
         // exposure
         let evHead = Style.hstack([Style.label("EXPOSURE", Style.mono(10), Style.muted, kern: 1.3), UIView(), evValue]); size(evHead, nil, 32)
-        evSlider.minimumValue = -2; evSlider.maximumValue = 2
+        evSlider.minimumValue = -2; evSlider.maximumValue = 2; evSlider.neutral = 0.5
         evSlider.addAction(UIAction { [weak self] _ in self?.onEvSlider() }, for: .valueChanged)
         let evRow = Style.hstack([evSlider]); size(evRow, nil, 36)
         let reset = Style.chip("Reset", on: false) { [weak self] in self?.setEv(0) }
@@ -380,7 +411,7 @@ final class CameraViewController: UIViewController, PHPickerViewControllerDelega
     private func applyGuide() {
         guideRow.arrangedSubviews.forEach { $0.removeFromSuperview() }
         for g in Guide.allCases {
-            guideRow.addArrangedSubview(Style.chip(g.label, on: g == guide) { [weak self] in self?.guide = g; self?.save(); self?.applyGuide() })
+            guideRow.addArrangedSubview(Style.chip(g.label, on: g == guide) { [weak self] in self?.guide = g; self?.save(); self?.applyGuide(); self?.guideMoved() })
         }
         secondRow.arrangedSubviews.forEach { $0.removeFromSuperview() }
         switch guide {
@@ -388,26 +419,40 @@ final class CameraViewController: UIViewController, PHPickerViewControllerDelega
             secondRow.addArrangedSubview(Style.label("EYE", Style.mono(10), Style.muted, kern: 1.3)); secondRow.addArrangedSubview(UIView())
             for q in 0..<4 {
                 let t = TileView(quadrant: q, triangle: false); t.on = q == quadrant; size(t, 44, 50)
-                t.addAction(UIAction { [weak self] _ in self?.quadrant = q; self?.save(); self?.applyGuide() }, for: .touchUpInside)
+                t.addAction(UIAction { [weak self] _ in self?.quadrant = q; self?.save(); self?.applyGuide(); self?.guideMoved() }, for: .touchUpInside)
                 secondRow.addArrangedSubview(t)
             }
-        case .triangles:
+        case .triangles, .dynamic:
             secondRow.addArrangedSubview(Style.label("DIRECTION", Style.mono(10), Style.muted, kern: 1.3)); secondRow.addArrangedSubview(UIView())
             for f in [false, true] {
                 let t = TileView(quadrant: f ? 1 : 0, triangle: true); t.on = f == triFlip; size(t, 44, 50)
-                t.addAction(UIAction { [weak self] _ in self?.triFlip = f; self?.save(); self?.applyGuide() }, for: .touchUpInside)
+                t.addAction(UIAction { [weak self] _ in self?.triFlip = f; self?.save(); self?.applyGuide(); self?.guideMoved() }, for: .touchUpInside)
                 secondRow.addArrangedSubview(t)
             }
+        case .thirds, .phiGrid, .diagonals:
+            // which point (or corner diagonal) a guide-linked focus sits on
+            secondRow.addArrangedSubview(Style.label(guide == .diagonals ? "DIAGONAL" : "POINT", Style.mono(10), Style.muted, kern: 1.3)); secondRow.addArrangedSubview(UIView())
+            for (a, n) in (guide == .diagonals ? ["↘", "↙", "↗", "↖"] : ["↖", "↗", "↙", "↘"]).enumerated() {
+                secondRow.addArrangedSubview(Style.chip(n, on: a == anchor) { [weak self] in self?.anchor = a; self?.save(); self?.applyGuide(); self?.guideMoved() })
+            }
         default:
-            secondRow.addArrangedSubview(Style.label(guide == .off ? "No guide" : "Double-tap the picture to switch spiral orientation", Style.medium(11.5), Style.muted))
+            secondRow.addArrangedSubview(Style.label(guide == .off ? "No guide" : "", Style.medium(11.5), Style.muted))
+            secondRow.addArrangedSubview(UIView())
         }
+        if guide != .off {
+            secondRow.addArrangedSubview(Style.chip(guideHidden ? "SHOW" : "HIDE", on: guideHidden) { [weak self] in
+                guard let self else { return }
+                self.guideHidden.toggle(); self.save(); self.applyGuide()      // hiding never unlinks the focus
+            })
+        }
+        overlay.hidden = guideHidden
         overlay.guide = guide; overlay.quadrant = quadrant; overlay.triFlip = triFlip
         lastFocus = CGPoint(x: -1, y: -1); refreshFocus()
     }
 
     private func doubleTap() {
-        if guide == .spiral { quadrant = (quadrant + 1) % 4 } else if guide == .triangles { triFlip.toggle() } else { return }
-        save(); applyGuide()
+        if guide == .spiral { quadrant = (quadrant + 1) % 4 } else if guide == .triangles || guide == .dynamic { triFlip.toggle() } else { return }
+        save(); applyGuide(); guideMoved()
     }
 
     // ---- art
@@ -416,33 +461,95 @@ final class CameraViewController: UIViewController, PHPickerViewControllerDelega
         for m in ArtMode.allCases {
             artRow.addArrangedSubview(Style.chip(m.label, on: m == art) { [weak self] in
                 guard let self else { return }
-                self.art = m; self.artValues = m.loadValues(); self.artParam = 0
+                // each look keeps its own settings; Off just pauses the look, nothing is forgotten
+                self.art = m; self.artState = m.loadState(); self.artParam = 0
                 self.save(); self.applyArtUi(); self.applyLayer()
             })
         }
         paramRow.arrangedSubviews.forEach { $0.removeFromSuperview() }
         overlay.squareGuide = art == .HOLGA
-        live.recipe = recipe
+        pushArt()
         if art == .OFF {
             paramRow.addArrangedSubview(Style.label("Pick a look. The original is always kept; the look is saved as a copy.", Style.medium(11.5), Style.muted))
-            artSlider.isHidden = true; return
+            artSlider.isHidden = true; artValueLbl.text = ""; return
         }
         for i in art.shown {
             let s = art.sliders[i]
             let b = UIButton(type: .system)
             b.setAttributedTitle(NSAttributedString(string: s.0.uppercased(), attributes: [.font: Style.mono(10), .kern: 1, .foregroundColor: i == artParam ? Style.gold : Style.muted]), for: .normal)
-            b.addAction(UIAction { [weak self] _ in self?.artParam = i; self?.applyArtUi() }, for: .touchUpInside)
+            b.addAction(UIAction { [weak self] _ in self?.artParam = i; self?.applyArtUi(); if self?.art.isFocusSlider(i) == true { self?.showMask() } }, for: .touchUpInside)
             paramRow.addArrangedSubview(b)
         }
-        paramRow.addArrangedSubview(UIView())
-        paramRow.addArrangedSubview(Style.label("\(Int((artValues[artParam] * 100).rounded()))", Style.mono(11), Style.gold))
+        if art == .HOLGA {
+            let st = min(max(Int(artValues[5].rounded()), 0), 5)
+            paramRow.addArrangedSubview(miniChip("LEAK · " + LEAK_STYLES[st], on: st > 0) { [weak self] in
+                guard let self else { return }
+                let next = (st + 1) % LEAK_STYLES.count
+                self.artValues[5] = Float(next)
+                if next == 5 { self.seed = Float.random(in: 0..<1000) }          // Random: a fresh, stable variant
+                self.art.saveState(self.artState); self.applyArtUi()
+            })
+        }
+        if art.follows {
+            paramRow.addArrangedSubview(miniChip("FOLLOW GUIDE", on: artState.follow) { [weak self] in
+                guard let self else { return }
+                if self.artState.follow && self.art == .TILT_SHIFT, let g = self.guideCtx(), let m = Focus.linked(g) {
+                    // turning it off leaves the band where the guide put it, ready to adjust by hand
+                    self.artValues[1] = min(max(m.cy, 0), 1)
+                    if m.type == 1 { self.artValues[3] = min(max(m.angle / (.pi / 2) + 0.5, 0), 1) }
+                }
+                self.artState.follow.toggle()
+                self.art.saveState(self.artState); self.applyArtUi(); self.showMask()
+            })
+        }
+        paramRow.addArrangedSubview(miniChip("RESET", on: false) { [weak self] in
+            guard let self else { return }
+            self.artState = self.art.resetState(); self.artParam = 0; self.applyArtUi(); self.applyLayer()
+        })
+        if !art.about.isEmpty && artParam == 0 { paramRow.addArrangedSubview(Style.label(art.about, Style.medium(10.5), Style.muted)) }
         artSlider.isHidden = false; artSlider.value = artValues[artParam]
+        artValueLbl.text = "\(Int((artValues[artParam] * 100).rounded()))"
+    }
+
+    private func miniChip(_ t: String, on: Bool, action: @escaping () -> Void) -> UIButton {
+        var c = UIButton.Configuration.filled()
+        c.baseBackgroundColor = on ? Style.gold.withAlphaComponent(0.16) : Style.elev
+        c.baseForegroundColor = on ? Style.gold : Style.muted
+        c.cornerStyle = .medium
+        c.contentInsets = NSDirectionalEdgeInsets(top: 5, leading: 9, bottom: 5, trailing: 9)
+        c.attributedTitle = AttributedString(t, attributes: AttributeContainer([.font: Style.mono(9.5), .kern: 1]))
+        let b = UIButton(configuration: c, primaryAction: UIAction { _ in action() })
+        b.layer.borderWidth = 1; b.layer.cornerRadius = 8
+        b.layer.borderColor = (on ? Style.gold.withAlphaComponent(0.8) : Style.line).cgColor
+        return b
     }
 
     private func onArtSlider() {
         artValues[artParam] = artSlider.value
-        (paramRow.arrangedSubviews.last as? UILabel)?.text = "\(Int((artSlider.value * 100).rounded()))"
-        art.saveValues(artValues); live.recipe = recipe
+        artValueLbl.text = "\(Int((artSlider.value * 100).rounded()))"
+        art.saveState(artState); pushArt()
+        if art.isFocusSlider(artParam) { showMask() }
+    }
+
+    /** In Art with Tilt Shift (not following the guide), a vertical drag on the picture moves the band. */
+    private func focusDrag(_ dy: CGFloat) -> Bool {
+        guard layer == "ART", art == .TILT_SHIFT, !artState.follow, !live.frameRect.isEmpty else { return false }
+        artValues[1] = min(max(artValues[1] + Float(dy / live.frameRect.height), 0), 1)
+        if artParam == 1 { artSlider.value = artValues[1]; artValueLbl.text = "\(Int((artValues[1] * 100).rounded()))" }
+        art.saveState(artState); pushArt(); showMask()
+        return true
+    }
+
+    // ---- settings
+    private var settingsBtn: UIButton?
+    private func settingsMenu() -> UIMenu {
+        let v = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? ""
+        let b = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? ""
+        return UIMenu(title: "Fibonacci Camera \(v) (\(b))", children: [
+            UIAction(title: "Haptic feedback", image: UIImage(systemName: "hand.tap"), state: Haptics.enabled ? .on : .off) { [weak self] _ in
+                Haptics.enabled.toggle(); if Haptics.enabled { Haptics.confirm() }
+                self?.settingsBtn?.menu = self?.settingsMenu()
+            }])
     }
 
     // ---- exposure
@@ -559,7 +666,7 @@ final class CameraViewController: UIViewController, PHPickerViewControllerDelega
         guard let best = Geo.nearestGoal(guide, fr, quadrant: quadrant, triFlip: triFlip, p: p) else { aligned = false; return }
         let d = hypot(best.x - p.x, best.y - p.y)
         let r = max(14, 0.045 * min(fr.width, fr.height))
-        if !aligned && d < r { aligned = true; haptic.impactOccurred(); haptic.prepare(); showNice() }
+        if !aligned && d < r { aligned = true; Haptics.confirm(); showNice() }
         else if aligned && d > r * 1.8 { aligned = false }
     }
 
@@ -621,6 +728,7 @@ final class CameraViewController: UIViewController, PHPickerViewControllerDelega
             self.cam.capture(flash: self.flash, rotation: self.rotationNow()) { data in
                 guard let data, let img = UIImage(data: data) else { self.toast("Couldn't take that photo."); return }
                 Library.saveOriginal(data)                                          // the original, always, untouched
+                self.seed = Float.random(in: 0..<1000); self.pushArt()             // fresh leaks and grain for the next frame
                 self.thumb.image = img
                 if takingFirst { self.setFirst(img, data: data); return }          // exposure 1 now floats over the live view
                 if firstNow != nil || r != nil { self.saveCopy(base: img, top: firstNow, blend: b, strength: st, recipe: r) }
