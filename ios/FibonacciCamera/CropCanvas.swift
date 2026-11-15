@@ -27,11 +27,11 @@ final class CropCanvas: UIView {
     /** Art tab: a quick tap picks what stays sharp (reported 0...1 across the photo). */
     var focusMode = false { didSet { setNeedsDisplay() } }
     /** The focus region to outline (crop uv), shown briefly after a tap or a focus slider. */
-    var mask: FocusMask? { didSet { setNeedsDisplay() } }
+    var focusMask: FocusMask? { didSet { setNeedsDisplay() } }
     var anchor = 0
     private var maskUntil: CFTimeInterval = 0
     func flashMask(_ m: FocusMask) {
-        mask = m; maskUntil = CACurrentMediaTime() + 1.6
+        focusMask = m; maskUntil = CACurrentMediaTime() + 1.6
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.7) { [weak self] in self?.setNeedsDisplay() }
     }
 
@@ -143,7 +143,7 @@ final class CropCanvas: UIView {
         c.clip(to: fr)
         GuidePainter.draw(c, fr, guide, quadrant: quadrant, triFlip: triFlip, trueSpiral: true)
         c.restoreGState()
-        if focusMode, let m = mask, m.type != 0, CACurrentMediaTime() < maskUntil {
+        if focusMode, let m = focusMask, m.type != 0, CACurrentMediaTime() < maskUntil {
             // the simulated focus region, briefly, in the crop's tilted frame (never saved)
             c.saveGState(); c.translateBy(x: sc.x, y: sc.y); c.rotate(by: theta); c.clip(to: fr)
             let mx = -w / 2 + CGFloat(m.cx) * w, my = -h / 2 + CGFloat(m.cy) * h

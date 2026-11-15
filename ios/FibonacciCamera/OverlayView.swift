@@ -16,8 +16,8 @@ final class OverlayView: UIView {
     var onFocusDrag: ((CGFloat) -> Bool)?
     var onFocusDragEnd: (() -> Void)?
     /** Hide the guide lines (the guide still drives any linked focus). */
-    var hidden = false { didSet { setNeedsDisplay() } }
-    private var mask: FocusMask?
+    var guideHidden = false { didSet { setNeedsDisplay() } }
+    private var focusMask: FocusMask?
     private var maskAlpha: CGFloat = 0
     private var maskShown: CFTimeInterval = 0
     private var maskLink: CADisplayLink?
@@ -58,7 +58,7 @@ final class OverlayView: UIView {
 
     /** Shows the simulated focus region while it's being adjusted; it fades away by itself and is never saved. */
     func showMask(_ m: FocusMask) {
-        mask = m; maskShown = CACurrentMediaTime(); maskAlpha = 1
+        focusMask = m; maskShown = CACurrentMediaTime(); maskAlpha = 1
         if maskLink == nil { maskLink = CADisplayLink(target: self, selector: #selector(maskTick)); maskLink?.add(to: .main, forMode: .common) }
         setNeedsDisplay()
     }
@@ -86,13 +86,13 @@ final class OverlayView: UIView {
     override func draw(_ rect: CGRect) {
         guard let c = UIGraphicsGetCurrentContext(), !frameRect.isEmpty else { return }
         let g = guideFrame
-        if !hidden {
+        if !guideHidden {
             c.saveGState(); c.clip(to: g)
             GuidePainter.draw(c, g, guide, quadrant: quadrant, triFlip: triFlip, trueSpiral: false)
             c.restoreGState()
         }
-        if let m = mask, maskAlpha > 0.01 { drawMask(c, m) }
-        if squareGuide && !hidden {
+        if let m = focusMask, maskAlpha > 0.01 { drawMask(c, m) }
+        if squareGuide && !guideHidden {
             c.setStrokeColor(GuidePainter.gold.withAlphaComponent(0.5).cgColor); c.setLineWidth(1); c.setLineDash(phase: 0, lengths: [5, 5])
             c.stroke(g.insetBy(dx: 0.5, dy: 0.5)); c.setLineDash(phase: 0, lengths: [])
         }

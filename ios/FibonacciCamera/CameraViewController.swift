@@ -152,7 +152,7 @@ final class CameraViewController: UIViewController, PHPickerViewControllerDelega
     /** The look's focus region right now (frame uv): the guide's geometry with Follow guide, otherwise its own. */
     private func liveMask() -> FocusMask { Focus.resolve(art, artValues, follow: artState.follow, guide: guideCtx(), subject: liveSubject()) }
 
-    private func pushArt() { live.recipe = recipe; live.mask = liveMask() }
+    private func pushArt() { live.recipe = recipe; live.focusMask = liveMask() }
     private func refreshFocus() {
         guard art != .OFF else { return }
         let m = liveMask(), f = CGPoint(x: CGFloat(m.cx), y: CGFloat(m.cy))
@@ -445,7 +445,7 @@ final class CameraViewController: UIViewController, PHPickerViewControllerDelega
                 self.guideHidden.toggle(); self.save(); self.applyGuide()      // hiding never unlinks the focus
             })
         }
-        overlay.hidden = guideHidden
+        overlay.guideHidden = guideHidden
         overlay.guide = guide; overlay.quadrant = quadrant; overlay.triFlip = triFlip
         lastFocus = CGPoint(x: -1, y: -1); refreshFocus()
     }
