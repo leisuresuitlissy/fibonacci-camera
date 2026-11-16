@@ -404,7 +404,7 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
             setOnClickListener {
                 coach = !coach
                 if (coach) hintUntil = SystemClock.uptimeMillis() + 4000
-                save(); syncCoachBtn(); updateHud(); overlay.invalidate()
+                save(); syncCoachBtn(); updateHud(); this@MainActivity.overlay.invalidate()
             }
         }
         header.addView(coachBtn, lp(wrap, dpi(32f), Gravity.START or Gravity.CENTER_VERTICAL))
@@ -500,7 +500,7 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
                 Art.saveState(prefs, art, artState); applyArtUi(); applyLiveArt()
             }
             slider.onChange = { v -> onArtSlider(v) }
-            slider.onStop = { overlay.fadeMask() }
+            slider.onStop = { this@MainActivity.overlay.fadeMask() }
         }
         ctxArea.addView(lookControls, lp(match, wrap))
         root.addView(ctxArea, lp(0, 0))
@@ -967,7 +967,7 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
         gBox.addView(text("Keep guides visible without obscuring your photo.", 11f, T.SUBTLE, T.regular), LinearLayout.LayoutParams(wrap, dpi(16f)).apply { topMargin = dpi(12f) })
         gBox.addView(plainSlider(this).apply {
             value = guideOpacity; contentDescription = "Guide opacity"
-            onChange = { v -> guideOpacity = v; pct.text = "${(v * 100).roundToInt()}%"; overlay.guideOpacity = v }
+            onChange = { v -> guideOpacity = v; pct.text = "${(v * 100).roundToInt()}%"; this@MainActivity.overlay.guideOpacity = v }
             onStop = { save() }
         }, LinearLayout.LayoutParams(match, dpi(22f)).apply { topMargin = dpi(12f) })
         g.addView(gBox)
