@@ -622,6 +622,7 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
         hud.post { hud.requestLayout(); ghost.requestLayout() }
         overlay.invalidate()
         applyLiveArt()
+        if (art == ArtMode.TILT_SHIFT) applyArtUi()   // the guide's values need the frame
     }
 
     // =========================================================== layers

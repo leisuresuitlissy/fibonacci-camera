@@ -317,6 +317,7 @@ class FollowToggle(ctx: Context) : LinearLayout(ctx) {
     fun set(on: Boolean, available: Boolean) {
         val c = if (on && available) T.AMBER else T.IVORY
         background = android.graphics.drawable.InsetDrawable(pill(T.CARBON, 13 * d, c, d.roundToInt().coerceAtLeast(1)), 0, (9 * d).roundToInt(), 0, (9 * d).roundToInt())
+        setPadding((10 * d).roundToInt(), 0, (10 * d).roundToInt(), 0)   // a background resets padding; the inset is only the touch margin
         icon.setColorFilter(c); label.setTextColor(c)
         isEnabled = available; alpha = if (available) 1f else 0.4f
         contentDescription = when { !available -> "Follow guide, not available for this guide"; on -> "Follow guide on"; else -> "Follow guide off" }
