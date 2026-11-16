@@ -735,7 +735,7 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
         overlay.guide = guide; overlay.quadrant = quadrant; overlay.triFlip = triFlip; overlay.align = align
         overlay.hidden = false
         if (::preview.isInitialized) overlay.post { applyLiveArt() }
-        for ((g, t) in composeTiles) t.selected = g == guide
+        for ((g, t) in composeTiles) t.chosen = g == guide
         composeSub.removeAllViews()
         // only guides with real alternatives get a submenu; the space stays empty otherwise
         val alts: List<Triple<String, Int, () -> Unit>> = when (guide) {
@@ -749,7 +749,7 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
         alts.forEachIndexed { i, (name, res, act) ->
             val sel = if (guide == Guide.SPIRAL) i == quadrant else (i == 1) == triFlip
             composeSub.addView(TileView(this, bmp(res), 48f, 35f, RectF(3f, 1f, 43f, 34f), 4f, T.GRAPHITE, name, 8f, crop = false).apply {
-                selected = sel; contentDescription = name; setOnClickListener { act() }
+                chosen = sel; contentDescription = name; setOnClickListener { act() }
             }, LinearLayout.LayoutParams(wrap, wrap).apply { if (i > 0) leftMargin = dpi(8f) })
         }
         overlay.invalidate(); updateHud()
@@ -767,7 +767,7 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
     }
 
     private fun applyArtUi() {
-        for ((m, t) in lookTiles) t.selected = m == art
+        for ((m, t) in lookTiles) t.chosen = m == art
         artParam = artParam.coerceIn(0, (art.controls.size - 1).coerceAtLeast(0))
         lookControls.bind(art, artValues, artParam, artState.follow)
     }
@@ -917,13 +917,13 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
         val c = card(); parent.addView(c, LinearLayout.LayoutParams(match, wrap).apply { topMargin = dpi(10f) }); return c
     }
 
-    private fun switchRow(title: String, desc: String, on: Boolean, onToggle: (Boolean, View) -> Unit): View {
+    private fun switchRow(title: String, desc: String, on: Boolean, toggled: (Boolean, View) -> Unit): View {
         val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(dpi(16f), dpi(14f), dpi(12f), dpi(14f)) }
         val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         col.addView(text(title, 14f, T.IVORY, T.medium))
         col.addView(text(desc, 11f, T.SUBTLE, T.regular).apply { maxLines = 3; setLineSpacing(0f, 1.4f) }, LinearLayout.LayoutParams(wrap, wrap).apply { topMargin = dpi(6f) })
         row.addView(col, LinearLayout.LayoutParams(0, wrap, 1f).apply { rightMargin = dpi(12f) })
-        val sw = SwitchView(this).apply { checked = on; contentDescription = title; onToggle = { v -> onToggle(v, this) } }
+        val sw = SwitchView(this).apply { checked = on; contentDescription = title; onToggle = { v -> toggled(v, this) } }
         row.addView(sw)
         row.minimumHeight = dpi(82f)
         return row

@@ -68,20 +68,20 @@ fun pill(fill: Int, radius: Float, stroke: Int? = null, strokeW: Int = 1) = Grad
 class FadeScroller(ctx: Context, private val fadeW: Float, private val fadeColor: Int = T.CARBON) : HorizontalScrollView(ctx) {
     private val paint = Paint()
     private var lastW = -1
-    private lateinit var left: LinearGradient
-    private lateinit var right: LinearGradient
+    private lateinit var gLeft: LinearGradient
+    private lateinit var gRight: LinearGradient
     init { isHorizontalScrollBarEnabled = false; overScrollMode = OVER_SCROLL_NEVER; isFillViewport = false }
 
     override fun dispatchDraw(c: Canvas) {
         super.dispatchDraw(c)
         if (width != lastW) {
             lastW = width
-            left = LinearGradient(0f, 0f, fadeW, 0f, fadeColor, T.alpha(fadeColor, 0f), Shader.TileMode.CLAMP)
-            right = LinearGradient(width - fadeW, 0f, width.toFloat(), 0f, T.alpha(fadeColor, 0f), fadeColor, Shader.TileMode.CLAMP)
+            gLeft = LinearGradient(0f, 0f, fadeW, 0f, fadeColor, T.alpha(fadeColor, 0f), Shader.TileMode.CLAMP)
+            gRight = LinearGradient(width - fadeW, 0f, width.toFloat(), 0f, T.alpha(fadeColor, 0f), fadeColor, Shader.TileMode.CLAMP)
         }
         c.save(); c.translate(scrollX.toFloat(), 0f)
-        if (canScrollHorizontally(-1)) { paint.shader = left; c.drawRect(0f, 0f, fadeW, height.toFloat(), paint) }
-        if (canScrollHorizontally(1)) { paint.shader = right; c.drawRect(width - fadeW, 0f, width.toFloat(), height.toFloat(), paint) }
+        if (canScrollHorizontally(-1)) { paint.shader = gLeft; c.drawRect(0f, 0f, fadeW, height.toFloat(), paint) }
+        if (canScrollHorizontally(1)) { paint.shader = gRight; c.drawRect(width - fadeW, 0f, width.toFloat(), height.toFloat(), paint) }
         c.restore()
     }
 
@@ -106,7 +106,7 @@ class FadeScroller(ctx: Context, private val fadeW: Float, private val fadeColor
 class TileView(ctx: Context, private val art: Bitmap?, private val boxW: Float, private val boxH: Float, private val artRect: RectF,
                private val radius: Float, private val fill: Int?, private val label: String, private val labelSize: Float,
                private val crop: Boolean) : View(ctx) {
-    var selected = false
+    var chosen = false
         set(v) { field = v; invalidate() }
     private val d = ctx.dp(1f)
     private val p = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
@@ -134,10 +134,10 @@ class TileView(ctx: Context, private val art: Bitmap?, private val boxW: Float, 
         }
         c.restore()
         // the border sits inside the box, like Figma's inside strokes
-        val sw = (if (selected) 2f else 1f) * d
-        stroke.strokeWidth = sw; stroke.color = if (selected) T.AMBER else T.BORDER
+        val sw = (if (chosen) 2f else 1f) * d
+        stroke.strokeWidth = sw; stroke.color = if (chosen) T.AMBER else T.BORDER
         c.drawRoundRect(sw / 2, sw / 2, bw - sw / 2, bh - sw / 2, (r - sw / 2).coerceAtLeast(0f), (r - sw / 2).coerceAtLeast(0f), stroke)
-        tp.color = if (selected) T.AMBER else T.IVORY
+        tp.color = if (chosen) T.AMBER else T.IVORY
         val fm = tp.fontMetrics
         val lineH = labelSize * 1.25f * d
         c.drawText(label, bw / 2, bh + 2 * d + lineH / 2 - (fm.ascent + fm.descent) / 2, tp)
