@@ -117,10 +117,13 @@ class TileView(ctx: Context, private val art: Bitmap?, private val boxW: Float, 
     private val src = android.graphics.Rect()
     private val dst = RectF()
 
-    override fun onMeasure(w: Int, h: Int) = setMeasuredDimension((boxW * d).roundToInt(), ((boxH + 2f + labelSize * 1.25f) * d).roundToInt())
+    /** Wide labels make the item wider than its thumbnail; the thumbnail stays centred over the label. */
+    override fun onMeasure(w: Int, h: Int) = setMeasuredDimension(maxOf(boxW * d, tp.measureText(label)).roundToInt(), ((boxH + 2f + labelSize * 1.2f) * d).roundToInt())
 
     override fun onDraw(c: Canvas) {
         val bw = boxW * d; val bh = boxH * d; val r = radius * d
+        val ox = (width - bw) / 2f
+        c.save(); c.translate(ox, 0f)
         clip.reset(); clip.addRoundRect(0f, 0f, bw, bh, r, r, Path.Direction.CW)
         c.save(); c.clipPath(clip)
         if (fill != null) { p.color = fill; c.drawRect(0f, 0f, bw, bh, p) }
@@ -138,10 +141,11 @@ class TileView(ctx: Context, private val art: Bitmap?, private val boxW: Float, 
         val sw = (if (chosen) 2f else 1f) * d
         stroke.strokeWidth = sw; stroke.color = if (chosen) T.AMBER else T.BORDER
         c.drawRoundRect(sw / 2, sw / 2, bw - sw / 2, bh - sw / 2, (r - sw / 2).coerceAtLeast(0f), (r - sw / 2).coerceAtLeast(0f), stroke)
+        c.restore()
         tp.color = if (chosen) T.AMBER else T.IVORY
         val fm = tp.fontMetrics
-        val lineH = labelSize * 1.25f * d
-        c.drawText(label, bw / 2, bh + 2 * d + lineH / 2 - (fm.ascent + fm.descent) / 2, tp)
+        val lineH = labelSize * 1.2f * d
+        c.drawText(label, width / 2f, bh + 2 * d + lineH / 2 - (fm.ascent + fm.descent) / 2, tp)
     }
 }
 

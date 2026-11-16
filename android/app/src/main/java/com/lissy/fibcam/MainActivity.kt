@@ -397,8 +397,8 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
 
         // header (Figma Camera / Header): Coach on the left; Double exposure and Flash on the right
         header = FrameLayout(this)
-        coachBtn = text("Coach", 10f, T.IVORY, T.semibold, caps = true).apply {
-            gravity = Gravity.CENTER; setPadding(dpi(8f), 0, dpi(8f), 0)
+        coachBtn = text("Coach", 10f, T.IVORY, T.medium, 0.08f, caps = true).apply {
+            gravity = Gravity.CENTER; setPadding(dpi(12f), 0, dpi(12f), 0)
             background = pill(T.CARBON, dp(16f))
             contentDescription = "Coach"
             setOnClickListener {
@@ -435,7 +435,7 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
             background = pill(T.GRAPHITE, dp(16f))
         }
         for ((key, name) in listOf("COMPOSE" to "Compose", "ART" to "Look", "EXPOSURE" to "Exposure")) {
-            tabRow.addView(text(name, 12f, T.IVORY, T.medium).apply {
+            tabRow.addView(text(name, 14f, T.IVORY, T.medium).apply {
                 gravity = Gravity.CENTER; tag = key
                 setOnClickListener { if (layer != key) { layer = key; save(); applyLayer() } }
             }, LinearLayout.LayoutParams(0, match, 1f).apply { if (key != "COMPOSE") leftMargin = dpi(8f) })
@@ -452,7 +452,7 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
             Guide.DYNAMIC to ("Dynamic" to R.drawable.comp_dynamic), Guide.CENTRE to ("Centre" to R.drawable.comp_centre),
             Guide.MARKS to ("Crop" to R.drawable.comp_crop))
         comps.forEachIndexed { i, (g, v) ->
-            val t = TileView(this, bmp(v.second), 60f, 50f, RectF(0f, 0f, 60f, 50f), 4f, T.GRAPHITE, v.first, 8f, crop = false).apply {
+            val t = TileView(this, bmp(v.second), 60f, 50f, RectF(0f, 0f, 60f, 50f), 4f, T.GRAPHITE, v.first, 10f, crop = false).apply {
                 contentDescription = "${v.first} guide"
                 setOnClickListener { if (guide != g) { guide = g; aligned = false; save(); applyGuide(); guideMoved() } }
             }
@@ -472,7 +472,7 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
             ArtMode.SOLARISED to ("Solarised" to R.drawable.look_solarised), ArtMode.INSTANT to ("Instant" to R.drawable.look_instant),
             ArtMode.BLEACH_BYPASS to ("Bleach bypass" to R.drawable.look_bleach_bypass))
         looks.forEachIndexed { i, (m, v) ->
-            val t = TileView(this, bmp(v.second), 60f, 50f, RectF(0f, 0f, 60f, 50f), 8f, null, v.first, 8f, crop = true).apply {
+            val t = TileView(this, bmp(v.second), 60f, 50f, RectF(0f, 0f, 60f, 50f), 8f, null, v.first, 10f, crop = true).apply {
                 contentDescription = "${v.first} look"
                 setOnClickListener { selectLook(m) }
             }
@@ -573,7 +573,7 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
         (zoomRow.layoutParams as FrameLayout.LayoutParams).apply { gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL; topMargin = vfBottom - dpi(41f); width = wrap; height = dpi(31f) }
         zoomRow.requestLayout()
         at(tabRow, dpi(16f), vfBottom + dpi(12f), w - dpi(32f), dpi(31f))
-        at(selector, 0, vfBottom + dpi(53f), w, dpi(62f))
+        at(selector, 0, vfBottom + dpi(51f), w, dpi(64f))
         val ctxTop = vfBottom + dpi(125f)
         val ctxH = max(0, rowTop + dpi(12f) - ctxTop)
         at(ctxArea, dpi(16f), ctxTop, w - dpi(32f), ctxH)
