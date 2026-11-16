@@ -251,7 +251,16 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
         firstUri?.let { if (double) loadFirst(it) }
         loadThumb()
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
-            override fun handleOnBackPressed() { if (settingsView != null) closeSettings() else { isEnabled = false; onBackPressedDispatcher.onBackPressed(); isEnabled = true } }
+            // Back steps out one level at a time: Settings → camera; a Look's setting → its first setting
+            // (Intensity); Look or Exposure → Compose (the main menu); Compose → leave the app as usual.
+            override fun handleOnBackPressed() {
+                when {
+                    settingsView != null -> closeSettings()
+                    layer == "ART" && artParam != 0 -> { artParam = 0; applyArtUi() }
+                    layer != "COMPOSE" -> { layer = "COMPOSE"; save(); applyLayer() }
+                    else -> { isEnabled = false; onBackPressedDispatcher.onBackPressed(); isEnabled = true }
+                }
+            }
         })
         if (shot == "settings") root.post { openSettings() }
         renderShot?.let { r -> root.post { showRenderTest(r) } }

@@ -107,6 +107,17 @@ class CropActivity : ComponentActivity() {
         if (u == null) { finish(); return }
         src = u
         setContentView(buildUi())
+        // Back steps out one level at a time: a Look's setting → its first; Art or Double → Crop; Crop → camera
+        onBackPressedDispatcher.addCallback(this, object : androidx.activity.OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() {
+                val first = recipe.mode.shown.firstOrNull() ?: 0
+                when {
+                    tab == "ART" && recipe.mode != ArtMode.OFF && artParam != first -> { artParam = first; applyArtUi() }
+                    tab != "CROP" -> { tab = "CROP"; applyTab() }
+                    else -> { isEnabled = false; onBackPressedDispatcher.onBackPressed() }
+                }
+            }
+        })
         note("Loading…")
         io.execute {
             val b = runCatching { decode(src, display = true) }.getOrNull()
