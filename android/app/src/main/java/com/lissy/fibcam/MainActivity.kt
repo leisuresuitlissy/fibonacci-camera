@@ -231,16 +231,18 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
         WindowCompat.setDecorFitsSystemWindows(window, false)
         shot = intent?.getStringExtra("fibShot")
         saveOriginal = prefs.getBoolean("saveOriginal", true)
-        remember = prefs.getBoolean("remember", true)
+        remember = prefs.getBoolean("remember2", false)     // off by default: every launch starts fresh
         guideOpacity = prefs.getFloat("guideOpacity", 0.75f)
         coach = prefs.getBoolean("coach", false)
-        // A restore (Android rebuilt the screen behind your back) brings everything back. A fresh launch opens on
-        // Compose; with Remember my settings on it also brings back the last Look, guide and exposure value.
+        // A restore (Android rebuilt the screen behind your back) brings everything back. Otherwise every launch
+        // starts fresh: Compose, Thirds, the Original look, every Look's sliders back at 50%, exposure 0.
+        // Settings › Remember my settings brings back the last Look, guide and exposure value instead.
         val restoring = savedInstanceState != null
         val keep = restoring || remember
+        if (!keep) prefs.edit().apply { for (k in prefs.all.keys) if (k.startsWith("art3:")) remove(k) }.apply()
         layer = if (restoring) prefs.getString("layer", "COMPOSE") ?: "COMPOSE" else "COMPOSE"
         if (layer !in listOf("COMPOSE", "ART")) layer = "COMPOSE"     // Exposure is no longer a tab
-        guide = if (keep) runCatching { Guide.valueOf(prefs.getString("guide", Guide.SPIRAL.name)!!) }.getOrDefault(Guide.SPIRAL) else Guide.SPIRAL
+        guide = if (keep) runCatching { Guide.valueOf(prefs.getString("guide", Guide.THIRDS.name)!!) }.getOrDefault(Guide.THIRDS) else Guide.THIRDS
         quadrant = if (keep) prefs.getInt("quadrant", 0) else 0
         triFlip = if (keep) prefs.getBoolean("triFlip", false) else false
         art = if (keep) runCatching { ArtMode.valueOf(prefs.getString("art", ArtMode.OFF.name)!!) }.getOrDefault(ArtMode.OFF) else ArtMode.OFF
@@ -355,7 +357,7 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
             .putBoolean("double", double).putString("firstUri", firstUri?.toString())
             .putString("blend", blend.name).putFloat("blendStrength", blendStrength)
             .putFloat("ev", if (evSupported) evIndex * evStep else evWanted)
-            .putBoolean("saveOriginal", saveOriginal).putBoolean("remember", remember).putFloat("guideOpacity", guideOpacity)
+            .putBoolean("saveOriginal", saveOriginal).putBoolean("remember2", remember).putFloat("guideOpacity", guideOpacity)
             .apply()
     }
 
