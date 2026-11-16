@@ -914,15 +914,15 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
     private fun card() = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; background = pill(T.GRAPHITE, dp(12f)) }
 
     private fun section(parent: LinearLayout, title: String, first: Boolean = false): LinearLayout {
-        parent.addView(text(title, 11f, T.AMBER, T.medium, caps = true), LinearLayout.LayoutParams(wrap, dpi(14f)).apply { if (!first) topMargin = dpi(24f) })
+        parent.addView(text(title, 11f, T.AMBER, T.medium, caps = true).apply { lineHeight = dpi(15.4f) }, LinearLayout.LayoutParams(wrap, wrap).apply { if (!first) topMargin = dpi(24f) })
         val c = card(); parent.addView(c, LinearLayout.LayoutParams(match, wrap).apply { topMargin = dpi(10f) }); return c
     }
 
     private fun switchRow(title: String, desc: String, on: Boolean, toggled: (Boolean, View) -> Unit): View {
         val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(dpi(16f), dpi(14f), dpi(12f), dpi(14f)) }
         val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        col.addView(text(title, 14f, T.IVORY, T.medium))
-        col.addView(text(desc, 11f, T.SUBTLE, T.regular).apply { maxLines = 3; setLineSpacing(0f, 1.4f) }, LinearLayout.LayoutParams(wrap, wrap).apply { topMargin = dpi(6f) })
+        col.addView(text(title, 14f, T.IVORY, T.medium).apply { lineHeight = dpi(19.6f) })
+        col.addView(text(desc, 12f, T.SUBTLE, T.regular).apply { maxLines = 3; lineHeight = dpi(16.8f) }, LinearLayout.LayoutParams(wrap, wrap).apply { topMargin = dpi(4f) })
         row.addView(col, LinearLayout.LayoutParams(0, wrap, 1f).apply { rightMargin = dpi(12f) })
         val sw = SwitchView(this).apply { checked = on; contentDescription = title; onToggle = { v -> toggled(v, this) } }
         row.addView(sw)
@@ -962,10 +962,10 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
         val g = section(body, "Composition guides")
         val gBox = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dpi(16f), dpi(16f), dpi(16f), dpi(16f)) }
         val gHead = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-        gHead.addView(text("Guide opacity", 14f, T.IVORY, T.medium)); gHead.addView(spacer())
+        gHead.addView(text("Guide opacity", 14f, T.IVORY, T.medium).apply { lineHeight = dpi(19.6f) }); gHead.addView(spacer())
         val pct = text("${(guideOpacity * 100).roundToInt()}%", 12f, T.AMBER, T.medium); gHead.addView(pct)
         gBox.addView(gHead, LinearLayout.LayoutParams(match, dpi(20f)))
-        gBox.addView(text("Keep guides visible without obscuring your photo.", 11f, T.SUBTLE, T.regular), LinearLayout.LayoutParams(wrap, dpi(16f)).apply { topMargin = dpi(12f) })
+        gBox.addView(text("Keep guides visible without obscuring your photo.", 12f, T.SUBTLE, T.regular).apply { lineHeight = dpi(16.8f); maxLines = 2 }, LinearLayout.LayoutParams(wrap, wrap).apply { topMargin = dpi(12f) })
         gBox.addView(plainSlider(this).apply {
             value = guideOpacity; contentDescription = "Guide opacity"
             onChange = { v -> guideOpacity = v; pct.text = "${(v * 100).roundToInt()}%"; this@MainActivity.overlay.guideOpacity = v }
