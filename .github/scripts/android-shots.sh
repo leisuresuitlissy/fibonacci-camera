@@ -53,15 +53,33 @@ adb shell am start -W -n com.lissy.fibcam/.MainActivity -e fibShot "look:HOLGA:5
 sleep 6; adb shell input tap 820 1250; sleep 1.5
 adb exec-out screencap -p > "$OUT/look-HOLGA-tap.png"; echo "shot look-HOLGA-tap"
 shoot look-HOLGA-reset "look:HOLGA:0"
-# Tilt Shift, Follow guide on with the spiral (one anchor): a tap low in the frame still moves the band there
+# Tilt Shift, Follow guide off: a tap low in the frame moves the band there
 adb shell am force-stop com.lissy.fibcam
-adb shell am start -W -n com.lissy.fibcam/.MainActivity -e fibShot "look:TILT_SHIFT:1:-:follow:SPIRAL:0" > /dev/null
+adb shell am start -W -n com.lissy.fibcam/.MainActivity -e fibShot "look:TILT_SHIFT:1:-:-:SPIRAL:0" > /dev/null
 sleep 6; adb shell input tap 540 1350; sleep 1.5
 adb exec-out screencap -p > "$OUT/look-TILT-tap.png"; echo "shot look-TILT-tap"
-# Vignette and Softness at 0 and 100 (Holga, Pinhole, Dream lens)
-for m in "HOLGA:2" "HOLGA:1" "PINHOLE:1" "PINHOLE:2" "DREAM_LENS:2"; do
-  for v in 0 100; do shoot "dial-${m/:/-}-$v" "look:$m:-:-:-:-:-:set$v"; done
-done
+# The simulated effect on a detailed test image (no camera involved), guide drawn on top for comparison
+for q in 0 1 2 3; do shoot "render-HOLGA-spiral$q" "render:HOLGA:SPIRAL:$q:0:follow"; done
+shoot render-KINO-thirds0 "render:KINO:THIRDS:0:0:follow"
+shoot render-KINO-thirds3 "render:KINO:THIRDS:0:3:follow"
+shoot render-PINHOLE-centre "render:PINHOLE:CENTRE:0:0:follow"
+shoot render-TILT-default "render:TILT_SHIFT:OFF:0:0:-"
+shoot render-TILT-spiral "render:TILT_SHIFT:SPIRAL:2:0:follow"
+shoot render-TILT-triangleB "render:TILT_SHIFT:TRIANGLES:1:1:follow"
+shoot render-TILT-thirds3 "render:TILT_SHIFT:THIRDS:0:3:follow"
+shoot render-TILT-focus20 "render:TILT_SHIFT:OFF:0:0:-:1=20"
+shoot render-TILT-width0 "render:TILT_SHIFT:OFF:0:0:-:2=0"
+shoot render-TILT-width100 "render:TILT_SHIFT:OFF:0:0:-:2=100"
+shoot render-TILT-angle100 "render:TILT_SHIFT:OFF:0:0:-:3=100"
+shoot render-TILT-feather0 "render:TILT_SHIFT:OFF:0:0:-:4=0"
+shoot render-TILT-feather100 "render:TILT_SHIFT:OFF:0:0:-:4=100"
+shoot render-TILT-depth0 "render:TILT_SHIFT:OFF:0:0:-:7=0"
+shoot render-TILT-depth100 "render:TILT_SHIFT:OFF:0:0:-:7=100"
+shoot render-TILT-intensity0 "render:TILT_SHIFT:OFF:0:0:-:0=0"
+shoot render-HOLGA-vignette100 "render:HOLGA:OFF:0:0:-:1=100"
+shoot render-HOLGA-softness100 "render:HOLGA:OFF:0:0:-:2=100"
+shoot render-HOLGA-plain0 "render:HOLGA:OFF:0:0:-:1=0,2=0"
+
 shoot exposure "exposure"
 shoot settings "settings"
 shoot header-active "double"

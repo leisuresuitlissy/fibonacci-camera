@@ -74,14 +74,14 @@ class CropView(ctx: Context) : View(ctx) {
      * photo however you crop or straighten.
      */
     fun cropMask(r: Recipe): FocusMask {
-        if (r.follow && r.mode.follows) {
+        if (r.follow && r.mode.follows && r.mode != ArtMode.TILT_SHIFT) {
             val fr = RectF(0f, 0f, cw, ch)
             val g = GuideCtx(guide, quadrant, triFlip, anchor, fr, fr, trueSpiral = true)
-            val m = Focus.resolve(r.mode, r.values, true, g, null)
+            val m = Focus.resolve(r.mode, r.values, true, g, null, aspect = cw / ch)
             if (Focus.linked(g) != null) return m
         }
         val p = imageToCrop(r.mask.cx, r.mask.cy)
-        val m = Focus.resolve(r.mode, r.values, false, null, p)
+        val m = Focus.resolve(r.mode, r.values, false, null, p, aspect = cw / ch)
         return if (r.mode == ArtMode.TILT_SHIFT) m.copy(cx = p.x, cy = p.y) else m
     }
     private var downX = 0f; private var downY = 0f; private var downT = 0L; private var multi = false

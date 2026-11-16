@@ -166,6 +166,7 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
     private var remember = true
     private var guideOpacity = 0.75f
     private var shot: String? = null
+    private var renderShot: String? = null
 
     private var provider: ProcessCameraProvider? = null
     private var camera: Camera? = null
@@ -253,6 +254,7 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
             override fun handleOnBackPressed() { if (settingsView != null) closeSettings() else { isEnabled = false; onBackPressedDispatcher.onBackPressed(); isEnabled = true } }
         })
         if (shot == "settings") root.post { openSettings() }
+        renderShot?.let { r -> root.post { showRenderTest(r) } }
         Updater.listener = { st -> runOnUiThread { onUpdateStatus(st) } }
         analysisExecutor.execute { Updater.cleanUp(this) }     // the first check happens in onResume
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) startCamera()
@@ -280,6 +282,7 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
                 // "setN": put the active control at N% (for the dial screenshots)
                 p.getOrNull(8)?.removePrefix("set")?.toIntOrNull()?.let { n -> art.controls.getOrNull(artParam)?.slot?.takeIf { it >= 0 }?.let { artValues[it] = n / 100f } } }
             "exposure" -> layer = "EXPOSURE"
+            "render" -> renderShot = s
             "double" -> { double = true; coach = true; flashMode = ImageCapture.FLASH_MODE_ON }
         }
     }
@@ -509,7 +512,7 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
         // Follow guide: always at the right of the sub-options row; the variations sit on the left
         followBtn = FollowToggle(this).apply {
             setOnClickListener {
-                follow = !follow; tapFocus = null; save(); syncFollow(); placeTiltOnGuide(); applyArtUi(); applyLiveArt()
+                follow = !follow; tapFocus = null; save(); syncFollow(); placeTiltOnGuide(); applyArtUi(); applyLiveArt(); focusOnAnchor()
                 if (follow) showMask()
             }
         }
@@ -630,7 +633,7 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
         hud.post { hud.requestLayout(); ghost.requestLayout() }
         overlay.invalidate()
         applyLiveArt()
-        if (art == ArtMode.TILT_SHIFT) applyArtUi()   // the guide's values need the frame
+        if (art == ArtMode.TILT_SHIFT) { placeTiltOnGuide(); applyArtUi(); applyLiveArt() }   // the guide's values need the frame
     }
 
     // =========================================================== layers
@@ -795,6 +798,7 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
         if (m == art) return
         // each look keeps its own settings; Original just pauses the look, nothing is forgotten
         art = m; artState = Art.loadState(prefs, m); artParam = 0
+        placeTiltOnGuide()
         overlay.squareGuide = art == ArtMode.HOLGA; overlay.invalidate(); updateHud()
         save(); applyArtUi(); applyLiveArt()
         lookTiles[m]?.let { lookScroller.reveal(it) }
@@ -807,7 +811,10 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
     }
 
     private fun onArtSlider(v: Float) {
+        if (art == ArtMode.TILT_SHIFT && artSlot == 1 && followActive) manualTilt()
         artValues[artSlot] = v
+        // Angle changed while following: the band turns about the guide's anchor, so it still runs through it
+        if (art == ArtMode.TILT_SHIFT && artSlot == 3 && followActive) guideCtx()?.let { Focus.linked(it) }?.let { a -> placeTilt(a.u, a.v, null) }
         Art.saveState(prefs, art, artState)
         lookControls.setValue(v)
         applyLiveArt()
@@ -819,7 +826,8 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
 
     /**
      * Puts Tilt Shift's band through a point (frame uv), keeping it a straight band: Focus is where the band
-     * crosses the vertical centre line, Angle the guide's line when it has one, otherwise unchanged.
+     * offsets it perpendicular to its Angle; Angle becomes the guide's line only when the guide has an explicit,
+     * unambiguous one (the triangles' diagonal, a dynamic-symmetry diagonal), otherwise it stays yours.
      */
     private fun placeTilt(u: Float, v: Float, angle: Float?) {
         val fr = overlay.frame
@@ -829,7 +837,7 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
             artValues[3] = (t / 1.5707964f + 0.5f).coerceIn(0f, 1f)
         }
         val ang = (artValues[3] - 0.5f) * 1.5707964f            // Angle's calibration is linear around 50%
-        artValues[1] = (v - (u - 0.5f) * (fr.width() / fr.height()) * kotlin.math.tan(ang)).coerceIn(0f, 1f)
+        artValues[1] = Focus.tiltFocusThrough(u, v, ang, fr.width() / fr.height())
         Art.saveState(prefs, art, artState)
     }
 
@@ -850,13 +858,15 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
     private fun liveMask(): FocusMask {
         // a tapped point follows the subject while the tracker holds it, and stays put if it loses it
         val tap = tapFocus?.let { liveSubject() ?: it }
-        return Focus.resolve(art, artValues, followActive, guideCtx(), liveSubject(), tap)
+        val fr = overlay.frame
+        return Focus.resolve(art, artValues, followActive, guideCtx(), liveSubject(), tap, if (fr.isEmpty) 0.75f else fr.width() / fr.height())
     }
 
     /** The guide changed: a guide-linked focus moves with it (and shows briefly); a manual one stays put. */
     private fun guideMoved() {
         tapFocus = null
         placeTiltOnGuide()
+        focusOnAnchor()
         syncFollow()
         if (art != ArtMode.OFF && art.follows && followActive) { applyLiveArt(); showMask() }
         if (art == ArtMode.TILT_SHIFT) applyArtUi()
@@ -1158,6 +1168,7 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
         }
         hintUntil = SystemClock.uptimeMillis() + 4000
         updateHud(); applyLiveArt()
+        overlay.post { focusOnAnchor() }          // Follow guide: the camera starts focused on the target
     }
 
     private fun onZoom(z: ZoomState) {
@@ -1266,7 +1277,24 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
                 focusAt(sx, sy)
             }
         }
-        requestFocus(sx, sy)
+        // Follow guide on: the camera focuses on the guide's target, not wherever the tap landed
+        if (followActive) focusOnAnchor() else requestFocus(sx, sy)
+    }
+
+    /** Moving Tilt Shift's Focus by hand turns Follow guide off; the band stays exactly where it was. */
+    private fun manualTilt() {
+        follow = false; save(); syncFollow()
+        Toast.makeText(this, "Follow guide off: the band is yours to move", Toast.LENGTH_SHORT).show()
+    }
+
+    /** Optical autofocus on the active guide anchor (Follow guide on). Asked once per change, not per frame. */
+    private fun focusOnAnchor() {
+        if (!followActive || camera == null) return
+        val gf = overlay.guideFrame
+        if (gf.isEmpty) return
+        val sh = GuideShape.build(guide, Box(gf.left, gf.top, gf.right, gf.bottom), quadrant, triFlip, false, align)
+        val a = sh.anchors.getOrNull(anchor.coerceIn(0, (sh.anchors.size - 1).coerceAtLeast(0))) ?: return
+        requestFocus(a.p.x, a.p.y)
     }
 
     private var focusToken = 0
@@ -1302,6 +1330,7 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
     /** In Art with Tilt Shift on (and not following the guide), a vertical drag on the picture moves the band. */
     override fun onFocusDrag(dy: Float): Boolean {
         if (layer != "ART" || art != ArtMode.TILT_SHIFT || overlay.frame.isEmpty) return false
+        if (followActive) manualTilt()
         artValues[1] = (artValues[1] + dy / overlay.frame.height()).coerceIn(0f, 1f)
         if (artSlot == 1) applyArtUi()
         Art.saveState(prefs, art, artState); applyLiveArt(); showMask()
@@ -1359,11 +1388,58 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
                 if (best >= 0 && best != anchor) anchor = best
                 syncFollow()
                 placeTiltOnGuide()
-            } else if (art == ArtMode.TILT_SHIFT) placeTilt(uv.x, uv.y, null)   // one anchor: the band still goes where you tap
+            }
         } else if (art == ArtMode.TILT_SHIFT) {
             placeTilt(uv.x, uv.y, null); tapFocus = null
         } else tapFocus = uv
         applyLiveArt(); applyArtUi(); showMask()
+    }
+
+    /**
+     * CI check of the simulated effect on a detailed test image, independent of the camera:
+     * `render:MODE:GUIDE:variant:anchor:follow|-[:slot=percent,...]`. Renders the Look exactly as a saved
+     * photo would be (Art.render with the mask the camera would use), then draws the guide on top of the
+     * on-screen copy only, so the sharp region can be compared with the anchor.
+     */
+    private fun showRenderTest(spec: String) {
+        if (Build.VERSION.SDK_INT < 33) return
+        val p = spec.split(":")
+        val mode = runCatching { ArtMode.valueOf(p[1]) }.getOrDefault(ArtMode.HOLGA)
+        val g = runCatching { Guide.valueOf(p[2]) }.getOrDefault(Guide.SPIRAL)
+        val variant = p.getOrNull(3)?.toIntOrNull() ?: 0
+        val anc = p.getOrNull(4)?.toIntOrNull() ?: 0
+        val fol = p.getOrNull(5) == "follow"
+        val v = mode.defaults
+        p.getOrNull(6)?.split(",")?.forEach { kv -> val (k, x) = kv.split("="); v[k.toInt()] = x.toInt() / 100f }
+        val w = 1200; val h = 1600
+        val src = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+        val c = android.graphics.Canvas(src)
+        val pt = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
+        for (y in 0 until h step 8) for (x in 0 until w step 8) {
+            pt.color = if (((x / 8) + (y / 8)) % 2 == 0) Color.rgb(40 + x * 180 / w, 60, 40 + y * 180 / h) else Color.rgb(235, 225 - y * 60 / h, 200 - x * 80 / w)
+            c.drawRect(x.toFloat(), y.toFloat(), x + 8f, y + 8f, pt)
+        }
+        pt.color = Color.BLACK; pt.textSize = 30f; pt.typeface = T.semibold
+        for (y in 60 until h step 110) for (x in 20 until w step 230) c.drawText("Aa 1:2 %", x.toFloat(), y.toFloat(), pt)
+        pt.style = android.graphics.Paint.Style.STROKE; pt.strokeWidth = 2f
+        for (i in 0..24) c.drawLine(0f, i * 70f, w.toFloat(), i * 70f + 40f, pt)
+        val fr = RectF(0f, 0f, w.toFloat(), h.toFloat())
+        val gf = if (mode == ArtMode.HOLGA) RectF(0f, (h - w) / 2f, w.toFloat(), (h + w) / 2f) else RectF(fr)
+        val q = if (g == Guide.SPIRAL) variant else 0; val flip = g != Guide.SPIRAL && variant == 1
+        val ctx = GuideCtx(g, q, flip, anc, fr, gf)
+        if (mode == ArtMode.TILT_SHIFT && fol) Focus.linked(ctx)?.let { a ->
+            a.angle?.let { t0 -> var t = t0; while (t > 1.5707964f) t -= 3.1415927f; while (t < -1.5707964f) t += 3.1415927f; v[3] = t / 1.5707964f + 0.5f }
+            v[1] = Focus.tiltFocusThrough(a.u, a.v, (v[3] - 0.5f) * 1.5707964f, w.toFloat() / h)
+        }
+        val m = Focus.resolve(mode, v, fol, ctx, null, null, w.toFloat() / h)
+        val out = Art.render(src, Recipe(mode, v, 0.37f, fol, m))
+        val shown = out.copy(Bitmap.Config.ARGB_8888, true)
+        GuidePainter(w / 384f).apply { opacity = 0.9f }.draw(android.graphics.Canvas(shown), gf, g, q, flip, false, 1, if (fol) anc else -1)
+        val iv = ImageView(this).apply { setImageBitmap(shown); scaleType = ImageView.ScaleType.FIT_CENTER; setBackgroundColor(Color.BLACK) }
+        root.addView(iv, lp(match, match))
+        root.addView(text("$mode · $g $variant · anchor $anc · ${if (fol) "follow" else "no follow"} · ${p.getOrNull(6) ?: "defaults"}", 12f, T.IVORY, T.medium).apply {
+            setBackgroundColor(T.alpha(T.CARBON, 0.8f)); setPadding(dpi(8f), dpi(6f), dpi(8f), dpi(6f))
+        }, lp(wrap, wrap, Gravity.BOTTOM or Gravity.START).apply { bottomMargin = dpi(40f) })
     }
 
     // =========================================================== updates

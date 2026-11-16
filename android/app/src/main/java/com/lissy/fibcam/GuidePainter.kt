@@ -56,6 +56,7 @@ class GuidePainter(private val d: Float) {
             else -> c.drawCircle(m.p.x, m.p.y, m.radiusDp * d, ring)
         }
         // the anchor Follow guide is using, where the guide offers a choice
-        sh.anchors.getOrNull(selected)?.let { if (sh.anchors.size > 1) c.drawCircle(it.p.x, it.p.y, 2.4f * d, dot) }
+        // the target Follow guide is using: a filled centre and a wider ring, so it stands apart from the others
+        sh.anchors.getOrNull(selected)?.let { c.drawCircle(it.p.x, it.p.y, 2.4f * d, dot); c.drawCircle(it.p.x, it.p.y, 7f * d, ring) }
     }
 }

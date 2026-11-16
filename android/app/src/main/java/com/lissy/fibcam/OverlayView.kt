@@ -47,7 +47,7 @@ class OverlayView @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? =
     /** Hide the guide lines (the guide still drives any linked focus). */
     var hidden = false
         set(v) { field = v; invalidate() }
-    /** The guide anchor Follow guide is using, shown filled when the guide offers several; -1 for none. */
+    /** The guide anchor Follow guide is using (shown as the target); -1 for none. */
     var selectedAnchor = -1
         set(v) { field = v; invalidate() }
     /** Settings › Guide opacity, applied to every guide alike. */

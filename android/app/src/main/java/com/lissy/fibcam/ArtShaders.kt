@@ -84,7 +84,7 @@ float maskSoft(float2 p) {
 float depthR(float2 p) {
     if (msz.z <= 0.001) return 0.0;
     float s = maskSoft(p);
-    return s * s * msz.z * 0.02 * min(res.x, res.y);
+    return s * s * msz.z * 0.03 * min(res.x, res.y);
 }
 float3 focusAt(float2 p, float3 c) {
     float r = depthR(p);
@@ -127,13 +127,14 @@ float filmGrain(float2 p, float l) {
 half4 main(float2 p) {
     float4 o = px(p);
     if (!inFrame(p)) return half4(o);
-    float A = amt;
+    // The finished miniature look: a fully sharp band (maskSoft 0 inside Width), blur growing across
+    // Feather to Depth's strength, toy-like colour. Intensity blends the original with it.
     float s = min(res.x, res.y);
     float soft = maskSoft(p);
-    float r = max(pow(soft, 1.35) * s * 0.045 * pow(A, 1.2), depthR(p) * 1.6);
+    float r = pow(soft, 1.35) * s * 0.05 * msz.z;
     float3 base = r < 0.6 ? o.rgb : blurWide(p, r);
-    float3 c = satur(scurve(base, 0.35 * A), 1.0 + 0.32 * A);
-    return half4(float4(c, o.a));
+    float3 fx = satur(scurve(base, 0.35), 1.32);
+    return half4(float4(mix(o.rgb, fx, amt), o.a));
 }
 """,
         // A plastic lens on a square camera: soft, uneven edges, colour fringing, a vignette that isn't

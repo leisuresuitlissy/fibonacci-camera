@@ -105,7 +105,7 @@ static float maskSoft_(texture2d<float> T, constant U& uu, float2 p) {
 static float depthR_(texture2d<float> T, constant U& uu, float2 p) {
     if (msz.z <= 0.001) return 0.0;
     float s = maskSoft(p);
-    return s * s * msz.z * 0.02 * min(res.x, res.y);
+    return s * s * msz.z * 0.03 * min(res.x, res.y);
 }
 #define depthR(...) depthR_(T, uu, __VA_ARGS__)
 static float3 focusAt_(texture2d<float> T, constant U& uu, float2 p, float3 c) {
@@ -150,13 +150,14 @@ static float filmGrain_(texture2d<float> T, constant U& uu, float2 p, float l) {
 static float4 fx_TILT_SHIFT(texture2d<float> T, constant U& uu, float2 p) {
     float4 o = px(p);
     if (!inFrame(p)) return float4(o);
-    float A = amt;
+    // The finished miniature look: a fully sharp band (maskSoft 0 inside Width), blur growing across
+    // Feather to Depth's strength, toy-like colour. Intensity blends the original with it.
     float s = min(res.x, res.y);
     float soft = maskSoft(p);
-    float r = max(pow(soft, 1.35) * s * 0.045 * pow(A, 1.2), depthR(p) * 1.6);
+    float r = pow(soft, 1.35) * s * 0.05 * msz.z;
     float3 base = r < 0.6 ? o.rgb : blurWide(p, r);
-    float3 c = satur(scurve(base, 0.35 * A), 1.0 + 0.32 * A);
-    return float4(float4(c, o.a));
+    float3 fx = satur(scurve(base, 0.35), 1.32);
+    return float4(float4(mix(o.rgb, fx, amt), o.a));
 }
 
 fragment float4 art_TILT_SHIFT(VOut in [[stage_in]], texture2d<float> T [[texture(0)]], constant U& uu [[buffer(0)]]) {

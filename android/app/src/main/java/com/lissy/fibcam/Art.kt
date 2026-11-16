@@ -53,7 +53,7 @@ enum class ArtMode(
 ) {
     OFF("OFF", emptyList()),
     TILT_SHIFT("TILT SHIFT", listOf("Intensity" to 0.5f, "Focus" to 0.5f, "Width" to 0.3f, "Angle" to 0.5f, "Feather" to 0.5f),
-        listOf(INTENSITY, c("Focus", 1), c("Width", 2), c("Angle", 3, degrees = true), c("Feather", 4), c("Depth", 7)), extra = 0f to DEPTH_50),
+        listOf(INTENSITY, c("Focus", 1), c("Width", 2), c("Angle", 3, degrees = true), c("Feather", 4), c("Depth", 7)), extra = 0f to 0.5f),
     HOLGA("HOLGA", listOf("Intensity" to 0.5f, "Vignette" to 0.55f, "Softness" to 0.3f, "Leaks" to 0.45f, "Depth" to DEPTH_50),
         listOf(INTENSITY, c("Softness", 2), c("Vignette", 1), c("Leaks", 3, choices = true), c("Grain", 6), DEPTH),
         variations = listOf("OFF", "WARM", "COOL", "NEUTRAL", "MIXED", "RANDOM"), variationLabel = "LEAK", defaultVariation = 1, extra = 0.3f to 0f),
@@ -171,21 +171,40 @@ object Focus {
      * Follow guide off: Tilt Shift's own Focus and Angle; Depth on the tapped subject (or the middle).
      * [tap]: a point tapped in the viewfinder (frame uv), which takes over from the guide until the guide changes.
      */
-    fun resolve(mode: ArtMode, raw: FloatArray, follow: Boolean, g: GuideCtx?, subject: PointF?, tap: PointF? = null): FocusMask {
+    fun resolve(mode: ArtMode, raw: FloatArray, follow: Boolean, g: GuideCtx?, subject: PointF?, tap: PointF? = null, aspect: Float = 0.75f): FocusMask {
         val link = if (follow && mode.follows && g != null) linked(g) else null
         val v = Art.eff(mode, raw)
         return when {
-            // a point you tapped wins: the sharp region goes exactly there (the band through it, at your Angle)
-            tap != null && mode.hasDepth -> FocusMask(2, tap.x, tap.y, 0f, 0.1f, 0.9f, v[4])
-            // Tilt Shift's band always comes from its own Focus and Angle. Follow guide and taps *write* those
-            // (see MainActivity.placeTilt), so the band can still be dragged, tapped or slid afterwards.
-            mode == ArtMode.TILT_SHIFT ->
-                FocusMask(1, 0.5f, v[1], (v[3] - 0.5f) * HALF_PI, 0.02f + v[2] * 0.3f, v[4], v.getOrElse(7) { 0f })
-            mode.hasDepth -> if (link != null) FocusMask(2, link.u, link.v, 0f, 0.1f, 0.9f, v[4])
-                else FocusMask(2, subject?.x ?: 0.5f, subject?.y ?: 0.5f, 0f, 0.08f, 1f, v[4])
+            // Tilt Shift is always a straight band from its own Focus and Angle. Follow guide and taps set those
+            // values (see MainActivity.placeTilt): a guide anchor decides where the band runs, never its shape.
+            mode == ArtMode.TILT_SHIFT -> tiltBand(v, aspect)
+            // Point-based depth: a fully sharp disc on the target, then progressively more blur.
+            tap != null && mode.hasDepth -> spot(tap.x, tap.y, v[4])
+            mode.hasDepth -> if (link != null) spot(link.u, link.v, v[4]) else spot(subject?.x ?: 0.5f, subject?.y ?: 0.5f, v[4])
             else -> FocusMask()
         }
     }
+
+    /** Radius of the fully sharp disc and the length of its fade, in frame heights. */
+    private const val SPOT_R = 0.17f
+    private const val SPOT_FEATHER = 0.4f      // fade = 0.03 + 0.4 × 0.55 = 0.25 frame heights
+    private fun spot(u: Float, v: Float, strength: Float) = FocusMask(2, u, v, 0f, SPOT_R, SPOT_FEATHER, strength)
+
+    /**
+     * Tilt Shift's band. Focus moves it perpendicular to its Angle: 50% runs through the middle of the frame,
+     * 0 and 100% sit half a frame height either side. Width is the fully sharp half-width, Feather the fade,
+     * Depth (slot 7) the blur strength outside. [aspect] is the frame's width / height.
+     */
+    fun tiltBand(v: FloatArray, aspect: Float): FocusMask {
+        val a = (v[3] - 0.5f) * HALF_PI
+        val d = v[1] - 0.5f
+        return FocusMask(1, 0.5f - kotlin.math.sin(a) * d / aspect, 0.5f + kotlin.math.cos(a) * d, a, 0.02f + v[2] * 0.3f, v[4], v.getOrElse(7) { 0f })
+    }
+
+    /** The Focus value whose band passes through (u, v) at angle [a] (radians). */
+    fun tiltFocusThrough(u: Float, v: Float, a: Float, aspect: Float): Float =
+        (0.5f - kotlin.math.sin(a) * (u - 0.5f) * aspect + kotlin.math.cos(a) * (v - 0.5f)).coerceIn(0f, 1f)
+
 
     /**
      * The viewfinder's mask (frame uv, portrait) in the saved photo's own coordinates. CameraX records the
@@ -302,8 +321,8 @@ object Art {
     @RequiresApi(33)
     fun thumbnail(src: Bitmap, mode: ArtMode, seed: Float = 0.37f): Bitmap =
         if (mode == ArtMode.OFF) src else {
-            val v = mode.defaults.also { it[mode.depthSlot] = 0f }
-            render(src, Recipe(mode, v, seed), if (mode == ArtMode.TILT_SHIFT) Focus.resolve(mode, v, false, null, null) else FocusMask())
+            val v = mode.defaults.also { if (mode != ArtMode.TILT_SHIFT) it[mode.depthSlot] = 0f }
+            render(src, Recipe(mode, v, seed), if (mode == ArtMode.TILT_SHIFT) Focus.resolve(mode, v, false, null, null, aspect = src.width.toFloat() / src.height) else FocusMask())
         }
 
     /** Runs a mode over a whole bitmap on the GPU and returns a new software bitmap. */
