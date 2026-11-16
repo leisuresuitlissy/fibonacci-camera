@@ -144,6 +144,15 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
         set(v) { prefs.edit().putInt("anchor:${guide.name}", v).apply() }
     /** A point tapped in the viewfinder (frame uv): the sharp region goes there until the guide changes. */
     private var tapFocus: PointF? = null
+    /**
+     * Tilt Shift's band is a line, so it only follows guides whose geometry suits a line: the thirds and grid
+     * lines (the classic miniature band), and the triangle and dynamic-symmetry diagonals (which also set its
+     * angle). With Spiral, Centre, Diagonals or Crop the band stays wherever you tap, drag or slide it.
+     */
+    private val tiltFollows: Boolean get() = art == ArtMode.TILT_SHIFT && followActive &&
+        guide in setOf(Guide.THIRDS, Guide.PHI_GRID, Guide.TRIANGLES, Guide.DYNAMIC)
+    /** Whether Follow guide is steering the current Look's target (Tilt Shift only with line-friendly guides). */
+    private val lookFollows: Boolean get() = if (art == ArtMode.TILT_SHIFT) tiltFollows else followActive
     /** Follow guide is on and the guide has a focal point to follow. */
     private val followActive: Boolean get() = follow && GuideShape.hasAnchors(guide)
     private var liveSeed = (Math.random() * 1000).toFloat()
@@ -820,10 +829,10 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
     }
 
     private fun onArtSlider(v: Float) {
-        if (art == ArtMode.TILT_SHIFT && artSlot == 1 && followActive) manualTilt()
+        if (tiltFollows && artSlot == 1) manualTilt()
         artValues[artSlot] = v
         // Angle changed while following: the band turns about the guide's anchor, so it still runs through it
-        if (art == ArtMode.TILT_SHIFT && artSlot == 3 && followActive) guideCtx()?.let { Focus.linked(it) }?.let { a -> placeTilt(a.u, a.v, null) }
+        if (tiltFollows && artSlot == 3) guideCtx()?.let { Focus.linked(it) }?.let { a -> placeTilt(a.u, a.v, null) }
         Art.saveState(prefs, art, artState)
         lookControls.setValue(v)
         applyLiveArt()
@@ -852,7 +861,7 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
 
     /** Follow guide on: move Tilt Shift's band onto the guide's chosen anchor (and along its line, if any). */
     private fun placeTiltOnGuide() {
-        if (art != ArtMode.TILT_SHIFT || !followActive) return
+        if (!tiltFollows) return
         val a = guideCtx()?.let { Focus.linked(it) } ?: return
         placeTilt(a.u, a.v, a.angle)
     }
@@ -1287,7 +1296,7 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
             }
         }
         // Follow guide on: the camera focuses on the guide's target, not wherever the tap landed
-        if (followActive) focusOnAnchor() else requestFocus(sx, sy)
+        if (lookFollows) focusOnAnchor() else requestFocus(sx, sy)
     }
 
     /** Moving Tilt Shift's Focus by hand turns Follow guide off; the band stays exactly where it was. */
@@ -1298,7 +1307,7 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
 
     /** Optical autofocus on the active guide anchor (Follow guide on). Asked once per change, not per frame. */
     private fun focusOnAnchor() {
-        if (!followActive || camera == null) return
+        if (!lookFollows || camera == null) return
         val gf = overlay.guideFrame
         if (gf.isEmpty) return
         val sh = GuideShape.build(guide, Box(gf.left, gf.top, gf.right, gf.bottom), quadrant, triFlip, false, align)
@@ -1339,7 +1348,7 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
     /** In Art with Tilt Shift on (and not following the guide), a vertical drag on the picture moves the band. */
     override fun onFocusDrag(dy: Float): Boolean {
         if (layer != "ART" || art != ArtMode.TILT_SHIFT || overlay.frame.isEmpty) return false
-        if (followActive) manualTilt()
+        if (tiltFollows) manualTilt()
         artValues[1] = (artValues[1] + dy / overlay.frame.height()).coerceIn(0f, 1f)
         if (artSlot == 1) applyArtUi()
         Art.saveState(prefs, art, artState); applyLiveArt(); showMask()
@@ -1388,7 +1397,7 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
         val fr = overlay.frame
         if (fr.isEmpty) return
         val uv = PointF((sx - fr.left) / fr.width(), (sy - fr.top) / fr.height())
-        if (followActive) {
+        if (lookFollows) {
             tapFocus = null
             val gf = overlay.guideFrame
             val sh = GuideShape.build(guide, Box(gf.left, gf.top, gf.right, gf.bottom), quadrant, triFlip, false, align)
