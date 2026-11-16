@@ -276,7 +276,9 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
                 if (p.getOrNull(4) == "follow") follow = true
                 p.getOrNull(5)?.let { n -> guide = runCatching { Guide.valueOf(n) }.getOrDefault(guide) }
                 p.getOrNull(6)?.toIntOrNull()?.let { if (guide == Guide.SPIRAL) quadrant = it else triFlip = it == 1 }
-                p.getOrNull(7)?.toIntOrNull()?.let { anchor = it } }
+                p.getOrNull(7)?.toIntOrNull()?.let { anchor = it }
+                // "setN": put the active control at N% (for the dial screenshots)
+                p.getOrNull(8)?.removePrefix("set")?.toIntOrNull()?.let { n -> art.controls.getOrNull(artParam)?.slot?.takeIf { it >= 0 }?.let { artValues[it] = n / 100f } } }
             "exposure" -> layer = "EXPOSURE"
             "double" -> { double = true; coach = true; flashMode = ImageCapture.FLASH_MODE_ON }
         }
@@ -1240,7 +1242,6 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
     override fun onSubjectTap(sx: Float, sy: Float) {
         val fr = overlay.frame
         if (!fr.contains(sx, sy)) return
-        overlay.showFocus(sx, sy)
         run {
             // The tap names the subject to follow, so the phone can buzz when it lands on the guide.
             // In Coach, tapping the marked subject again lets it go; without Coach there's nothing to tap, so a tap always re-aims.
@@ -1255,10 +1256,29 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
                 focusAt(sx, sy)
             }
         }
-        camera?.let { cam ->
-            val pt = preview.meteringPointFactory.createPoint(sx, sy)
-            cam.cameraControl.startFocusAndMetering(FocusMeteringAction.Builder(pt).setAutoCancelDuration(5, TimeUnit.SECONDS).build())
-        }
+        requestFocus(sx, sy)
+    }
+
+    private var focusToken = 0
+
+    /**
+     * Optical autofocus at the tapped point. PreviewView's metering factory maps the tap through the
+     * preview's crop, zoom, rotation and front-camera mirroring. Focus only (FLAG_AF): a tap no longer
+     * re-meters exposure, which stays with the Exposure dial. The ring turns Amber only when the camera
+     * confirms focus; a fixed-focus lens or a failed lock fades it grey.
+     */
+    private fun requestFocus(sx: Float, sy: Float) {
+        val cam = camera ?: return
+        val pt = preview.meteringPointFactory.createPoint(sx, sy)
+        val action = FocusMeteringAction.Builder(pt, FocusMeteringAction.FLAG_AF).setAutoCancelDuration(5, TimeUnit.SECONDS).build()
+        overlay.showFocus(sx, sy)
+        if (!cam.cameraInfo.isFocusMeteringSupported(action)) { overlay.focusResult(null); return }
+        val token = ++focusToken
+        val f = cam.cameraControl.startFocusAndMetering(action)
+        f.addListener({
+            if (token != focusToken) return@addListener           // a newer tap took over
+            overlay.focusResult(runCatching { f.get().isFocusSuccessful }.getOrDefault(false))
+        }, ContextCompat.getMainExecutor(this))
     }
 
     override fun onDoubleTap() {
@@ -1310,27 +1330,30 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
     private fun buzz() = Haptics.confirm(overlay)
 
     /**
-     * A tap moves the Look's sharp region to the tapped point (the camera's own autofocus goes there too,
-     * as it always has). With Follow guide on, a tap close to one of the guide's anchors (within 40dp)
-     * snaps to that anchor instead, and the choice is remembered per guide. Tilt Shift without Follow guide
-     * moves its band (its Focus slider) to the tap.
+     * Where a tap puts the Look's simulated sharp region (the camera's autofocus goes to the tap regardless).
+     * Follow guide on: guides with several anchors take the one nearest the tap (remembered per guide);
+     * single-anchor guides (spiral eye, centre) stay on their anchor. Follow guide off: the sharp region
+     * goes to the tapped point; for Tilt Shift its band (Focus) moves so the line passes through the tap at
+     * the current Angle. Global softness is part of a Look and isn't removed by tapping.
      */
     private fun focusAt(sx: Float, sy: Float) {
         val fr = overlay.frame
         if (fr.isEmpty) return
         val uv = PointF((sx - fr.left) / fr.width(), (sy - fr.top) / fr.height())
         if (followActive) {
+            tapFocus = null
             val gf = overlay.guideFrame
             val sh = GuideShape.build(guide, Box(gf.left, gf.top, gf.right, gf.bottom), quadrant, triFlip, false, align)
-            val best = GuideShape.nearest(sh, Pt(sx, sy))
-            if (best >= 0 && sh.anchors[best].p.dist(Pt(sx, sy)) < dp(40f)) {
-                if (best != anchor) anchor = best
-                tapFocus = null; syncFollow()
-                applyLiveArt(); applyArtUi(); showMask(); return
+            if (sh.anchors.size > 1) {
+                val best = GuideShape.nearest(sh, Pt(sx, sy))
+                if (best >= 0 && best != anchor) anchor = best
+                syncFollow()
             }
-            tapFocus = uv
         } else if (art == ArtMode.TILT_SHIFT) {
-            artValues[1] = uv.y.coerceIn(0f, 1f); Art.saveState(prefs, art, artState); tapFocus = null
+            val ang = (Art.eff(art, artValues)[3] - 0.5f) * 1.5707964f
+            val ar = fr.width() / fr.height()
+            artValues[1] = (uv.y - (uv.x - 0.5f) * ar * kotlin.math.tan(ang)).coerceIn(0f, 1f)
+            Art.saveState(prefs, art, artState); tapFocus = null
         } else tapFocus = uv
         applyLiveArt(); applyArtUi(); showMask()
     }

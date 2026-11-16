@@ -161,15 +161,19 @@ half4 main(float2 p) {
     float2 cd = sq - 0.5;
     float wob = vnoise(sq * 3.0 + seed) - 0.5;
     float edge = length(cd) * 1.414 * (1.0 + wob * 0.18);
-    float rad = s * (0.0008 + (0.006 + p2 * 0.03) * pow(smoothstep(0.2, 1.1, edge), 1.3)) * a;
-    float3 c = blurAt(p, max(rad, depthR(p)));
+    // Softness: the plastic lens, soft all over and softer towards the edges. All of it comes from the
+    // control (0 = none). It adds to Depth's spatial blur rather than hiding behind it.
+    float rad = s * p2 * (0.005 + 0.015 * pow(smoothstep(0.1, 1.1, edge), 1.3)) * (0.35 + 0.65 * a);
+    float dr = depthR(p);
+    float3 c = blurAt(p, sqrt(rad * rad + dr * dr));
     float ca = s * 0.005 * edge * edge * a;
     c.r = mix(c.r, px(p + cd * ca).r, 0.6);
     c.b = mix(c.b, px(p - cd * ca).b, 0.6);
     c = satur(scurve(c, 0.5 * a), 1.0 + 0.22 * a);
     float l = luma(c);
     c += (float3(-0.025, 0.02, 0.045) * (1.0 - l) + float3(0.05, 0.02, -0.04) * l) * a;
-    c *= 1.0 - (0.45 + p1 * 0.55) * a * pow(smoothstep(0.28, 1.12, edge), 1.5);
+    // Vignette: from the control alone (0 = none), feathered from the middle out to the corners.
+    c *= 1.0 - p1 * pow(smoothstep(0.25, 1.1, edge), 1.4);
     if (lks > 0.5 && p3 > 0.001) {
         float side = floor(hash(float2(seed, 3.0)) * 4.0);
         float2 q = side < 1.0 ? sq : (side < 2.0 ? float2(sq.y, 1.0 - sq.x) : (side < 3.0 ? float2(1.0 - sq.x, 1.0 - sq.y) : float2(1.0 - sq.y, sq.x)));
@@ -201,12 +205,15 @@ half4 main(float2 p) {
     float a = amt;
     float s = min(res.x, res.y);
     float e = edgeOf(p);
-    float rad = s * (0.0012 + p1 * 0.005 + e * e * (0.004 + p1 * 0.014)) * (0.3 + 0.7 * a);
-    float3 c = blurAt(p, max(rad, depthR(p)));
+    // Softness: from the control alone (0 = none), more towards the edges; added to Depth's blur.
+    float rad = s * p1 * (0.006 + e * e * 0.016) * (0.3 + 0.7 * a);
+    float dr = depthR(p);
+    float3 c = blurAt(p, sqrt(rad * rad + dr * dr));
     c = mix(c, blurAt(p, s * 0.012), 0.1 * a);
     c *= 1.0 + (vnoise(uvOf(p) * 2.5 + seed) - 0.5) * 0.06 * a;
     c = satur(c, 1.0 - 0.18 * a) * mix(float3(1.0), float3(1.03, 1.0, 0.94), a);
-    c *= 1.0 - (0.35 + p2 * 0.4) * a * pow(smoothstep(0.1, 1.2, e), 1.7);
+    // Vignette: from the control alone (0 = none), smooth from the centre to the corners.
+    c *= 1.0 - p2 * (0.45 + 0.5 * a) * pow(smoothstep(0.15, 1.1, e), 1.6);
     c += filmGrain(p, luma(c)) * 0.025 * a;
     return half4(float4(mix(o.rgb, clamp(c, 0.0, 1.0), min(1.0, a * 2.0)), o.a));
 }
@@ -255,8 +262,9 @@ half4 main(float2 p) {
     float a = 1.0 - pow(1.0 - amt, 1.4);
     float s = min(res.x, res.y);
     float3 base = focusAt(p, o.rgb);
-    float3 soft = blurAt(p, s * (0.0015 + p2 * 0.0055));
-    float3 c = mix(base, soft, (0.18 + 0.42 * p2) * a);
+    // Softness: a soft-focus lens, a blurred image laid over the sharp one; from the control alone (0 = none).
+    float3 soft = blurAt(p, s * (0.002 + p2 * 0.008));
+    float3 c = mix(base, soft, p2 * (0.3 + 0.55 * a));
     float3 halo = bloomAt(p, s * (0.012 + p1 * 0.035), 0.55);
     c = screen(c, halo * (0.9 + 1.8 * p1) * a);
     c = mix(c, c * 0.96 + 0.015, a);

@@ -71,6 +71,9 @@ class OverlayView @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? =
     private val focusPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = 1.5f * d; color = white }
     private var focusAt: PointF? = null
     private var focusT = 1f
+    private var focusAlpha = 0f
+    private var focusColor = 0xFFFFFFFF.toInt()
+    private var fadeAnim: ValueAnimator? = null
     private var focusAnim: ValueAnimator? = null
 
     val guideFrame: RectF get() {
@@ -103,14 +106,31 @@ class OverlayView @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? =
     }
 
     /** A ring where you tapped: it shrinks onto the point and fades, like any camera's focus mark. */
+    /** Autofocus requested at (x, y): an Ivory ring closes in and waits for the camera's answer. */
     fun showFocus(x: Float, y: Float) {
-        focusAt = PointF(x, y)
-        focusAnim?.cancel()
+        focusAt = PointF(x, y); focusColor = white; focusAlpha = 1f
+        focusAnim?.cancel(); fadeAnim?.cancel()
         focusAnim = ValueAnimator.ofFloat(0f, 1f).apply {
-            duration = 1100
+            duration = 250
             addUpdateListener { focusT = it.animatedValue as Float; invalidate() }
             start()
         }
+    }
+
+    /**
+     * The camera's answer: true = focus confirmed (the ring turns Amber), false = it couldn't lock or the
+     * lens is fixed-focus, null = autofocus isn't available here. Only a confirmed lock turns Amber.
+     */
+    fun focusResult(ok: Boolean?) {
+        if (focusAt == null) return
+        focusColor = if (ok == true) gold else 0xFF8A877F.toInt()
+        fadeAnim?.cancel()
+        fadeAnim = ValueAnimator.ofFloat(1f, 0f).apply {
+            startDelay = if (ok == true) 500 else 250; duration = 500
+            addUpdateListener { focusAlpha = it.animatedValue as Float; invalidate() }
+            start()
+        }
+        invalidate()
     }
 
     override fun onDraw(c: Canvas) {
@@ -160,11 +180,10 @@ class OverlayView @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? =
 
     private fun drawFocus(c: Canvas) {
         val p = focusAt ?: return
-        if (focusT >= 1f) return
-        val shrink = minOf(1f, focusT / 0.25f)
-        val r = (34 - 8 * shrink) * d
-        val fade = if (focusT < 0.6f) 1f else 1f - (focusT - 0.6f) / 0.4f
-        focusPaint.alpha = (230 * fade).toInt()
+        if (focusAlpha <= 0f) return
+        val r = (34 - 8 * focusT) * d
+        focusPaint.color = focusColor
+        focusPaint.alpha = (230 * focusAlpha).toInt()
         c.drawCircle(p.x, p.y, r, focusPaint)
     }
 
