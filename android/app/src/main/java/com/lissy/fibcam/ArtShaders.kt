@@ -130,7 +130,7 @@ half4 main(float2 p) {
     float A = amt;
     float s = min(res.x, res.y);
     float soft = maskSoft(p);
-    float r = max(pow(soft, 1.35) * s * 0.055 * pow(A, 1.2), depthR(p) * 1.6);
+    float r = max(pow(soft, 1.35) * s * 0.045 * pow(A, 1.2), depthR(p) * 1.6);
     float3 base = r < 0.6 ? o.rgb : blurWide(p, r);
     float3 c = satur(scurve(base, 0.35 * A), 1.0 + 0.32 * A);
     return half4(float4(c, o.a));

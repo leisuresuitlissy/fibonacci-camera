@@ -22,6 +22,7 @@ import kotlin.math.roundToInt
 class LookControls(ctx: Context) : FrameLayout(ctx) {
     var onSelect: ((Int) -> Unit)? = null
     var onChoice: ((Int) -> Unit)? = null
+    var onReset: (() -> Unit)? = null
     val slider = ValueSlider(ctx)
     /** The height this block may use (px); set by the screen layout. */
     var available = Int.MAX_VALUE
@@ -31,6 +32,16 @@ class LookControls(ctx: Context) : FrameLayout(ctx) {
 
     private val names = FadeScroller(ctx, dp(24f))
     private val namesRow = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+    private val divider = View(ctx).apply { setBackgroundColor(T.alpha(Color.WHITE, 0.14f)) }
+    /** Reset all: this Look's sliders and choices back to their starting 50%. Dimmed when there's nothing to reset. */
+    private val reset = LinearLayout(ctx).apply {
+        orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER
+        addView(ImageView(ctx).apply { setImageResource(R.drawable.ic_reset_ev) }, LinearLayout.LayoutParams(dpi(12f), dpi(12f)))
+        addView(ctx.text("Reset all", 11f, T.IVORY, T.medium, caps = true), LinearLayout.LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT).apply { leftMargin = dpi(5f) })
+        background = android.graphics.drawable.InsetDrawable(pill(T.CARBON, dp(13f), T.IVORY, dpi(1f).coerceAtLeast(1)), 0, dpi(9f), 0, dpi(9f))
+        setPadding(dpi(10f), 0, dpi(10f), 0)
+        contentDescription = "Reset all settings for this Look"
+    }
     private val choices = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
     private val value = ctx.text("", 12f, T.AMBER, T.medium, 0.08f).apply { gravity = Gravity.END or Gravity.CENTER_VERTICAL }
     private val empty = ctx.text("No Look applied", 11f, T.IVORY, T.medium).apply { gravity = Gravity.CENTER }
@@ -38,7 +49,8 @@ class LookControls(ctx: Context) : FrameLayout(ctx) {
     init {
         setBackgroundColor(T.CARBON)
         names.addView(namesRow, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.MATCH_PARENT))
-        addView(names); addView(choices); addView(slider); addView(value); addView(empty)
+        reset.setOnClickListener { onReset?.invoke() }
+        addView(names); addView(divider); addView(reset); addView(choices); addView(slider); addView(value); addView(empty)
     }
 
     private var mode = ArtMode.OFF
@@ -53,7 +65,7 @@ class LookControls(ctx: Context) : FrameLayout(ctx) {
         this.mode = mode; this.active = active
         val off = mode == ArtMode.OFF || mode.controls.isEmpty()
         empty.visibility = if (off) VISIBLE else GONE
-        for (x in listOf(names, slider, value)) x.visibility = if (off) GONE else VISIBLE
+        for (x in listOf(names, divider, reset, slider, value)) x.visibility = if (off) GONE else VISIBLE
         if (off) { choices.visibility = GONE; place(); return }
 
         if (rebuilt) {
@@ -68,6 +80,9 @@ class LookControls(ctx: Context) : FrameLayout(ctx) {
         }
         for (i in 0 until namesRow.childCount) (namesRow.getChildAt(i) as TextView).apply { setTextColor(if (i == active) T.AMBER else T.IVORY); typeface = if (i == active) T.semibold else T.medium }
         namesRow.getChildAt(active)?.let { names.reveal(it, smooth = !rebuilt) }
+        val d0 = mode.defaults
+        val changed = d0.indices.any { kotlin.math.abs(v.getOrElse(it) { d0[it] } - d0[it]) > 0.001f }
+        reset.isEnabled = changed; reset.alpha = if (changed) 1f else 0.4f
 
         val c = mode.controls[active]
         val variation = v.getOrElse(5) { 0f }.roundToInt().coerceIn(0, (mode.variations.size - 1).coerceAtLeast(0))
@@ -120,7 +135,9 @@ class LookControls(ctx: Context) : FrameLayout(ctx) {
         val compact = dp(natural()) > available
         val top = if (compact) 0f else 4f
         val gap = if (compact) 4f else 6f
-        lp(names, 0f, top, w, dpi(32f))
+        lp(names, 0f, top, dpi(wd - 121f), dpi(32f))
+        lp(divider, wd - 111f, top + 7f, dpi(1f), dpi(18f))
+        lp(reset, wd - 100f, top - 6f, dpi(100f), dpi(44f))
         var y = top + 32f + gap
         if (choices.visibility == VISIBLE) { lp(choices, 0f, y, w, dpi(26f)); y += 26f + gap }
         lp(slider, 0f, y, dpi(wd - 40f), dpi(18f))

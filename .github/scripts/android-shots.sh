@@ -47,6 +47,12 @@ shoot look-HOLGA-follow-spiral1 "look:HOLGA:5:1:follow:SPIRAL:1"
 shoot look-TILT-follow-triangle "look:TILT_SHIFT:1:-:follow:TRIANGLES:0:1"
 shoot look-TILT-follow-thirds "look:TILT_SHIFT:3:-:follow:THIRDS:0:3"
 shoot look-TILT-nofollow "look:TILT_SHIFT:1"
+# a tap moves the sharp region to the tapped point (Holga, Follow guide on, tap well away from the spiral's eye)
+adb shell am force-stop com.lissy.fibcam
+adb shell am start -W -n com.lissy.fibcam/.MainActivity -e fibShot "look:HOLGA:5:1:follow:SPIRAL:0" > /dev/null
+sleep 6; adb shell input tap 820 1250; sleep 1.5
+adb exec-out screencap -p > "$OUT/look-HOLGA-tap.png"; echo "shot look-HOLGA-tap"
+shoot look-HOLGA-reset "look:HOLGA:0"
 shoot exposure "exposure"
 shoot settings "settings"
 shoot header-active "double"

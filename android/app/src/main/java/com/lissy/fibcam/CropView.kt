@@ -273,7 +273,7 @@ class CropView(ctx: Context) : View(ctx) {
         val sx = ox + ip.x * bw * k; val sy = oy + ip.y * bh * k
         val scale = (ch * k) / (y1 - y0)
         val shown = m.copy(cx = (sx - x0) / (x1 - x0), cy = (sy - y0) / (y1 - y0), angle = m.angle + theta, size = m.size * scale, feather = m.feather * scale)
-        Art.setUniforms(sh, r.values, x0, y0, x1 - x0, y1 - y0, r.seed, shown)
+        Art.setUniforms(sh, r.mode, r.values, x0, y0, x1 - x0, y1 - y0, r.seed, shown)
         artPaint.shader = sh
         c.drawRect(ox, oy, ox + b.width * k, oy + b.height * k, artPaint)
         return true
