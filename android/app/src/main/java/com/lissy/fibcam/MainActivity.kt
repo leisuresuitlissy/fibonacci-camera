@@ -397,7 +397,7 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
 
         // header (Figma Camera / Header): Coach on the left; Double exposure and Flash on the right
         header = FrameLayout(this)
-        coachBtn = text("Coach", 10f, T.IVORY, T.medium, 0.08f, caps = true).apply {
+        coachBtn = text("Coach", 11f, T.IVORY, T.medium, caps = true).apply {
             gravity = Gravity.CENTER; setPadding(dpi(12f), 0, dpi(12f), 0)
             background = pill(T.CARBON, dp(16f))
             contentDescription = "Coach"
@@ -435,7 +435,7 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
             background = pill(T.GRAPHITE, dp(16f))
         }
         for ((key, name) in listOf("COMPOSE" to "Compose", "ART" to "Look", "EXPOSURE" to "Exposure")) {
-            tabRow.addView(text(name, 14f, T.IVORY, T.medium).apply {
+            tabRow.addView(text(name, 13f, T.IVORY, T.medium).apply {
                 gravity = Gravity.CENTER; tag = key
                 setOnClickListener { if (layer != key) { layer = key; save(); applyLayer() } }
             }, LinearLayout.LayoutParams(0, match, 1f).apply { if (key != "COMPOSE") leftMargin = dpi(8f) })
@@ -452,7 +452,7 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
             Guide.DYNAMIC to ("Dynamic" to R.drawable.comp_dynamic), Guide.CENTRE to ("Centre" to R.drawable.comp_centre),
             Guide.MARKS to ("Crop" to R.drawable.comp_crop))
         comps.forEachIndexed { i, (g, v) ->
-            val t = TileView(this, bmp(v.second), 60f, 50f, RectF(0f, 0f, 60f, 50f), 4f, T.GRAPHITE, v.first, 10f, crop = false).apply {
+            val t = TileView(this, bmp(v.second), 60f, 50f, RectF(0f, 0f, 60f, 50f), 4f, T.GRAPHITE, v.first, 11f, crop = false).apply {
                 contentDescription = "${v.first} guide"
                 setOnClickListener { if (guide != g) { guide = g; aligned = false; save(); applyGuide(); guideMoved() } }
             }
@@ -472,7 +472,7 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
             ArtMode.SOLARISED to ("Solarised" to R.drawable.look_solarised), ArtMode.INSTANT to ("Instant" to R.drawable.look_instant),
             ArtMode.BLEACH_BYPASS to ("Bleach bypass" to R.drawable.look_bleach_bypass))
         looks.forEachIndexed { i, (m, v) ->
-            val t = TileView(this, bmp(v.second), 60f, 50f, RectF(0f, 0f, 60f, 50f), 8f, null, v.first, 10f, crop = true).apply {
+            val t = TileView(this, bmp(v.second), 60f, 50f, RectF(0f, 0f, 60f, 50f), 8f, null, v.first, 11f, crop = true).apply {
                 contentDescription = "${v.first} look"
                 setOnClickListener { selectLook(m) }
             }
@@ -558,8 +558,8 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
     private fun relayout() {
         val w = root.width; val h = root.height
         if (w <= 0 || h <= 0) return
-        val rowTop = h - insetBottom - dpi(84f)
-        val maxBottom = rowTop - dpi(197f)
+        val rowTop = h - insetBottom - dpi(81f)
+        val maxBottom = rowTop - dpi(200f)
         val fullH = w * 4 / 3
         var vfTop = insetTop
         if (vfTop + fullH > maxBottom) vfTop = max(0, maxBottom - fullH)
@@ -573,8 +573,8 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
         (zoomRow.layoutParams as FrameLayout.LayoutParams).apply { gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL; topMargin = vfBottom - dpi(41f); width = wrap; height = dpi(31f) }
         zoomRow.requestLayout()
         at(tabRow, dpi(16f), vfBottom + dpi(12f), w - dpi(32f), dpi(31f))
-        at(selector, 0, vfBottom + dpi(51f), w, dpi(64f))
-        val ctxTop = vfBottom + dpi(125f)
+        at(selector, 0, vfBottom + dpi(53f), w, dpi(65f))
+        val ctxTop = vfBottom + dpi(128f)
         val ctxH = max(0, rowTop + dpi(12f) - ctxTop)
         at(ctxArea, dpi(16f), ctxTop, w - dpi(32f), ctxH)
         lookControls.available = ctxH
@@ -658,7 +658,7 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
             val modes = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(0, dpi(8f), 0, dpi(14f)) }
             fun paint() { for (i in 0 until modes.childCount) { val t = modes.getChildAt(i) as TextView; val on = t.tag == blend
                 t.setTextColor(if (on) T.AMBER else T.IVORY); t.background = pill(T.CARBON, dp(13f), if (on) T.AMBER else T.BORDER, dpi(1f)) } }
-            for (b in Blend.values()) modes.addView(text(b.label, 10f, T.IVORY, T.medium, 0.08f, caps = true).apply {
+            for (b in Blend.values()) modes.addView(text(b.label, 11f, T.IVORY, T.medium, caps = true).apply {
                 tag = b; gravity = Gravity.CENTER; setPadding(dpi(10f), 0, dpi(10f), 0)
                 setOnClickListener { blend = b; save(); applyGhost(); paint() }
             }, LinearLayout.LayoutParams(wrap, dpi(26f)).apply { rightMargin = dpi(8f) })
@@ -749,7 +749,7 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
         }
         alts.forEachIndexed { i, (name, res, act) ->
             val sel = if (guide == Guide.SPIRAL) i == quadrant else (i == 1) == triFlip
-            composeSub.addView(TileView(this, bmp(res), 48f, 35f, RectF(3f, 1f, 43f, 34f), 4f, T.GRAPHITE, name, 8f, crop = false).apply {
+            composeSub.addView(TileView(this, bmp(res), 48f, 35f, RectF(3f, 1f, 43f, 34f), 4f, T.GRAPHITE, name, 11f, crop = false).apply {
                 chosen = sel; contentDescription = name; setOnClickListener { act() }
             }, LinearLayout.LayoutParams(wrap, wrap).apply { if (i > 0) leftMargin = dpi(8f) })
         }
@@ -842,17 +842,17 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
     // ---- exposure
     private fun buildExposure(): FrameLayout {
         val box = FrameLayout(this)
-        box.addView(text("Exposure compensation", 10f, T.IVORY, T.medium, 0.08f, caps = true).apply { gravity = Gravity.CENTER_VERTICAL },
+        box.addView(text("Exposure compensation", 11f, T.IVORY, T.medium, caps = true).apply { gravity = Gravity.CENTER_VERTICAL },
             lp(wrap, dpi(32f)))
         val reset = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER
             background = pill(T.CARBON, dp(13f), T.IVORY, dpi(1f))
             contentDescription = "Reset exposure to 0"
             addView(ImageView(context).apply { setImageResource(R.drawable.ic_reset_ev) }, LinearLayout.LayoutParams(dpi(12f), dpi(12f)))
-            addView(text("Reset", 10f, T.IVORY, T.medium, 0.08f, caps = true), LinearLayout.LayoutParams(wrap, wrap).apply { leftMargin = dpi(5f) })
+            addView(text("Reset", 11f, T.IVORY, T.medium, caps = true), LinearLayout.LayoutParams(wrap, wrap).apply { leftMargin = dpi(5f) })
             setOnClickListener { setEv(0); Haptics.neutral(this) }
         }
-        box.addView(reset, lp(dpi(72f), dpi(26f), Gravity.END).apply { topMargin = dpi(3f) })
+        box.addView(reset, lp(dpi(76f), dpi(26f), Gravity.END).apply { topMargin = dpi(3f) })
         evValue = text("0.0 EV", 18f, T.AMBER, T.medium).apply { gravity = Gravity.CENTER }
         box.addView(evValue, lp(match, dpi(24f)).apply { topMargin = dpi(39f) })
         evSlider = EvSlider(this).apply { onChange = { ev -> onEvSlider(ev) } }
@@ -868,7 +868,7 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
                 }
             }
         }
-        for (s in listOf("−2", "−1", "0", "+1", "+2")) marks.addView(text(s, 10f, if (s == "0") T.AMBER else T.IVORY, T.medium), lp(wrap, wrap))
+        for (s in listOf("−2", "−1", "0", "+1", "+2")) marks.addView(text(s, 11f, if (s == "0") T.AMBER else T.IVORY, if (s == "0") T.semibold else T.medium), lp(wrap, wrap))
         box.addView(marks, lp(match, dpi(14f)).apply { topMargin = dpi(105f) })
         return box
     }
@@ -914,7 +914,7 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
     private fun card() = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; background = pill(T.GRAPHITE, dp(12f)) }
 
     private fun section(parent: LinearLayout, title: String, first: Boolean = false): LinearLayout {
-        parent.addView(text(title, 10f, T.AMBER, T.medium, 0.08f, caps = true), LinearLayout.LayoutParams(wrap, dpi(14f)).apply { if (!first) topMargin = dpi(24f) })
+        parent.addView(text(title, 11f, T.AMBER, T.medium, caps = true), LinearLayout.LayoutParams(wrap, dpi(14f)).apply { if (!first) topMargin = dpi(24f) })
         val c = card(); parent.addView(c, LinearLayout.LayoutParams(match, wrap).apply { topMargin = dpi(10f) }); return c
     }
 

@@ -37,10 +37,10 @@ class LookControls(ctx: Context) : FrameLayout(ctx) {
         contentDescription = "Follow guide"
     }
     private val followIcon = ImageView(ctx).apply { setImageResource(R.drawable.ic_link) }
-    private val followText = ctx.text("Follow guide", 10f, T.IVORY, T.medium, 0.08f, caps = true)
+    private val followText = ctx.text("Follow guide", 11f, T.IVORY, T.medium, caps = true)
     private val choices = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-    private val value = ctx.text("", 11f, T.AMBER, T.medium, 0.08f).apply { gravity = Gravity.END or Gravity.CENTER_VERTICAL }
-    private val empty = ctx.text("No Look applied", 10f, T.IVORY, T.medium).apply { gravity = Gravity.CENTER }
+    private val value = ctx.text("", 12f, T.AMBER, T.medium, 0.08f).apply { gravity = Gravity.END or Gravity.CENTER_VERTICAL }
+    private val empty = ctx.text("No Look applied", 11f, T.IVORY, T.medium).apply { gravity = Gravity.CENTER }
 
     init {
         setBackgroundColor(T.CARBON)
@@ -66,14 +66,14 @@ class LookControls(ctx: Context) : FrameLayout(ctx) {
         if (rebuilt) {
             namesRow.removeAllViews()
             mode.controls.forEachIndexed { i, c ->
-                namesRow.addView(context.text(c.label, 10f, T.IVORY, T.medium, 0.08f, caps = true).apply {
+                namesRow.addView(context.text(c.label, 11f, T.IVORY, T.medium, caps = true).apply {
                     gravity = Gravity.CENTER_VERTICAL
                     setOnClickListener { onSelect?.invoke(i) }
                 }, LinearLayout.LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.MATCH_PARENT).apply { if (i > 0) leftMargin = dpi(14f) })
             }
             names.scrollTo(0, 0)
         }
-        for (i in 0 until namesRow.childCount) (namesRow.getChildAt(i) as TextView).setTextColor(if (i == active) T.AMBER else T.IVORY)
+        for (i in 0 until namesRow.childCount) (namesRow.getChildAt(i) as TextView).apply { setTextColor(if (i == active) T.AMBER else T.IVORY); typeface = if (i == active) T.semibold else T.medium }
         namesRow.getChildAt(active)?.let { names.reveal(it, smooth = !rebuilt) }
 
         // Follow guide: Ivory outline off, Amber on
@@ -88,7 +88,7 @@ class LookControls(ctx: Context) : FrameLayout(ctx) {
             choices.visibility = VISIBLE
             choices.removeAllViews()
             mode.variations.forEachIndexed { i, name ->
-                choices.addView(context.text(name, 10f, if (i == variation) T.AMBER else T.IVORY, T.medium, 0.08f, caps = true).apply {
+                choices.addView(context.text(name, 11f, if (i == variation) T.AMBER else T.IVORY, if (i == variation) T.semibold else T.medium, caps = true).apply {
                     gravity = Gravity.CENTER_VERTICAL
                     setOnClickListener { onChoice?.invoke(i) }
                 }, LinearLayout.LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.MATCH_PARENT).apply { if (i > 0) leftMargin = dpi(14f) })
@@ -131,9 +131,9 @@ class LookControls(ctx: Context) : FrameLayout(ctx) {
         val compact = dp(natural()) > available
         val top = if (compact) 0f else 4f
         val gap = if (compact) 4f else 6f
-        lp(names, 0f, top, dpi(wd - 149f), dpi(32f))
-        lp(divider, wd - 139f, top + 7f, dpi(1f), dpi(18f))
-        lp(follow, wd - 128f, top + 3f, dpi(126f), dpi(26f))
+        lp(names, 0f, top, dpi(wd - 145f), dpi(32f))
+        lp(divider, wd - 135f, top + 7f, dpi(1f), dpi(18f))
+        lp(follow, wd - 124f, top + 3f, dpi(122f), dpi(26f))
         var y = top + 32f + gap
         if (choices.visibility == VISIBLE) { lp(choices, 0f, y, w, dpi(26f)); y += 26f + gap }
         lp(slider, 0f, y, dpi(wd - 40f), dpi(18f))

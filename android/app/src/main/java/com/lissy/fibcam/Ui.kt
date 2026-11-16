@@ -103,27 +103,61 @@ class FadeScroller(ctx: Context, private val fadeW: Float, private val fadeColor
 /**
  * A thumbnail with a label underneath: the Look and Compose pickers and the orientation choices.
  * [art] is drawn into [artRect] (dp, inside the box); [crop] fills it like Figma's "Fill" (centre crop).
+ * The label never runs wider than the thumbnail: long names end in "…", and holding the item slowly
+ * scrolls the whole name through that width so it can be read; letting go brings it back.
  */
+@SuppressLint("ClickableViewAccessibility")
 class TileView(ctx: Context, private val art: Bitmap?, private val boxW: Float, private val boxH: Float, private val artRect: RectF,
                private val radius: Float, private val fill: Int?, private val label: String, private val labelSize: Float,
                private val crop: Boolean) : View(ctx) {
     var chosen = false
-        set(v) { field = v; invalidate() }
+        set(v) { field = v; tp.typeface = if (v) T.semibold else T.medium; requestLayout(); invalidate() }
     private val d = ctx.dp(1f)
     private val p = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
     private val stroke = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE }
-    private val tp = Paint(Paint.ANTI_ALIAS_FLAG).apply { typeface = T.semibold; textSize = labelSize * d; textAlign = Paint.Align.CENTER }
+    private val tp = android.text.TextPaint(Paint.ANTI_ALIAS_FLAG).apply { typeface = T.medium; textSize = labelSize * d }
     private val clip = Path()
     private val src = android.graphics.Rect()
     private val dst = RectF()
+    /** How far the held label has scrolled (px). */
+    private var offset = 0f
+    private var reading = false
+    private var anim: android.animation.ValueAnimator? = null
 
-    /** Wide labels make the item wider than its thumbnail; the thumbnail stays centred over the label. */
-    override fun onMeasure(w: Int, h: Int) = setMeasuredDimension(maxOf(boxW * d, tp.measureText(label)).roundToInt(), ((boxH + 2f + labelSize * 1.2f) * d).roundToInt())
+    init {
+        setOnLongClickListener {
+            val over = tp.measureText(label) - boxW * d
+            if (over <= 0f) return@setOnLongClickListener false   // it already fits: a long hold is just a hold
+            parent?.requestDisallowInterceptTouchEvent(true)
+            reading = true
+            anim?.cancel()
+            // about 30dp a second, after a short pause, so it reads rather than flicks past
+            anim = android.animation.ValueAnimator.ofFloat(offset, over).apply {
+                startDelay = 250; duration = ((over - offset) / (30f * d) * 1000).toLong().coerceAtLeast(300)
+                interpolator = android.view.animation.LinearInterpolator()
+                addUpdateListener { offset = it.animatedValue as Float; invalidate() }
+                start()
+            }
+            true
+        }
+    }
+
+    override fun onTouchEvent(e: MotionEvent): Boolean {
+        val r = super.onTouchEvent(e)
+        if ((e.actionMasked == MotionEvent.ACTION_UP || e.actionMasked == MotionEvent.ACTION_CANCEL) && reading) {
+            reading = false
+            anim?.cancel()
+            anim = android.animation.ValueAnimator.ofFloat(offset, 0f).apply {
+                duration = 220; addUpdateListener { offset = it.animatedValue as Float; invalidate() }; start()
+            }
+        }
+        return r
+    }
+
+    override fun onMeasure(w: Int, h: Int) = setMeasuredDimension((boxW * d).roundToInt(), ((boxH + 2f + labelSize * 1.2f) * d).roundToInt())
 
     override fun onDraw(c: Canvas) {
         val bw = boxW * d; val bh = boxH * d; val r = radius * d
-        val ox = (width - bw) / 2f
-        c.save(); c.translate(ox, 0f)
         clip.reset(); clip.addRoundRect(0f, 0f, bw, bh, r, r, Path.Direction.CW)
         c.save(); c.clipPath(clip)
         if (fill != null) { p.color = fill; c.drawRect(0f, 0f, bw, bh, p) }
@@ -141,11 +175,19 @@ class TileView(ctx: Context, private val art: Bitmap?, private val boxW: Float, 
         val sw = (if (chosen) 2f else 1f) * d
         stroke.strokeWidth = sw; stroke.color = if (chosen) T.AMBER else T.BORDER
         c.drawRoundRect(sw / 2, sw / 2, bw - sw / 2, bh - sw / 2, (r - sw / 2).coerceAtLeast(0f), (r - sw / 2).coerceAtLeast(0f), stroke)
-        c.restore()
         tp.color = if (chosen) T.AMBER else T.IVORY
         val fm = tp.fontMetrics
         val lineH = labelSize * 1.2f * d
-        c.drawText(label, width / 2f, bh + 2 * d + lineH / 2 - (fm.ascent + fm.descent) / 2, tp)
+        val y = bh + 2 * d + lineH / 2 - (fm.ascent + fm.descent) / 2
+        val full = tp.measureText(label)
+        c.save(); c.clipRect(0f, bh, bw, height.toFloat())
+        when {
+            full <= bw -> c.drawText(label, (bw - full) / 2, y, tp)
+            reading || offset > 0f -> c.drawText(label, -offset, y, tp)
+            else -> { val t = android.text.TextUtils.ellipsize(label, tp, bw, android.text.TextUtils.TruncateAt.END).toString()
+                c.drawText(t, (bw - tp.measureText(t)) / 2, y, tp) }
+        }
+        c.restore()
     }
 }
 
