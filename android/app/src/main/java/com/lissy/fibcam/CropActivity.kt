@@ -245,11 +245,12 @@ class CropActivity : ComponentActivity() {
         root.addView(layers, LinearLayout.LayoutParams(match, dpi(160f)))
 
         val bar = row().apply { setPadding(dpi(16f), dpi(8f), dpi(16f), dpi(12f)) }
-        bar.addView(label("Reset", 13f, cText, medium).apply {
-            gravity = Gravity.CENTER; background = rounded(cElev, cLine, 14f); setPadding(dpi(18f), dpi(15f), dpi(18f), dpi(15f))
+        // two equal buttons
+        bar.addView(label("Reset", 14f, cText, medium).apply {
+            gravity = Gravity.CENTER; background = rounded(cElev, cLine, 14f); setPadding(0, dpi(15f), 0, dpi(15f))
             setOnClickListener { dial.value = 0f; crop.theta = 0f; applyRatio(reset = true) }
-        })
-        saveBtn = label("Save φ copy", 14f, cBase, Typeface.DEFAULT_BOLD).apply {
+        }, LinearLayout.LayoutParams(0, wrap, 1f))
+        saveBtn = label("Save a copy", 14f, cBase, Typeface.DEFAULT_BOLD).apply {
             gravity = Gravity.CENTER; background = rounded(cGold, null, 14f); setPadding(0, dpi(15f), 0, dpi(15f))
             setOnClickListener { save() }
         }
@@ -458,7 +459,7 @@ class CropActivity : ComponentActivity() {
         } else {
             eyeRow.addView(label("GUIDE · " + crop.guide.label, 10f, cMuted, mono, 0.13f))
         }
-        saveBtn.text = if (ratio == "PHI") "Save φ copy" else "Save copy"
+        saveBtn.text = "Save a copy"
         syncReadout()
     }
 
