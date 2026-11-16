@@ -176,14 +176,11 @@ object Focus {
         val v = Art.eff(mode, raw)
         return when {
             // a point you tapped wins: the sharp region goes exactly there (the band through it, at your Angle)
-            tap != null && mode == ArtMode.TILT_SHIFT -> FocusMask(1, tap.x, tap.y, (v[3] - 0.5f) * HALF_PI, 0.02f + v[2] * 0.3f, v[4], v.getOrElse(7) { 0f })
             tap != null && mode.hasDepth -> FocusMask(2, tap.x, tap.y, 0f, 0.1f, 0.9f, v[4])
-            mode == ArtMode.TILT_SHIFT -> {
-                val size = 0.02f + v[2] * 0.3f
-                val userAngle = (v[3] - 0.5f) * HALF_PI
-                if (link != null) FocusMask(1, link.u, link.v, link.angle ?: userAngle, size, v[4], v.getOrElse(7) { 0f })
-                else FocusMask(1, 0.5f, v[1], userAngle, size, v[4], v.getOrElse(7) { 0f })
-            }
+            // Tilt Shift's band always comes from its own Focus and Angle. Follow guide and taps *write* those
+            // (see MainActivity.placeTilt), so the band can still be dragged, tapped or slid afterwards.
+            mode == ArtMode.TILT_SHIFT ->
+                FocusMask(1, 0.5f, v[1], (v[3] - 0.5f) * HALF_PI, 0.02f + v[2] * 0.3f, v[4], v.getOrElse(7) { 0f })
             mode.hasDepth -> if (link != null) FocusMask(2, link.u, link.v, 0f, 0.1f, 0.9f, v[4])
                 else FocusMask(2, subject?.x ?: 0.5f, subject?.y ?: 0.5f, 0f, 0.08f, 1f, v[4])
             else -> FocusMask()

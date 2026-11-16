@@ -53,6 +53,11 @@ adb shell am start -W -n com.lissy.fibcam/.MainActivity -e fibShot "look:HOLGA:5
 sleep 6; adb shell input tap 820 1250; sleep 1.5
 adb exec-out screencap -p > "$OUT/look-HOLGA-tap.png"; echo "shot look-HOLGA-tap"
 shoot look-HOLGA-reset "look:HOLGA:0"
+# Tilt Shift, Follow guide on with the spiral (one anchor): a tap low in the frame still moves the band there
+adb shell am force-stop com.lissy.fibcam
+adb shell am start -W -n com.lissy.fibcam/.MainActivity -e fibShot "look:TILT_SHIFT:1:-:follow:SPIRAL:0" > /dev/null
+sleep 6; adb shell input tap 540 1350; sleep 1.5
+adb exec-out screencap -p > "$OUT/look-TILT-tap.png"; echo "shot look-TILT-tap"
 # Vignette and Softness at 0 and 100 (Holga, Pinhole, Dream lens)
 for m in "HOLGA:2" "HOLGA:1" "PINHOLE:1" "PINHOLE:2" "DREAM_LENS:2"; do
   for v in 0 100; do shoot "dial-${m/:/-}-$v" "look:$m:-:-:-:-:-:set$v"; done
