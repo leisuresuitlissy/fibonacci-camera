@@ -122,6 +122,7 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
     private lateinit var ghost: ImageView
     private lateinit var shutterRow: FrameLayout
     private var settingsView: View? = null
+    private var viewerView: View? = null
 
     // ---- state
     private val prefs by lazy { getSharedPreferences("fibcam", Context.MODE_PRIVATE) }
@@ -214,6 +215,11 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
         if (uri != null) setFirst(uri)
     }
 
+    /** Android's own "allow Crooked Light to delete this?" prompt, for photos the app no longer owns. */
+    private val askDelete = registerForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) { r ->
+        if (r.resultCode == RESULT_OK) afterDelete() else Toast.makeText(this, "Photo kept", Toast.LENGTH_SHORT).show()
+    }
+
     private val askCamera = registerForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
         if (ok) startCamera() else gate("Camera access was refused. Allow it in Settings → Apps → Crooked Light → Permissions.")
     }
@@ -269,6 +275,7 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
             override fun handleOnBackPressed() {
                 when {
                     settingsView != null -> closeSettings()
+                    viewerView != null -> closeViewer()
                     evBar.visibility == View.VISIBLE -> closeEv()
                     layer == "ART" && artParam != 0 -> { artParam = 0; applyArtUi() }
                     layer != "COMPOSE" -> { layer = "COMPOSE"; save(); applyLayer() }
@@ -575,7 +582,7 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
             outlineProvider = object : ViewOutlineProvider() { override fun getOutline(v: View, o: Outline) { o.setRoundRect(0, 0, v.width, v.height, dp(10f)) } }
             clipToOutline = true
             contentDescription = "Edit the last photo"
-            setOnClickListener { val u = lastUri; if (u != null) openCrop(u) else pickFromLibrary() }
+            setOnClickListener { if (shownPhoto() != null) openViewer() else pickFromLibrary() }
             setOnLongClickListener { pickFromLibrary(); true }
         }
         bar.addView(thumb, lp(dpi(44f), dpi(44f)))
@@ -1804,12 +1811,95 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
 
     private fun loadThumb() {
         if (!::thumb.isInitialized) return
-        val uri = prefs.getString("thumbUri", null)?.let { Uri.parse(it) } ?: lastUri
+        val uri = shownPhoto()
         if (uri == null) { thumb.setImageDrawable(null); return }
         saveExecutor.execute {
             val bmp = runCatching { contentResolver.loadThumbnail(uri, Size(240, 240), null) }.getOrNull()
-            runOnUiThread { if (bmp != null) thumb.setImageBitmap(bmp) }
+            runOnUiThread { thumb.setImageBitmap(bmp) }          // a photo deleted elsewhere leaves an empty frame
         }
+    }
+
+    /** The latest photo as it was saved: the Look copy if there is one, otherwise the shot itself. */
+    private fun shownPhoto(): Uri? = prefs.getString("thumbUri", null)?.let { Uri.parse(it) } ?: lastUri
+
+    // =========================================================== the last photo
+    /**
+     * Tapping the last-photo thumbnail: the photo full screen with Share, Edit and Delete. Every shot is
+     * already saved when you take it; this is just what to do with it next.
+     */
+    private fun openViewer() {
+        val uri = shownPhoto() ?: return
+        if (viewerView != null) return
+        val page = FrameLayout(this).apply { setBackgroundColor(Color.BLACK); isClickable = true }
+        val img = ImageView(this).apply { scaleType = ImageView.ScaleType.FIT_CENTER; contentDescription = "Your last photo" }
+        page.addView(img, lp(match, match).apply { topMargin = insetTop + dpi(56f); bottomMargin = insetBottom + dpi(88f) })
+        page.addView(ImageView(this).apply {
+            setImageResource(R.drawable.ic_back); scaleType = ImageView.ScaleType.CENTER; contentDescription = "Back to camera"
+            setOnClickListener { closeViewer() }
+        }, lp(dpi(48f), dpi(48f)).apply { topMargin = insetTop + dpi(4f); leftMargin = dpi(6f) })
+        val bar = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setBackgroundColor(T.CARBON) }
+        fun action(icon: Int, name: String, act: () -> Unit) = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER; contentDescription = name
+            addView(ImageView(context).apply { setImageResource(icon) }, LinearLayout.LayoutParams(dpi(24f), dpi(24f)))
+            addView(text(name, 12f, T.IVORY, T.medium), LinearLayout.LayoutParams(wrap, wrap).apply { topMargin = dpi(6f) })
+            setOnClickListener { act() }
+        }
+        bar.addView(action(R.drawable.ic_share, "Share") { sharePhoto(uri) }, LinearLayout.LayoutParams(0, match, 1f))
+        bar.addView(action(R.drawable.ic_edit, "Edit") { closeViewer(); lastUri?.let { openCrop(it) } ?: openCrop(uri) }, LinearLayout.LayoutParams(0, match, 1f))
+        bar.addView(action(R.drawable.ic_delete, "Delete") { confirmDelete() }, LinearLayout.LayoutParams(0, match, 1f))
+        page.addView(bar, lp(match, insetBottom + dpi(88f), Gravity.BOTTOM).also { bar.setPadding(0, 0, 0, insetBottom) })
+        root.addView(page, lp(match, match))
+        viewerView = page
+        val target = resources.displayMetrics.widthPixels
+        saveExecutor.execute {
+            val b = runCatching {
+                ImageDecoder.decodeBitmap(ImageDecoder.createSource(contentResolver, uri)) { dec, info, _ ->
+                    val sz = info.size; val k = target.toFloat() / maxOf(1, minOf(sz.width, sz.height))
+                    if (k < 1f) dec.setTargetSize((sz.width * k).roundToInt().coerceAtLeast(1), (sz.height * k).roundToInt().coerceAtLeast(1))
+                }
+            }.getOrNull()
+            runOnUiThread { if (b != null) img.setImageBitmap(b) else { closeViewer(); Toast.makeText(this, "That photo isn't there any more.", Toast.LENGTH_SHORT).show(); clearLast() } }
+        }
+    }
+
+    private fun closeViewer() { viewerView?.let { root.removeView(it) }; viewerView = null }
+
+    private fun sharePhoto(uri: Uri) {
+        val send = Intent(Intent.ACTION_SEND).setType("image/jpeg").putExtra(Intent.EXTRA_STREAM, uri).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        startActivity(Intent.createChooser(send, null))
+    }
+
+    /** The photo and, if a Look was applied, its unfiltered original go together. */
+    private fun shotUris(): List<Uri> = listOfNotNull(shownPhoto(), lastUri).distinct()
+
+    private fun confirmDelete() {
+        val both = shotUris().size > 1
+        sheet { box, dlg ->
+            box.addView(label("Delete this photo?", 17f, cText, T.semibold))
+            box.addView(label(if (both) "It's removed from your gallery, along with its unfiltered original." else "It's removed from your gallery.", 13f, cMuted).apply { setPadding(0, dpi(8f), 0, dpi(16f)) })
+            val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+            row.addView(sheetButton("Cancel", false) { dlg.dismiss() }, LinearLayout.LayoutParams(0, wrap, 1f).apply { rightMargin = dpi(10f) })
+            row.addView(sheetButton("Delete", true) { dlg.dismiss(); deleteShot() }, LinearLayout.LayoutParams(0, wrap, 1f))
+            box.addView(row)
+        }
+    }
+
+    private fun deleteShot() {
+        val left = ArrayList<Uri>()
+        for (u in shotUris()) try { contentResolver.delete(u, null, null) } catch (e: SecurityException) { left.add(u) }
+        if (left.isNotEmpty() && Build.VERSION.SDK_INT >= 30) {
+            // photos from before a reinstall belong to the gallery, not the app: Android asks you first
+            askDelete.launch(androidx.activity.result.IntentSenderRequest.Builder(MediaStore.createDeleteRequest(contentResolver, left).intentSender).build())
+        } else afterDelete()
+    }
+
+    private fun afterDelete() { clearLast(); closeViewer(); Toast.makeText(this, "Photo deleted", Toast.LENGTH_SHORT).show() }
+
+    private fun clearLast() {
+        lastUri?.let { prefs.edit().remove("art:$it").apply() }
+        lastUri = null
+        prefs.edit().remove("lastUri").remove("thumbUri").apply()
+        loadThumb()
     }
 
     // The original from the shutter is already saved and is never touched again; editing makes copies.
