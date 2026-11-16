@@ -109,6 +109,7 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
     private val lookTiles = HashMap<ArtMode, TileView>()
     private lateinit var ctxArea: FrameLayout
     private lateinit var composeSub: LinearLayout
+    private lateinit var followBtn: FollowToggle
     private lateinit var lookControls: LookControls
     private lateinit var exposureLayer: FrameLayout
     private lateinit var evValue: TextView
@@ -135,7 +136,14 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
     /** The active Look control: an index into art.controls. */
     private var artParam = 0
     private val artSlot: Int get() = art.controls.getOrNull(artParam)?.slot ?: 0
-    private var anchor = 0                // which thirds/φ point, or which corner's diagonal, the focus follows
+    /** Follow guide: shared camera state, kept across tabs and Looks. */
+    private var follow = false
+    /** Which of the active guide's anchors Follow guide uses; remembered per guide. */
+    private var anchor: Int
+        get() = prefs.getInt("anchor:${guide.name}", 0)
+        set(v) { prefs.edit().putInt("anchor:${guide.name}", v).apply() }
+    /** Follow guide is on and the guide has a focal point to follow. */
+    private val followActive: Boolean get() = follow && GuideShape.hasAnchors(guide)
     private var liveSeed = (Math.random() * 1000).toFloat()
     private var liveShader: RuntimeShader? = null
     // double exposure
@@ -217,7 +225,7 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
         if (!Art.supported) art = ArtMode.OFF
         artState = Art.loadState(prefs, art)
         evWanted = if (keep) prefs.getFloat("ev", 0f) else 0f
-        anchor = prefs.getInt("anchor", 0)
+        follow = prefs.getBoolean("follow", false)
         Haptics.enabled = prefs.getBoolean("haptics", true)
         lastUri = prefs.getString("lastUri", null)?.let { Uri.parse(it) }
         double = prefs.getBoolean("double", false)
@@ -257,11 +265,16 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
         val p = s.split(":")
         when (p[0]) {
             "compose" -> { layer = "COMPOSE"; guide = runCatching { Guide.valueOf(p[1]) }.getOrDefault(guide)
-                p.getOrNull(2)?.toIntOrNull()?.let { if (guide == Guide.SPIRAL) quadrant = it else triFlip = it == 1 } }
-            "look" -> { layer = "ART"; art = runCatching { ArtMode.valueOf(p[1]) }.getOrDefault(ArtMode.OFF); artState = Art.loadState(prefs, art)
+                p.getOrNull(2)?.toIntOrNull()?.let { if (guide == Guide.SPIRAL) quadrant = it else triFlip = it == 1 }
+                follow = p.getOrNull(3) == "follow"
+                p.getOrNull(4)?.toIntOrNull()?.let { anchor = it } }
+            "look" -> { layer = "ART"; follow = false; art = runCatching { ArtMode.valueOf(p[1]) }.getOrDefault(ArtMode.OFF); artState = Art.loadState(prefs, art)
                 artParam = p.getOrNull(2)?.toIntOrNull() ?: 0
                 p.getOrNull(3)?.toIntOrNull()?.let { artValues[5] = it.toFloat() }
-                if (p.getOrNull(4) == "follow") artState.follow = true }
+                if (p.getOrNull(4) == "follow") follow = true
+                p.getOrNull(5)?.let { n -> guide = runCatching { Guide.valueOf(n) }.getOrDefault(guide) }
+                p.getOrNull(6)?.toIntOrNull()?.let { if (guide == Guide.SPIRAL) quadrant = it else triFlip = it == 1 }
+                p.getOrNull(7)?.toIntOrNull()?.let { anchor = it } }
             "exposure" -> layer = "EXPOSURE"
             "double" -> { double = true; coach = true; flashMode = ImageCapture.FLASH_MODE_ON }
         }
@@ -300,7 +313,7 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
         prefs.edit().putString("guide", guide.name).putInt("quadrant", quadrant)
             .putBoolean("triFlip", triFlip).putBoolean("coach", coach)
             .putString("layer", layer).putString("art", art.name)
-            .putInt("anchor", anchor).putBoolean("haptics", Haptics.enabled)
+            .putBoolean("follow", follow).putBoolean("haptics", Haptics.enabled)
             .putBoolean("double", double).putString("firstUri", firstUri?.toString())
             .putString("blend", blend.name).putFloat("blendStrength", blendStrength)
             .putFloat("ev", if (evSupported) evIndex * evStep else evWanted)
@@ -489,13 +502,16 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
         ctxArea = FrameLayout(this)
         composeSub = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         ctxArea.addView(composeSub, lp(wrap, wrap))
+        // Follow guide: always at the right of the sub-options row; the variations sit on the left
+        followBtn = FollowToggle(this).apply {
+            setOnClickListener {
+                follow = !follow; save(); syncFollow(); applyArtUi(); applyLiveArt()
+                if (follow) showMask()
+            }
+        }
+        ctxArea.addView(followBtn, lp(wrap, dpi(44f), Gravity.END or Gravity.TOP).apply { topMargin = -dpi(6f) })
         lookControls = LookControls(this).apply {
             onSelect = { i -> artParam = i; applyArtUi(); if (art.isFocusSlider(artSlot)) showMask() }
-            onFollow = {
-                artState.follow = !artState.follow
-                if (!artState.follow && art == ArtMode.TILT_SHIFT) unlinkTiltBand()
-                Art.saveState(prefs, art, artState); applyArtUi(); applyLiveArt(); showMask()
-            }
             onChoice = { i ->
                 artValues[5] = i.toFloat()
                 if (art.isRandom(i)) liveSeed = (Math.random() * 1000).toFloat()   // Random: a fresh, stable variant
@@ -621,6 +637,7 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
         lookScroller.visibility = if (a) View.VISIBLE else View.GONE
         selector.visibility = if (e) View.GONE else View.VISIBLE
         composeSub.visibility = if (c) View.VISIBLE else View.GONE
+        followBtn.visibility = if (c) View.VISIBLE else View.GONE
         lookControls.visibility = if (a) View.VISIBLE else View.GONE
         ctxArea.visibility = if (e) View.GONE else View.VISIBLE
         exposureLayer.visibility = if (e) View.VISIBLE else View.GONE
@@ -753,7 +770,14 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
                 chosen = sel; contentDescription = name; setOnClickListener { act() }
             }, LinearLayout.LayoutParams(wrap, wrap).apply { if (i > 0) leftMargin = dpi(8f) })
         }
+        syncFollow()
         overlay.invalidate(); updateHud()
+    }
+
+    /** The toggle's state and the chosen anchor's marker. Off and Crop have no focal point: the toggle dims. */
+    private fun syncFollow() {
+        followBtn.set(follow, GuideShape.hasAnchors(guide))
+        overlay.selectedAnchor = if (followActive) anchor else -1
     }
 
     // ---- looks
@@ -770,7 +794,7 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
     private fun applyArtUi() {
         for ((m, t) in lookTiles) t.chosen = m == art
         artParam = artParam.coerceIn(0, (art.controls.size - 1).coerceAtLeast(0))
-        lookControls.bind(art, artValues, artParam, artState.follow)
+        lookControls.bind(art, artValues, artParam, guidedSlots())
     }
 
     private fun onArtSlider(v: Float) {
@@ -781,14 +805,19 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
         if (art.isFocusSlider(artSlot)) showMask()
     }
 
-    /** Turning Follow guide off leaves Tilt Shift's band where the guide had put it, ready to adjust by hand. */
-    private fun unlinkTiltBand() {
-        val g = guideCtx() ?: return
-        val m = Focus.linked(g) ?: return
-        if (m.type == 1) {
-            artValues[1] = m.cy.coerceIn(0f, 1f)
-            artValues[3] = (m.angle / 1.5707964f + 0.5f).coerceIn(0f, 1f)
-        } else artValues[1] = m.cy.coerceIn(0f, 1f)
+    /**
+     * Tilt Shift controls the guide is setting while Follow guide is on: Focus always (the band goes through
+     * the anchor), Angle when the guide's line there is unambiguous. Shown dimmed at the guide's value; your
+     * own values come back when Follow guide is turned off.
+     */
+    private fun guidedSlots(): Map<Int, Float> {
+        if (art != ArtMode.TILT_SHIFT || !followActive) return emptyMap()
+        val g = guideCtx() ?: return emptyMap()
+        val a = Focus.linked(g) ?: return emptyMap()
+        val out = hashMapOf(1 to a.v.coerceIn(0f, 1f))
+        a.angle?.let { var t = it; while (t > 1.5707964f) t -= 3.1415927f; while (t < -1.5707964f) t += 3.1415927f
+            out[3] = (t / 1.5707964f + 0.5f).coerceIn(0f, 1f) }
+        return out
     }
 
     private fun guideCtx(): GuideCtx? {
@@ -798,11 +827,13 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
     }
 
     /** The mask the look uses right now (frame uv). */
-    private fun liveMask(): FocusMask = Focus.resolve(art, artValues, artState.follow, guideCtx(), liveSubject())
+    private fun liveMask(): FocusMask = Focus.resolve(art, artValues, followActive, guideCtx(), liveSubject())
 
     /** The guide changed: a guide-linked focus moves with it (and shows briefly); a manual one stays put. */
     private fun guideMoved() {
-        if (art != ArtMode.OFF && art.follows && artState.follow) { applyLiveArt(); showMask() }
+        syncFollow()
+        if (art != ArtMode.OFF && art.follows && followActive) { applyLiveArt(); showMask() }
+        if (art == ArtMode.TILT_SHIFT) applyArtUi()
     }
 
     /** Briefly outlines the simulated focus region: never part of the photo. */
@@ -1226,7 +1257,7 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
 
     /** In Art with Tilt Shift on (and not following the guide), a vertical drag on the picture moves the band. */
     override fun onFocusDrag(dy: Float): Boolean {
-        if (layer != "ART" || art != ArtMode.TILT_SHIFT || artState.follow || overlay.frame.isEmpty) return false
+        if (layer != "ART" || art != ArtMode.TILT_SHIFT || followActive || overlay.frame.isEmpty) return false
         artValues[1] = (artValues[1] + dy / overlay.frame.height()).coerceIn(0f, 1f)
         if (artSlot == 1) applyArtUi()
         Art.saveState(prefs, art, artState); applyLiveArt(); showMask()
@@ -1265,23 +1296,18 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
     private fun buzz() = Haptics.confirm(overlay)
 
     /**
-     * Thirds, Grid and Diagonals have four places a guide-linked focus can sit. Tapping your subject near
-     * one of them picks it (this replaces the old anchor tiles, which the new design doesn't have).
+     * With Follow guide on, a tap picks the guide anchor nearest to it (thirds or grid intersections, the
+     * triangles' and dynamic symmetry's marked points, the diagonals' crossings). The choice is remembered
+     * per guide and shown filled. Guides with one anchor (spiral eye, centre) have nothing to pick.
      */
     private fun pickAnchor(sx: Float, sy: Float) {
+        if (!followActive) return
         val fr = overlay.guideFrame
         if (fr.isEmpty) return
-        val pts: List<PointF> = when (guide) {
-            Guide.THIRDS, Guide.PHI_GRID -> {
-                val a = if (guide == Guide.THIRDS) 1 / 3f else (1 - 1 / PHI).toFloat(); val b = 1 - a
-                listOf(PointF(a, a), PointF(b, a), PointF(a, b), PointF(b, b))
-            }
-            Guide.DIAGONALS -> listOf(PointF(0f, 0f), PointF(1f, 0f), PointF(0f, 1f), PointF(1f, 1f))
-            else -> return
-        }
-        val nx = (sx - fr.left) / fr.width(); val ny = (sy - fr.top) / fr.height()
-        val best = pts.indices.minByOrNull { val p = pts[it]; (p.x - nx) * (p.x - nx) + (p.y - ny) * (p.y - ny) } ?: return
-        if (best != anchor) { anchor = best; save(); guideMoved() }
+        val sh = GuideShape.build(guide, Box(fr.left, fr.top, fr.right, fr.bottom), quadrant, triFlip, false, align)
+        if (sh.anchors.size < 2) return
+        val best = GuideShape.nearest(sh, Pt(sx, sy))
+        if (best >= 0 && best != anchor) { anchor = best; guideMoved() }
     }
 
     // =========================================================== updates
@@ -1486,7 +1512,7 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
         }
         // The art look at the moment of the shot. The original is saved as-is; the look becomes a copy.
         // the frame is the whole photo, so the live mask (frame uv) is already in the photo's own coordinates
-        val recipe = if (Art.supported && art != ArtMode.OFF) Recipe(art, artValues.copyOf(), liveSeed, artState.follow, liveMask()) else null
+        val recipe = if (Art.supported && art != ArtMode.OFF) Recipe(art, artValues.copyOf(), liveSeed, followActive, Focus.toPhoto(liveMask(), deviceRot, overlay.frame.width() / overlay.frame.height())) else null
         val first = if (double) firstUri else null
         val takingFirst = double && first == null
         val blendNow = blend; val strengthNow = blendStrength

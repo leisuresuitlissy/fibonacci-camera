@@ -33,6 +33,10 @@ jobs:
         with:
           gradle-version: '8.11.1'
 
+      - name: Guide geometry tests
+        working-directory: android
+        run: gradle testDirectReleaseUnitTest --stacktrace
+
       - name: Build the direct-distribution APK
         working-directory: android
         run: gradle assembleDirectRelease --stacktrace

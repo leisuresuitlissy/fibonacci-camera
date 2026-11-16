@@ -38,6 +38,15 @@ shoot look-HOLGA-depth-follow "look:HOLGA:5:1:follow"
 shoot look-TILT_SHIFT-angle "look:TILT_SHIFT:3"
 shoot look-EXPIRED-colour "look:EXPIRED:2:1"
 shoot look-SOLARISED-contour "look:SOLARISED:3"
+# Follow guide in Compose: every guide with it on, and the chosen anchor of multi-anchor guides
+for g in THIRDS PHI_GRID DIAGONALS DYNAMIC CENTRE MARKS OFF; do shoot "follow-$g" "compose:$g:-:follow:1"; done
+shoot follow-SPIRAL-3 "compose:SPIRAL:3:follow"
+shoot follow-TRIANGLES-1 "compose:TRIANGLES:1:follow:1"
+# Looks following the guide: Holga depth at the spiral eye; Tilt Shift along a triangle diagonal and through a thirds point
+shoot look-HOLGA-follow-spiral1 "look:HOLGA:5:1:follow:SPIRAL:1"
+shoot look-TILT-follow-triangle "look:TILT_SHIFT:1:-:follow:TRIANGLES:0:1"
+shoot look-TILT-follow-thirds "look:TILT_SHIFT:3:-:follow:THIRDS:0:3"
+shoot look-TILT-nofollow "look:TILT_SHIFT:1"
 shoot exposure "exposure"
 shoot settings "settings"
 shoot header-active "double"

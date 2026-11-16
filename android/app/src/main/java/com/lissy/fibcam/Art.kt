@@ -126,65 +126,73 @@ data class FocusMask(val type: Int = 0, val cx: Float = 0.5f, val cy: Float = 0.
     }
 }
 
-/** What a guide offers the focus mask, worked out on a frame. */
-class GuideCtx(val guide: Guide, val quadrant: Int, val triFlip: Boolean, val anchor: Int, val frame: RectF, val guideFrame: RectF)
+/**
+ * What a guide offers the focus mask, worked out on a frame: [frame] is the visible camera image (the whole
+ * photo), [guideFrame] the box the guide is drawn in (the same, or Holga's square inside it), [anchor]
+ * which of the guide's anchors is chosen.
+ */
+class GuideCtx(val guide: Guide, val quadrant: Int, val triFlip: Boolean, val anchor: Int, val frame: RectF, val guideFrame: RectF, val trueSpiral: Boolean = false)
 
+/** A guide anchor in frame uv, with the guide line through it if that line is unambiguous. */
+class FocusAnchor(val u: Float, val v: Float, val angle: Float?)
+
+/*
+ * Follow guide moves the *simulated* sharp region of a Look (the Depth falloff, Tilt Shift's band). It never
+ * drives the camera's optical autofocus or exposure: those stay on tap-to-focus, as before.
+ */
 object Focus {
     private const val HALF_PI = 1.5707964f
 
     /**
-     * The geometry a guide suggests, in frame uv: the spiral's eye, a chosen thirds or φ point, the centre
-     * (radial); the dominant diagonal of the triangles or dynamic symmetry, or a chosen corner diagonal (band).
-     * Null for guides with no meaningful focal geometry (Off, the crop marks).
+     * The chosen anchor of the active guide, from the same geometry that draws it (GuideShape), in frame uv.
+     * Null when the guide has no focal point (Off, the crop marks).
      */
-    fun linked(g: GuideCtx): FocusMask? {
+    fun linked(g: GuideCtx): FocusAnchor? {
         val fr = g.frame; val gf = g.guideFrame
-        if (fr.isEmpty) return null
-        fun uv(x: Float, y: Float) = PointF((x - fr.left) / fr.width(), (y - fr.top) / fr.height())
-        fun radial(x: Float, y: Float) = uv(x, y).let { FocusMask(2, it.x, it.y, 0f) }
-        fun band(x0: Float, y0: Float, x1: Float, y1: Float): FocusMask {
-            val m = uv((x0 + x1) / 2, (y0 + y1) / 2)
-            return FocusMask(1, m.x, m.y, kotlin.math.atan2(y1 - y0, x1 - x0))   // screen px angle = corrected-space angle
-        }
-        val corners = listOf(PointF(gf.left, gf.top), PointF(gf.right, gf.top), PointF(gf.left, gf.bottom), PointF(gf.right, gf.bottom))
-        return when (g.guide) {
-            Guide.SPIRAL -> Geo.goals(Guide.SPIRAL, gf, g.quadrant, g.triFlip, 1).firstOrNull()?.let { radial(it.x, it.y) }
-            Guide.THIRDS, Guide.PHI_GRID -> {
-                val a = if (g.guide == Guide.THIRDS) 1f / 3f else (1f - 1f / 1.618034f)
-                val x = if (g.anchor % 2 == 0) gf.left + a * gf.width() else gf.right - a * gf.width()
-                val y = if (g.anchor < 2) gf.top + a * gf.height() else gf.bottom - a * gf.height()
-                radial(x, y)
-            }
-            Guide.CENTRE -> radial(gf.centerX(), gf.centerY())
-            Guide.TRIANGLES, Guide.DYNAMIC ->
-                if (!g.triFlip) band(gf.left, gf.top, gf.right, gf.bottom) else band(gf.right, gf.top, gf.left, gf.bottom)
-            Guide.DIAGONALS -> {
-                val c = corners[g.anchor.coerceIn(0, 3)]
-                val dx = if (g.anchor % 2 == 0) 1f else -1f; val dy = if (g.anchor < 2) 1f else -1f
-                val e = Geo.exit(c, dx, dy, gf)
-                band(c.x, c.y, e.x, e.y)
-            }
-            else -> null
-        }
+        if (fr.isEmpty || !GuideShape.hasAnchors(g.guide)) return null
+        val sh = GuideShape.build(g.guide, Box(gf.left, gf.top, gf.right, gf.bottom), g.quadrant, g.triFlip, g.trueSpiral, 1)
+        val a = sh.anchors.getOrNull(g.anchor.coerceIn(0, (sh.anchors.size - 1).coerceAtLeast(0))) ?: return null
+        return FocusAnchor((a.p.x - fr.left) / fr.width(), (a.p.y - fr.top) / fr.height(), a.angle)
     }
 
     /**
-     * The mask a mode uses right now. Follow guide on (Tilt Shift, Dream Lens): the guide's geometry.
-     * Off: Tilt Shift's own band (Focus, Width, Angle, Feather); for Depth, a soft circle on the subject
-     * you tapped (or the middle before any tap).
+     * The mask a Look uses right now. [follow] is whether Follow guide is on *and* the guide has an anchor.
+     * It only places the spatial part: Tilt Shift's band goes through the anchor (along the guide's line
+     * where that is unambiguous, otherwise at your Angle); Depth's sharp circle centres on it. Width,
+     * Feather, Depth and Intensity keep their own jobs, and a Look with Depth at 0 gains no blur.
+     * Follow guide off: Tilt Shift's own Focus and Angle; Depth on the tapped subject (or the middle).
      */
     fun resolve(mode: ArtMode, v: FloatArray, follow: Boolean, g: GuideCtx?, subject: PointF?): FocusMask {
         val link = if (follow && mode.follows && g != null) linked(g) else null
         return when {
             mode == ArtMode.TILT_SHIFT -> {
                 val size = 0.02f + v[2] * 0.3f
-                link?.copy(size = if (link.type == 2) size * 0.8f + 0.04f else size, feather = v[4], strength = v.getOrElse(7) { 0f })
-                    ?: FocusMask(1, 0.5f, v[1], (v[3] - 0.5f) * HALF_PI, size, v[4], v.getOrElse(7) { 0f })
+                val userAngle = (v[3] - 0.5f) * HALF_PI
+                if (link != null) FocusMask(1, link.u, link.v, link.angle ?: userAngle, size, v[4], v.getOrElse(7) { 0f })
+                else FocusMask(1, 0.5f, v[1], userAngle, size, v[4], v.getOrElse(7) { 0f })
             }
-            mode.hasDepth -> link?.copy(size = if (link.type == 2) 0.1f else 0.05f, feather = 0.9f, strength = v[4])
-                ?: FocusMask(2, subject?.x ?: 0.5f, subject?.y ?: 0.5f, 0f, 0.08f, 1f, v[4])
+            mode.hasDepth -> if (link != null) FocusMask(2, link.u, link.v, 0f, 0.1f, 0.9f, v[4])
+                else FocusMask(2, subject?.x ?: 0.5f, subject?.y ?: 0.5f, 0f, 0.08f, 1f, v[4])
             else -> FocusMask()
         }
+    }
+
+    /**
+     * The viewfinder's mask (frame uv, portrait) in the saved photo's own coordinates. CameraX records the
+     * phone's rotation and the photo is decoded upright, so a shot taken sideways is the frame turned by
+     * [deviceRot] (the orientation listener's 0/90/180/270, clockwise). The mask's size is in units of the
+     * image height, which becomes the short side when turned, so it is rescaled to stay the same on the
+     * picture. [aspect] is the frame's width / height. Front-camera photos are saved mirrored like the
+     * preview, so no extra flip is needed.
+     */
+    fun toPhoto(m: FocusMask, deviceRot: Int, aspect: Float): FocusMask {
+        if (m.type == 0 || deviceRot == 0) return m
+        if (deviceRot == 180) return m.copy(cx = 1f - m.cx, cy = 1f - m.cy)
+        val k = 1f / aspect                 // portrait height / landscape height
+        val f = 0.03f + m.feather * 0.55f
+        val feather = ((f * k - 0.03f) / 0.55f).coerceAtLeast(0f)
+        return if (deviceRot == 90) m.copy(cx = 1f - m.cy, cy = m.cx, angle = m.angle + HALF_PI, size = m.size * k, feather = feather)
+        else m.copy(cx = m.cy, cy = 1f - m.cx, angle = m.angle - HALF_PI, size = m.size * k, feather = feather)
     }
 }
 

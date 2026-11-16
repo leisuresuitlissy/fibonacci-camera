@@ -4,9 +4,7 @@ import android.graphics.Canvas
 import android.graphics.DashPathEffect
 import android.graphics.Paint
 import android.graphics.Path
-import android.graphics.PointF
 import android.graphics.RectF
-import kotlin.math.hypot
 
 /**
  * Draws any guide into a rectangle, in the Figma guide style: Ivory lines at one shared weight
@@ -40,93 +38,24 @@ class GuidePainter(private val d: Float) {
         line.alpha = a; dashed.alpha = a; ring.alpha = a; dot.alpha = a
     }
 
-    /** [trueSpiral]: Crop screen (largest fit inside the box). Otherwise the viewfinder (full height, [align]ed). */
-    fun draw(c: Canvas, fr: RectF, guide: Guide, quadrant: Int, triFlip: Boolean, trueSpiral: Boolean, align: Int = 1) {
-        when (guide) {
-            Guide.OFF -> {}
-            Guide.THIRDS -> grid(c, fr, floatArrayOf(1 / 3f, 2 / 3f), 2f)
-            Guide.PHI_GRID -> grid(c, fr, floatArrayOf((1 - 1 / PHI).toFloat(), (1 / PHI).toFloat()), 2f)
-            Guide.SPIRAL -> spiral(c, fr, quadrant, trueSpiral, align)
-            Guide.TRIANGLES -> triangles(c, fr, triFlip)
-            Guide.DIAGONALS -> diagonals(c, fr)
-            Guide.DYNAMIC -> dynamic(c, fr)
-            Guide.CENTRE -> centre(c, fr)
-            Guide.MARKS -> marks(c, fr)
+    /**
+     * [trueSpiral]: Crop screen (largest fit inside the box). Otherwise the viewfinder (full height, [align]ed).
+     * [selected]: an anchor to show as chosen (Follow guide), or -1.
+     */
+    fun draw(c: Canvas, fr: RectF, guide: Guide, quadrant: Int, triFlip: Boolean, trueSpiral: Boolean, align: Int = 1, selected: Int = -1) {
+        val sh = GuideShape.build(guide, Box(fr.left, fr.top, fr.right, fr.bottom), quadrant, triFlip, trueSpiral, align)
+        for (sg in sh.segs) c.drawLine(sg.a.x, sg.a.y, sg.b.x, sg.b.y, if (sg.dashed) dashed else line)
+        if (sh.curve.isNotEmpty()) {
+            path.reset(); path.moveTo(sh.curve[0].x, sh.curve[0].y)
+            for (i in 1 until sh.curve.size) path.lineTo(sh.curve[i].x, sh.curve[i].y)
+            c.drawPath(path, line)
         }
-    }
-
-    private fun seg(c: Canvas, a: PointF, b: PointF) = c.drawLine(a.x, a.y, b.x, b.y, line)
-    private fun marker(c: Canvas, p: PointF, r: Float = MARKER_RADIUS_DP) = c.drawCircle(p.x, p.y, r * d, ring)
-    private fun corners(fr: RectF) = arrayOf(PointF(fr.left, fr.top), PointF(fr.right, fr.top), PointF(fr.right, fr.bottom), PointF(fr.left, fr.bottom))
-
-    private fun grid(c: Canvas, fr: RectF, fs: FloatArray, markerR: Float) {
-        for (f in fs) {
-            val x = fr.left + f * fr.width(); val y = fr.top + f * fr.height()
-            c.drawLine(x, fr.top, x, fr.bottom, line); c.drawLine(fr.left, y, fr.right, y, line)
+        for (m in sh.markers) when (m.kind) {
+            Marker.BIG_RING -> { ring.color = IVORY; ring.alpha = line.alpha; c.drawCircle(m.p.x, m.p.y, m.radiusDp * d, ring); ring.color = MARKER; ring.alpha = line.alpha }
+            Marker.DOT -> c.drawCircle(m.p.x, m.p.y, m.radiusDp * d, dot)
+            else -> c.drawCircle(m.p.x, m.p.y, m.radiusDp * d, ring)
         }
-        for (a in fs) for (b in fs) marker(c, PointF(fr.left + a * fr.width(), fr.top + b * fr.height()), markerR)
-    }
-
-    private fun spiral(c: Canvas, fr: RectF, quadrant: Int, trueSpiral: Boolean, align: Int) {
-        val s = Spiral.of(quadrant, wide = trueSpiral && fr.width() > fr.height())
-        // one scale for both axes: the golden-ratio geometry is never stretched
-        val (eye, u) = if (trueSpiral) Geo.phiEye(s, fr) else Geo.shootSpiral(s, fr, align).let { it.first to it.second }
-        path.reset()
-        val p = s.pts
-        path.moveTo(eye.x + p[0] * u, eye.y + p[1] * u)
-        var i = 2
-        while (i < p.size) { path.lineTo(eye.x + p[i] * u, eye.y + p[i + 1] * u); i += 2 }
-        c.drawPath(path, line)
-        marker(c, eye)
-    }
-
-    private fun triangles(c: Canvas, fr: RectF, triFlip: Boolean) {
-        val (tl, tr, br, bl) = corners(fr)
-        val a: PointF; val b: PointF; val c1: PointF; val c2: PointF
-        if (!triFlip) { a = tl; b = br; c1 = tr; c2 = bl } else { a = tr; b = bl; c1 = tl; c2 = br }
-        val f1 = Geo.footOf(a, b, c1); val f2 = Geo.footOf(a, b, c2)
-        seg(c, a, b); seg(c, c1, f1); seg(c, c2, f2); marker(c, f1); marker(c, f2)
-    }
-
-    private fun diagonals(c: Canvas, fr: RectF) {
-        val (tl, tr, br, bl) = corners(fr)
-        for ((p, dir) in listOf(tl to (1f to 1f), tr to (-1f to 1f), bl to (1f to -1f), br to (-1f to -1f))) {
-            val q = Geo.exit(p, dir.first, dir.second, fr); seg(c, p, q); marker(c, q)
-        }
-    }
-
-    /** Both diagonals and the four reciprocals: symmetric, so it has no orientations. */
-    private fun dynamic(c: Canvas, fr: RectF) {
-        val (tl, tr, br, bl) = corners(fr)
-        seg(c, tl, br); seg(c, tr, bl)
-        fun recip(p: PointF, a: PointF, b: PointF) {
-            val f = Geo.footOf(a, b, p)
-            val dx = f.x - p.x; val dy = f.y - p.y; val n = hypot(dx, dy)
-            seg(c, p, Geo.exit(p, dx / n, dy / n, fr)); marker(c, f)
-        }
-        recip(tl, tr, bl); recip(br, tr, bl); recip(tr, tl, br); recip(bl, tl, br)
-    }
-
-    private fun centre(c: Canvas, fr: RectF) {
-        val cx = fr.centerX(); val cy = fr.centerY()
-        c.drawLine(cx, fr.top, cx, fr.bottom, line); c.drawLine(fr.left, cy, fr.right, cy, line)
-        ring.color = IVORY; ring.alpha = line.alpha
-        c.drawCircle(cx, cy, 13.5f * d, ring)
-        ring.color = MARKER; ring.alpha = line.alpha
-        c.drawCircle(cx, cy, 1.8f * d, dot)
-    }
-
-    /** The 4:5 crop as a dashed box, and the 1:1 crop's top and bottom edges. */
-    private fun marks(c: Canvas, fr: RectF) {
-        val h45 = fr.width() * 1.25f
-        if (h45 <= fr.height() + 0.5f) {
-            val top = fr.top + (fr.height() - h45) / 2
-            path.reset(); path.addRect(fr.left, top, fr.right, top + h45, Path.Direction.CW); c.drawPath(path, dashed)
-        }
-        val h11 = fr.width()
-        if (h11 <= fr.height()) {
-            val top = fr.top + (fr.height() - h11) / 2
-            c.drawLine(fr.left, top, fr.right, top, dashed); c.drawLine(fr.left, top + h11, fr.right, top + h11, dashed)
-        }
+        // the anchor Follow guide is using, where the guide offers a choice
+        sh.anchors.getOrNull(selected)?.let { if (sh.anchors.size > 1) c.drawCircle(it.p.x, it.p.y, 2.4f * d, dot) }
     }
 }

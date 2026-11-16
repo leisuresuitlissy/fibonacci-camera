@@ -16,6 +16,9 @@ import android.util.TypedValue
 import android.view.MotionEvent
 import android.view.View
 import android.widget.HorizontalScrollView
+import android.widget.ImageView
+import android.widget.LinearLayout
+import android.view.Gravity
 import android.widget.TextView
 import androidx.core.content.res.ResourcesCompat
 import kotlin.math.abs
@@ -200,7 +203,10 @@ class ValueSlider(ctx: Context, private val ticks: Boolean = true, neutral: Floa
     var value = 0.5f
         set(v) { field = v.coerceIn(0f, 1f); invalidate() }
     var enabledLook = true
-        set(v) { field = v; alpha = if (v) 1f else 0.4f; invalidate() }
+        set(v) { field = v; alpha = if (v && !locked) 1f else 0.4f; invalidate() }
+    /** Set by something else (Follow guide): shown dimmed at that value, not draggable. */
+    var locked = false
+        set(v) { field = v; alpha = if (enabledLook && !v) 1f else 0.4f }
     var onChange: ((Float) -> Unit)? = null
     var onStart: (() -> Unit)? = null
     var onStop: (() -> Unit)? = null
@@ -219,7 +225,7 @@ class ValueSlider(ctx: Context, private val ticks: Boolean = true, neutral: Floa
     }
 
     override fun onTouchEvent(e: MotionEvent): Boolean {
-        if (!isEnabled || !enabledLook) return false
+        if (!isEnabled || !enabledLook || locked) return false
         val f = (e.x / width).coerceIn(0f, 1f)
         when (e.actionMasked) {
             MotionEvent.ACTION_DOWN -> { parent.requestDisallowInterceptTouchEvent(true); det.begin(value); onStart?.invoke(); set(f) }
@@ -292,3 +298,27 @@ class SwitchView(ctx: Context) : View(ctx) {
 
 /** A plain bar for the Guide opacity setting: rail, fill, handle, no ticks. */
 fun plainSlider(ctx: Context) = ValueSlider(ctx, ticks = false, handleColor = T.IVORY)
+
+/**
+ * The Follow guide text toggle: an outlined pill (Ivory off, Amber on) with a link icon. The visible pill is
+ * 26dp tall inside a 44dp touch target. Disabled (dimmed) when the guide has no focal point.
+ */
+class FollowToggle(ctx: Context) : LinearLayout(ctx) {
+    private val d = ctx.dp(1f)
+    private val icon = ImageView(ctx).apply { setImageResource(R.drawable.ic_link) }
+    private val label = ctx.text("Follow guide", 11f, T.IVORY, T.medium, caps = true)
+    init {
+        orientation = HORIZONTAL; gravity = Gravity.CENTER
+        setPadding((10 * d).roundToInt(), 0, (10 * d).roundToInt(), 0)
+        addView(icon, LayoutParams((14 * d).roundToInt(), (14 * d).roundToInt()))
+        addView(label, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT).apply { leftMargin = (5 * d).roundToInt() })
+        set(false, true)
+    }
+    fun set(on: Boolean, available: Boolean) {
+        val c = if (on && available) T.AMBER else T.IVORY
+        background = android.graphics.drawable.InsetDrawable(pill(T.CARBON, 13 * d, c, d.roundToInt().coerceAtLeast(1)), 0, (9 * d).roundToInt(), 0, (9 * d).roundToInt())
+        icon.setColorFilter(c); label.setTextColor(c)
+        isEnabled = available; alpha = if (available) 1f else 0.4f
+        contentDescription = when { !available -> "Follow guide, not available for this guide"; on -> "Follow guide on"; else -> "Follow guide off" }
+    }
+}

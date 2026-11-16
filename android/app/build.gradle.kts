@@ -54,6 +54,8 @@ android {
     }
     kotlinOptions { jvmTarget = "17" }
     lint { checkReleaseBuilds = false; abortOnError = false }
+    // the guide geometry is plain Kotlin; its tests run on the JVM without a device
+    testOptions { unitTests.isReturnDefaultValues = true }
 }
 
 dependencies {
@@ -64,4 +66,5 @@ dependencies {
     implementation("androidx.camera:camera-camera2:$camerax")
     implementation("androidx.camera:camera-lifecycle:$camerax")
     implementation("androidx.camera:camera-view:$camerax")
+    testImplementation("junit:junit:4.13.2")
 }

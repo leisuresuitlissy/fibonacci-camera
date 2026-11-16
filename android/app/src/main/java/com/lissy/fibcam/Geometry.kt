@@ -110,21 +110,13 @@ object Geo {
         return PointF(left - s.ox * u, top - s.oy * u) to u
     }
 
-    /** Points the subject should land on for a guide, in screen px. */
-    fun goals(guide: Guide, fr: RectF, quadrant: Int, triFlip: Boolean, align: Int = 1): List<PointF> {
-        val tl = PointF(fr.left, fr.top); val tr = PointF(fr.right, fr.top)
-        val br = PointF(fr.right, fr.bottom); val bl = PointF(fr.left, fr.bottom)
-        fun grid(fs: FloatArray) = fs.flatMap { a -> fs.map { b -> PointF(fr.left + a * fr.width(), fr.top + b * fr.height()) } }
-        return when (guide) {
-            Guide.SPIRAL -> listOf(shootSpiral(Spiral.of(quadrant), fr, align).first)
-            Guide.THIRDS -> grid(floatArrayOf(1 / 3f, 2 / 3f))
-            Guide.PHI_GRID -> grid(floatArrayOf((1 - 1 / PHI).toFloat(), (1 / PHI).toFloat()))
-            Guide.TRIANGLES -> if (!triFlip) listOf(footOf(tl, br, tr), footOf(tl, br, bl)) else listOf(footOf(tr, bl, tl), footOf(tr, bl, br))
-            Guide.DYNAMIC -> listOf(footOf(tr, bl, tl), footOf(tr, bl, br), footOf(tl, br, tr), footOf(tl, br, bl))
-            Guide.CENTRE -> listOf(PointF(fr.centerX(), fr.centerY()))
+    /** Points the subject should land on for a guide, in screen px: the guide's own anchors (see GuideShape). */
+    fun goals(guide: Guide, fr: RectF, quadrant: Int, triFlip: Boolean, align: Int = 1): List<PointF> =
+        when (guide) {
+            Guide.SPIRAL, Guide.THIRDS, Guide.PHI_GRID, Guide.TRIANGLES, Guide.DYNAMIC, Guide.CENTRE ->
+                GuideShape.build(guide, Box(fr.left, fr.top, fr.right, fr.bottom), quadrant, triFlip, false, align).anchors.map { PointF(it.p.x, it.p.y) }
             else -> emptyList()
         }
-    }
 
     fun dist(a: PointF, b: PointF) = hypot(a.x - b.x, a.y - b.y)
 

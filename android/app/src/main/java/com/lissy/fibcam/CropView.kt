@@ -76,7 +76,7 @@ class CropView(ctx: Context) : View(ctx) {
     fun cropMask(r: Recipe): FocusMask {
         if (r.follow && r.mode.follows) {
             val fr = RectF(0f, 0f, cw, ch)
-            val g = GuideCtx(guide, quadrant, triFlip, anchor, fr, fr)
+            val g = GuideCtx(guide, quadrant, triFlip, anchor, fr, fr, trueSpiral = true)
             val m = Focus.resolve(r.mode, r.values, true, g, null)
             if (Focus.linked(g) != null) return m
         }

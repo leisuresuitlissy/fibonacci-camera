@@ -13,13 +13,14 @@ import kotlin.math.roundToInt
 
 /**
  * The Look tab's contextual controls (Figma "Look controls"): the look's adjustments as a scrolling row of
- * names with the active one in Amber, a divider and the pinned Follow guide toggle, an optional row of
- * choices (Holga's leaks, Expired's colour shift), then one slider for the active adjustment.
+ * names across the full width with the active one in Amber, an optional row of choices (Holga's leaks,
+ * Expired's colour shift), then one slider for the active adjustment. Follow guide lives in Compose; when it
+ * places Tilt Shift's band, the controls it overrides (Focus, and Angle where the guide sets one) show the
+ * guide's value, dimmed, until it is turned off.
  * When the space is shorter than the design's height the gaps tighten; nothing reflows sideways.
  */
 class LookControls(ctx: Context) : FrameLayout(ctx) {
     var onSelect: ((Int) -> Unit)? = null
-    var onFollow: (() -> Unit)? = null
     var onChoice: ((Int) -> Unit)? = null
     val slider = ValueSlider(ctx)
     /** The height this block may use (px); set by the screen layout. */
@@ -30,14 +31,6 @@ class LookControls(ctx: Context) : FrameLayout(ctx) {
 
     private val names = FadeScroller(ctx, dp(24f))
     private val namesRow = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-    private val divider = View(ctx).apply { setBackgroundColor(T.alpha(Color.WHITE, 0.14f)) }
-    private val follow = LinearLayout(ctx).apply {
-        orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER
-        setPadding(dpi(10f), 0, dpi(10f), 0)
-        contentDescription = "Follow guide"
-    }
-    private val followIcon = ImageView(ctx).apply { setImageResource(R.drawable.ic_link) }
-    private val followText = ctx.text("Follow guide", 11f, T.IVORY, T.medium, caps = true)
     private val choices = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
     private val value = ctx.text("", 12f, T.AMBER, T.medium, 0.08f).apply { gravity = Gravity.END or Gravity.CENTER_VERTICAL }
     private val empty = ctx.text("No Look applied", 11f, T.IVORY, T.medium).apply { gravity = Gravity.CENTER }
@@ -45,22 +38,22 @@ class LookControls(ctx: Context) : FrameLayout(ctx) {
     init {
         setBackgroundColor(T.CARBON)
         names.addView(namesRow, LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.MATCH_PARENT))
-        follow.addView(followIcon, LinearLayout.LayoutParams(dpi(14f), dpi(14f)))
-        follow.addView(followText, LinearLayout.LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT).apply { leftMargin = dpi(5f) })
-        follow.setOnClickListener { onFollow?.invoke() }
-        addView(names); addView(divider); addView(follow); addView(choices); addView(slider); addView(value); addView(empty)
+        addView(names); addView(choices); addView(slider); addView(value); addView(empty)
     }
 
     private var mode = ArtMode.OFF
     private var active = 0
 
-    /** Shows [mode]'s controls with control [active] selected. Rebuilds rows only when the look changes. */
-    fun bind(mode: ArtMode, v: FloatArray, active: Int, follows: Boolean) {
+    /**
+     * Shows [mode]'s controls with control [active] selected. [locked] maps value slots the guide is setting
+     * to the value it sets (shown dimmed). Rebuilds rows only when the look changes.
+     */
+    fun bind(mode: ArtMode, v: FloatArray, active: Int, locked: Map<Int, Float> = emptyMap()) {
         val rebuilt = mode != this.mode || namesRow.childCount == 0
         this.mode = mode; this.active = active
         val off = mode == ArtMode.OFF || mode.controls.isEmpty()
         empty.visibility = if (off) VISIBLE else GONE
-        for (x in listOf(names, divider, follow, slider, value)) x.visibility = if (off) GONE else VISIBLE
+        for (x in listOf(names, slider, value)) x.visibility = if (off) GONE else VISIBLE
         if (off) { choices.visibility = GONE; place(); return }
 
         if (rebuilt) {
@@ -75,12 +68,6 @@ class LookControls(ctx: Context) : FrameLayout(ctx) {
         }
         for (i in 0 until namesRow.childCount) (namesRow.getChildAt(i) as TextView).apply { setTextColor(if (i == active) T.AMBER else T.IVORY); typeface = if (i == active) T.semibold else T.medium }
         namesRow.getChildAt(active)?.let { names.reveal(it, smooth = !rebuilt) }
-
-        // Follow guide: Ivory outline off, Amber on
-        follow.visibility = if (mode.follows) VISIBLE else INVISIBLE
-        val fc = if (follows) T.AMBER else T.IVORY
-        follow.background = pill(T.CARBON, dp(13f), fc, dpi(1f).coerceAtLeast(1))
-        followIcon.setColorFilter(fc); followText.setTextColor(fc)
 
         val c = mode.controls[active]
         val variation = v.getOrElse(5) { 0f }.roundToInt().coerceIn(0, (mode.variations.size - 1).coerceAtLeast(0))
@@ -99,10 +86,12 @@ class LookControls(ctx: Context) : FrameLayout(ctx) {
         else {
             // Leaks · Off: the amount has nothing to act on, so the slider dims and reads 0
             val dormant = c.choices && mode.variations.getOrNull(variation) == "OFF"
+            val guided = locked[c.slot]
             slider.enabledLook = !dormant
-            slider.value = v[c.slot]
-            value.alpha = if (dormant) 0.4f else 1f
-            setValue(if (dormant) 0f else v[c.slot])
+            slider.locked = guided != null
+            slider.value = guided ?: v[c.slot]
+            value.alpha = if (dormant || guided != null) 0.4f else 1f
+            setValue(if (dormant) 0f else guided ?: v[c.slot])
         }
         place()
     }
@@ -131,9 +120,7 @@ class LookControls(ctx: Context) : FrameLayout(ctx) {
         val compact = dp(natural()) > available
         val top = if (compact) 0f else 4f
         val gap = if (compact) 4f else 6f
-        lp(names, 0f, top, dpi(wd - 145f), dpi(32f))
-        lp(divider, wd - 135f, top + 7f, dpi(1f), dpi(18f))
-        lp(follow, wd - 124f, top + 3f, dpi(122f), dpi(26f))
+        lp(names, 0f, top, w, dpi(32f))
         var y = top + 32f + gap
         if (choices.visibility == VISIBLE) { lp(choices, 0f, y, w, dpi(26f)); y += 26f + gap }
         lp(slider, 0f, y, dpi(wd - 40f), dpi(18f))

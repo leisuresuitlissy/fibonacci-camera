@@ -47,6 +47,9 @@ class OverlayView @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? =
     /** Hide the guide lines (the guide still drives any linked focus). */
     var hidden = false
         set(v) { field = v; invalidate() }
+    /** The guide anchor Follow guide is using, shown filled when the guide offers several; -1 for none. */
+    var selectedAnchor = -1
+        set(v) { field = v; invalidate() }
     /** Settings › Guide opacity, applied to every guide alike. */
     var guideOpacity: Float
         get() = painter.opacity
@@ -113,7 +116,7 @@ class OverlayView @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? =
     override fun onDraw(c: Canvas) {
         if (frame.isEmpty) return
         c.drawRect(frame, edge)
-        if (!hidden) painter.draw(c, guideFrame, guide, quadrant, triFlip, trueSpiral = false, align = align)
+        if (!hidden) painter.draw(c, guideFrame, guide, quadrant, triFlip, trueSpiral = false, align = align, selected = selectedAnchor)
         drawMask(c)
         drawFocus(c)
         if (coach) drawCoach(c)
