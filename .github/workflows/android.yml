@@ -9,9 +9,10 @@ name: Android APK
 # To publish an update: change android/version.txt if the version should move (e.g. 0.3), write the
 # bullet points in android/release-notes.txt, push. Nothing else.
 
+# Only pushes to main publish. Other branches build the APK and render the screens for checking, and stop there.
 on:
   push:
-    paths: ['android/**', '.github/workflows/android.yml']
+    paths: ['android/**', '.github/workflows/android.yml', '.github/scripts/android-shots.sh']
   workflow_dispatch:
 
 permissions:
@@ -58,19 +59,27 @@ jobs:
           echo "code=$CODE" >> "$GITHUB_OUTPUT"; echo "name=$NAME" >> "$GITHUB_OUTPUT"
           echo "file=$FILE" >> "$GITHUB_OUTPUT"; echo "url=$URL" >> "$GITHUB_OUTPUT"
 
+      - name: Keep the APK for the screen check
+        uses: actions/upload-artifact@v4
+        with:
+          name: apk
+          path: fibonacci-camera.apk
+
       # The permanent, version-specific address first.
       - name: Publish this version
+        if: github.ref == 'refs/heads/main'
         uses: ncipollo/release-action@v1
         with:
           tag: android-b${{ steps.meta.outputs.code }}
           commit: ${{ github.sha }}
-          name: Fibonacci Camera ${{ steps.meta.outputs.name }} (Android)
+          name: Crooked Light ${{ steps.meta.outputs.name }} (Android)
           bodyFile: android/release-notes.txt
           artifacts: ${{ steps.meta.outputs.file }}
           makeLatest: false
           prerelease: true
 
       - name: Check the APK is reachable before telling anyone about it
+        if: github.ref == 'refs/heads/main'
         run: |
           for i in 1 2 3 4 5 6; do
             if curl -fsIL "${{ steps.meta.outputs.url }}" > /dev/null; then echo "reachable"; exit 0; fi
@@ -80,11 +89,12 @@ jobs:
 
       # Then the manifest and the stable QR-code APK.
       - name: Publish to the android-latest release
+        if: github.ref == 'refs/heads/main'
         uses: ncipollo/release-action@v1
         with:
           tag: android-latest
           commit: ${{ github.sha }}
-          name: Fibonacci Camera — Android (latest)
+          name: Crooked Light — Android (latest)
           body: |
             Build ${{ steps.meta.outputs.code }} · v${{ steps.meta.outputs.name }} · built from ${{ github.sha }}.
             On the phone: open the APK, allow installs from this source when asked, install. New builds install over the old one, and the app offers future updates itself.
@@ -93,3 +103,44 @@ jobs:
           replacesArtifacts: true
           removeArtifacts: true
           makeLatest: true
+
+  # Renders every screen state on an emulator the size of the reference phone and publishes the PNGs
+  # (plus the APK that was rendered) to the android-ui-check release. Not a distribution channel.
+  screens:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: apk
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Render the screens
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 33
+          target: google_apis
+          arch: x86_64
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back emulated
+          script: bash .github/scripts/android-shots.sh fibonacci-camera.apk shots
+      - name: Bundle
+        run: cd shots && zip -q ../android-shots.zip *.png crash-log.txt && cd .. && cp fibonacci-camera.apk crooked-light-check.apk
+      - name: Publish the screens
+        uses: ncipollo/release-action@v1
+        with:
+          tag: android-ui-check
+          commit: ${{ github.sha }}
+          name: Android screen check (not a release)
+          body: Emulator renders of ${{ github.sha }} (${{ github.ref_name }}). For checking against the Figma design only.
+          artifacts: android-shots.zip,crooked-light-check.apk
+          allowUpdates: true
+          replacesArtifacts: true
+          removeArtifacts: true
+          prerelease: true
+          makeLatest: false

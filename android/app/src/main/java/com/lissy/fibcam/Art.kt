@@ -18,53 +18,92 @@ import android.os.Build
 import androidx.annotation.RequiresApi
 
 /**
- * Values per mode, always six: 0 intensity, 1..3 the mode's own sliders (p1..p3), 4 Feather (Tilt Shift)
- * or Depth (the others), 5 Holga's leak style. Names that are empty are hidden in the UI.
- * Every mode starts at 50% intensity; the shaders map that through each mode's own curve.
+ * Values per mode, always eight: 0 intensity, 1..3 the mode's own sliders (p1..p3), 4 Feather (Tilt Shift)
+ * or Depth (the others), 5 the named variation (Holga's leak style, Expired's colour shift), 6 a fourth
+ * parameter p4 (Holga grain, Instant texture), 7 Tilt Shift's Depth. Every mode starts at 50% intensity;
+ * the shaders map that through each mode's own curve. [controls] is what the camera shows, in display order.
  */
+class LookControl(
+    val label: String,
+    /** The value the slider edits, or -1 for a choice-only control. */
+    val slot: Int,
+    /** Choices kept in values[5] (shown above the slider when both exist). */
+    val choices: Boolean = false,
+    /** Shown as degrees (Tilt Shift's angle) instead of 0..100. */
+    val degrees: Boolean = false,
+)
+
+private fun c(label: String, slot: Int, choices: Boolean = false, degrees: Boolean = false) = LookControl(label, slot, choices, degrees)
+private val INTENSITY = c("Intensity", 0)
+private val DEPTH = c("Depth", 4)
+
 enum class ArtMode(
     val label: String,
     val sliders: List<Pair<String, Float>>,
+    val controls: List<LookControl> = emptyList(),
     val about: String = "",
     /** A set of named variations kept in values[5] (Holga's leak styles, Expired's colour drift). */
     val variations: List<String> = emptyList(),
     val variationLabel: String = "",
     val defaultVariation: Int = 0,
+    /** Defaults for values[6] and values[7]. */
+    val extra: Pair<Float, Float> = 0f to 0f,
 ) {
     OFF("OFF", emptyList()),
-    TILT_SHIFT("TILT SHIFT", listOf("Intensity" to 0.5f, "Focus" to 0.55f, "Width" to 0.22f, "Angle" to 0.5f, "Feather" to 0.5f)),
+    TILT_SHIFT("TILT SHIFT", listOf("Intensity" to 0.5f, "Focus" to 0.55f, "Width" to 0.22f, "Angle" to 0.5f, "Feather" to 0.5f),
+        listOf(INTENSITY, c("Focus", 1), c("Width", 2), c("Angle", 3, degrees = true), c("Feather", 4), c("Depth", 7))),
     HOLGA("HOLGA", listOf("Intensity" to 0.5f, "Vignette" to 0.55f, "Softness" to 0.4f, "Leaks" to 0.45f, "Depth" to 0.3f),
-        variations = listOf("OFF", "WARM", "COOL", "NEUTRAL", "MIXED", "RANDOM"), variationLabel = "LEAK", defaultVariation = 1),
-    PINHOLE("PINHOLE", listOf("Intensity" to 0.5f, "Softness" to 0.4f, "Vignette" to 0.5f, "" to 0f, "Depth" to 0f)),
-    GRAINY_FILM("GRAINY FILM", listOf("Intensity" to 0.5f, "Grain" to 0.5f, "Contrast" to 0.55f, "" to 0f, "Depth" to 0.35f)),
-    CROSS_PROCESS("CROSS PROCESS", listOf("Intensity" to 0.5f, "Colour" to 0.5f, "" to 0f, "" to 0f, "Depth" to 0.35f)),
-    DREAM_LENS("DREAM LENS", listOf("Intensity" to 0.5f, "Glow" to 0.5f, "Softness" to 0.4f, "" to 0f, "Depth" to 0.35f)),
+        listOf(INTENSITY, c("Softness", 2), c("Vignette", 1), c("Leaks", 3, choices = true), c("Grain", 6), DEPTH),
+        variations = listOf("OFF", "WARM", "COOL", "NEUTRAL", "MIXED", "RANDOM"), variationLabel = "LEAK", defaultVariation = 1, extra = 0.3f to 0f),
+    PINHOLE("PINHOLE", listOf("Intensity" to 0.5f, "Softness" to 0.4f, "Vignette" to 0.5f, "" to 0f, "Depth" to 0f),
+        listOf(INTENSITY, c("Softness", 1), c("Vignette", 2), DEPTH)),
+    GRAINY_FILM("GRAINY FILM", listOf("Intensity" to 0.5f, "Grain" to 0.5f, "Contrast" to 0.55f, "" to 0f, "Depth" to 0.35f),
+        listOf(INTENSITY, c("Grain", 1), c("Contrast", 2), DEPTH)),
+    CROSS_PROCESS("CROSS PROCESS", listOf("Intensity" to 0.5f, "Colour" to 0.5f, "Contrast" to 0.5f, "" to 0f, "Depth" to 0.35f),
+        listOf(INTENSITY, c("Colour", 1), c("Contrast", 2), DEPTH)),
+    DREAM_LENS("DREAM LENS", listOf("Intensity" to 0.5f, "Glow" to 0.5f, "Softness" to 0.4f, "" to 0f, "Depth" to 0.35f),
+        listOf(INTENSITY, c("Glow", 1), c("Softness", 2), DEPTH)),
+    // Halation stays at its calibrated 0.3; the camera shows Contrast and Depth only.
     INFRARED("INFRARED", listOf("Intensity" to 0.5f, "Contrast" to 0.5f, "Halation" to 0.3f, "" to 0f, "Depth" to 0.35f),
+        listOf(INTENSITY, c("Contrast", 1), DEPTH),
         about = "Infrared-inspired: a simulation from visible light, not real infrared."),
-    CYANOTYPE("CYANOTYPE", listOf("Intensity" to 0.5f, "Contrast" to 0.5f, "Paper" to 0.5f, "" to 0f, "Depth" to 0.35f)),
-    BLEACH_BYPASS("BLEACH BYPASS", listOf("Intensity" to 0.5f, "Saturation" to 0.35f, "Contrast" to 0.5f, "" to 0f, "Depth" to 0.35f)),
+    CYANOTYPE("CYANOTYPE", listOf("Intensity" to 0.5f, "Contrast" to 0.5f, "Paper" to 0.5f, "" to 0f, "Depth" to 0.35f),
+        listOf(INTENSITY, c("Contrast", 1), c("Paper", 2), DEPTH)),
+    BLEACH_BYPASS("BLEACH BYPASS", listOf("Intensity" to 0.5f, "Saturation" to 0.35f, "Contrast" to 0.5f, "" to 0f, "Depth" to 0.35f),
+        listOf(INTENSITY, c("Saturation", 1), c("Contrast", 2), DEPTH)),
     // The newer looks are colour and tone first: Depth starts at 0 and stays optional.
-    KINO("KINO", listOf("Intensity" to 0.5f, "Halation" to 0.5f, "Coolness" to 0.5f, "Grain" to 0.35f, "Depth" to 0f)),
+    KINO("KINO", listOf("Intensity" to 0.5f, "Halation" to 0.5f, "Coolness" to 0.5f, "Grain" to 0.35f, "Depth" to 0f),
+        listOf(INTENSITY, c("Halation", 1), c("Coolness", 2), c("Grain", 3), DEPTH)),
     EXPIRED("EXPIRED", listOf("Intensity" to 0.5f, "Age" to 0.5f, "Grain" to 0.45f, "" to 0f, "Depth" to 0f),
+        listOf(INTENSITY, c("Age", 1), c("Colour shift", -1, choices = true), c("Grain", 2), DEPTH),
         variations = listOf("WARM", "MAGENTA", "COOL", "RANDOM"), variationLabel = "COLOUR", defaultVariation = 1),
-    REDSCALE("REDSCALE", listOf("Intensity" to 0.5f, "Tone" to 0.45f, "Grain" to 0.3f, "" to 0f, "Depth" to 0f)),
-    SOLARISED("SOLARISED", listOf("Intensity" to 0.5f, "Reversal" to 0.7f, "Threshold" to 0.45f, "Contour" to 0.35f, "Depth" to 0f)),
-    INSTANT("INSTANT", listOf("Intensity" to 0.5f, "Warmth" to 0.55f, "Fade" to 0.5f, "Softness" to 0.4f, "Depth" to 0f));
+    REDSCALE("REDSCALE", listOf("Intensity" to 0.5f, "Tone" to 0.45f, "Grain" to 0.3f, "" to 0f, "Depth" to 0f),
+        listOf(INTENSITY, c("Tone", 1), c("Grain", 2), DEPTH)),
+    SOLARISED("SOLARISED", listOf("Intensity" to 0.5f, "Reversal" to 0.7f, "Threshold" to 0.45f, "Contour" to 0.35f, "Depth" to 0f),
+        listOf(INTENSITY, c("Reversal", 1), c("Threshold", 2), c("Contour", 3), DEPTH)),
+    // Texture is the film's grain (values[6]); the slight softness stays at its calibrated 0.4.
+    INSTANT("INSTANT", listOf("Intensity" to 0.5f, "Warmth" to 0.55f, "Fade" to 0.5f, "Softness" to 0.4f, "Depth" to 0f),
+        listOf(INTENSITY, c("Warmth", 1), c("Fade", 2), c("Texture", 6), DEPTH), extra = 0.4f to 0f);
 
-    val defaults: FloatArray get() = FloatArray(6) { i -> if (i == 5) defaultVariation.toFloat() else sliders.getOrNull(i)?.second ?: 0f }
+    val defaults: FloatArray get() = FloatArray(Art.SLOTS) { i ->
+        when (i) { 5 -> defaultVariation.toFloat(); 6 -> extra.first; 7 -> extra.second; else -> sliders.getOrNull(i)?.second ?: 0f }
+    }
     /** Whether variation [i] is the random one (it gets a fresh, stable seed when chosen). */
     fun isRandom(i: Int) = variations.getOrNull(i) == "RANDOM"
-    /** The sliders to show: the padding entries (no name) are skipped, but indexes stay put. */
-    val shown: List<Int> get() = sliders.indices.filter { sliders[it].first.isNotEmpty() }
+    /** The value slots that have a slider, in display order (the editor uses these too). */
+    val shown: List<Int> get() = controls.filter { it.slot >= 0 }.map { it.slot }
+    fun labelOf(slot: Int): String = controls.firstOrNull { it.slot == slot }?.label ?: sliders.getOrNull(slot)?.first ?: ""
     val fileTag: String get() = name.lowercase().replace('_', '-')
     val hasDepth: Boolean get() = sliders.getOrNull(4)?.first == "Depth"
+    /** The slot Depth lives in (Tilt Shift keeps Feather in 4). */
+    val depthSlot: Int get() = if (this == TILT_SHIFT) 7 else 4
     /**
      * Follow guide is offered wherever there's a focus mask: Tilt Shift's band, and Depth on every other look.
      * It only decides where the sharp region sits, never how strong the effect is: Depth 0 stays Depth 0.
      */
     val follows: Boolean get() = this == TILT_SHIFT || hasDepth
     /** Sliders that shape the focus region (they bring up its outline while you drag). */
-    fun isFocusSlider(i: Int) = when (this) { TILT_SHIFT -> i in 1..4; else -> i == 4 && hasDepth }
+    fun isFocusSlider(i: Int) = when (this) { TILT_SHIFT -> i in 1..4 || i == 7; else -> i == 4 && hasDepth }
 }
 
 
@@ -139,8 +178,8 @@ object Focus {
         return when {
             mode == ArtMode.TILT_SHIFT -> {
                 val size = 0.02f + v[2] * 0.3f
-                link?.copy(size = if (link.type == 2) size * 0.8f + 0.04f else size, feather = v[4])
-                    ?: FocusMask(1, 0.5f, v[1], (v[3] - 0.5f) * HALF_PI, size, v[4], 0f)
+                link?.copy(size = if (link.type == 2) size * 0.8f + 0.04f else size, feather = v[4], strength = v.getOrElse(7) { 0f })
+                    ?: FocusMask(1, 0.5f, v[1], (v[3] - 0.5f) * HALF_PI, size, v[4], v.getOrElse(7) { 0f })
             }
             mode.hasDepth -> link?.copy(size = if (link.type == 2) 0.1f else 0.05f, feather = 0.9f, strength = v[4])
                 ?: FocusMask(2, subject?.x ?: 0.5f, subject?.y ?: 0.5f, 0f, 0.08f, 1f, v[4])
@@ -170,6 +209,9 @@ data class Recipe(val mode: ArtMode, val values: FloatArray, val seed: Float, va
 }
 
 object Art {
+    /** How many values each look keeps (see [ArtMode]). */
+    const val SLOTS = 8
+
     /** AGSL needs Android 13. On older phones the Art layer explains that instead of crashing. */
     val supported: Boolean get() = Build.VERSION.SDK_INT >= 33
 
@@ -178,7 +220,11 @@ object Art {
         val s = prefs.getString("art2:${mode.name}", null) ?: return migrate(prefs, mode)
         return runCatching {
             val p = s.split("|")
-            ArtState(pad(mode, p[0].split(",").map { it.toFloat() }.toFloatArray()), p.getOrNull(1) == "1")
+            val raw = p[0].split(",").map { it.toFloat() }.toFloatArray()
+            val v = pad(mode, raw)
+            // saved before Cross Process had a Contrast slider: that slot held an unused 0, start it at neutral
+            if (raw.size <= 6 && mode == ArtMode.CROSS_PROCESS) v[2] = mode.defaults[2]
+            ArtState(v, p.getOrNull(1) == "1")
         }.getOrDefault(ArtState(mode.defaults, false))
     }
 
@@ -190,7 +236,7 @@ object Art {
         val old = prefs.getString("artv:${mode.name}", null) ?: return ArtState(mode.defaults, false)
         val v = runCatching { old.split(",").map { it.toFloat() } }.getOrNull() ?: return ArtState(mode.defaults, false)
         val d = mode.defaults
-        val out = FloatArray(6) { i -> if (i in 1..4 && i < v.size && mode.sliders.getOrNull(i)?.first?.isNotEmpty() == true) v[i] else d[i] }
+        val out = FloatArray(SLOTS) { i -> if (i in 1..4 && i < v.size && mode.sliders.getOrNull(i)?.first?.isNotEmpty() == true) v[i] else d[i] }
         return ArtState(out, false)
     }
 
@@ -205,7 +251,7 @@ object Art {
         return ArtState(mode.defaults, false)
     }
 
-    fun pad(mode: ArtMode, v: FloatArray): FloatArray = FloatArray(6) { i -> v.getOrNull(i) ?: mode.defaults[i] }
+    fun pad(mode: ArtMode, v: FloatArray): FloatArray = FloatArray(SLOTS) { i -> v.getOrNull(i) ?: mode.defaults[i] }
 
     @RequiresApi(33)
     fun newShader(mode: ArtMode): RuntimeShader? =
@@ -217,7 +263,7 @@ object Art {
         set("org", x, y); set("res", w, h)
         set("amt", v.getOrElse(0) { 0f }); set("p1", v.getOrElse(1) { 0f })
         set("p2", v.getOrElse(2) { 0f }); set("p3", v.getOrElse(3) { 0f })
-        set("seed", seed); set("lks", v.getOrElse(5) { 0f })
+        set("seed", seed); set("lks", v.getOrElse(5) { 0f }); set("p4", v.getOrElse(6) { 0f })
         set("msk", m.cx, m.cy, m.angle, m.type.toFloat()); set("msz", m.size, m.feather, m.strength)
     }
 
@@ -228,7 +274,7 @@ object Art {
     @RequiresApi(33)
     fun thumbnail(src: Bitmap, mode: ArtMode, seed: Float = 0.37f): Bitmap =
         if (mode == ArtMode.OFF) src else {
-            val v = mode.defaults.also { if (mode != ArtMode.TILT_SHIFT) it[4] = 0f }
+            val v = mode.defaults.also { it[mode.depthSlot] = 0f }
             render(src, Recipe(mode, v, seed), if (mode == ArtMode.TILT_SHIFT) Focus.resolve(mode, v, false, null, null) else FocusMask())
         }
 

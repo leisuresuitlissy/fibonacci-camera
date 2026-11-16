@@ -26,6 +26,7 @@ uniform float amt;
 uniform float p1;
 uniform float p2;
 uniform float p3;
+uniform float p4;
 uniform float seed;
 uniform float4 msk;
 uniform float3 msz;
@@ -129,7 +130,7 @@ half4 main(float2 p) {
     float A = amt;
     float s = min(res.x, res.y);
     float soft = maskSoft(p);
-    float r = pow(soft, 1.35) * s * 0.055 * pow(A, 1.2);
+    float r = max(pow(soft, 1.35) * s * 0.055 * pow(A, 1.2), depthR(p) * 1.6);
     float3 base = r < 0.6 ? o.rgb : blurWide(p, r);
     float3 c = satur(scurve(base, 0.35 * A), 1.0 + 0.32 * A);
     return half4(float4(c, o.a));
@@ -184,7 +185,8 @@ half4 main(float2 p) {
         float3 lc = leakColour(lks, along, d, pick) * body + leakColour(lks, 1.0 - along, 0.9, pick) * corner * 0.6;
         c = screen(c, lc * p3 * (0.55 + 0.45 * a));
     }
-    c += filmGrain(p, l) * (0.012 + 0.06 * a);
+    float gk = p4 < 0.3 ? p4 / 0.3 : 1.0 + (p4 - 0.3) / 0.7 * 1.5;
+    c += filmGrain(p, l) * (0.012 + 0.06 * a) * gk;
     float3 fx = clamp(c, 0.0, 1.0) * inside;
     return half4(float4(mix(o.rgb, fx, max(a, 1.0 - inside)), o.a));
 }
@@ -238,7 +240,7 @@ half4 main(float2 p) {
     x += float3(-0.05, 0.06, 0.02) * (1.0 - l) * (1.0 + bias) * k;
     x += float3(0.07, 0.05, -0.09) * l * k;
     x += float3(0.05, -0.05, 0.07) * max(-bias, 0.0) * (1.0 - l) * k;
-    x = satur(contrast(x, 1.0 + 0.15 * a), 1.0 + 0.3 * a);
+    x = satur(contrast(x, 1.0 + 0.15 * a + (p2 - 0.5) * 0.6 * a), 1.0 + 0.3 * a);
     return half4(float4(mix(c, clamp(x, 0.0, 1.0), pow(a, 0.8)), o.a));
 }
 """,
@@ -452,7 +454,7 @@ half4 main(float2 p) {
     c = c * (1.0 - 0.2 * p2 * a) + float3(0.07, 0.09, 0.1) * p2 * a;
     c = mix(c, smoothstep(float3(-0.1), float3(1.1), c), -0.3 * a);
     c *= vig(p, 0.16 * a);
-    c += filmGrain(p, l) * 0.015 * a;
+    c += filmGrain(p, l) * 0.015 * a * (p4 / 0.4);
     return half4(float4(clamp(c, 0.0, 1.0), o.a));
 }
 """,

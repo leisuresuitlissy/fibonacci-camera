@@ -51,7 +51,7 @@ class CropActivity : ComponentActivity() {
     private val cLine = 0xFF2E2E36.toInt()
     private val cText = 0xFFF5F3EF.toInt()
     private val cMuted = 0xFFA3A09A.toInt()
-    private val cGold = 0xFFE0B252.toInt()
+    private val cGold = 0xFFE9B65B.toInt()
     private val mono: Typeface = Typeface.MONOSPACE
     private val medium: Typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
     private val wrap = ViewGroup.LayoutParams.WRAP_CONTENT
@@ -84,7 +84,7 @@ class CropActivity : ComponentActivity() {
     private var secondUri: Uri? = null
     private var tab = "CROP"
     /** This photo's editing state. Starts from your shooting settings for a look, but never writes back to them. */
-    private var recipe = Recipe(ArtMode.OFF, FloatArray(6), (Math.random() * 1000).toFloat())
+    private var recipe = Recipe(ArtMode.OFF, FloatArray(Art.SLOTS), (Math.random() * 1000).toFloat())
     private var focusHinted = false
     private var artParam = 0
 
@@ -348,7 +348,7 @@ class CropActivity : ComponentActivity() {
         val mode = recipe.mode
         mode.shown.forEach { i ->
             val on = i == artParam
-            paramRow.addView(label(mode.sliders[i].first.uppercase(Locale.US), 10f, if (on) cGold else cMuted, mono, 0.1f).apply {
+            paramRow.addView(label(mode.labelOf(i).uppercase(Locale.US), 10f, if (on) cGold else cMuted, mono, 0.1f).apply {
                 setPadding(0, dpi(8f), dpi(12f), dpi(8f)); setOnClickListener { artParam = i; applyArtUi(); if (mode.isFocusSlider(i)) crop.flashMask() }
             })
         }

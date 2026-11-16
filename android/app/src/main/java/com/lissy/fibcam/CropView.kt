@@ -89,8 +89,8 @@ class CropView(ctx: Context) : View(ctx) {
     private var artShader: RuntimeShader? = null
     private var artShaderMode: ArtMode? = null
     private val artPaint = Paint(Paint.FILTER_BITMAP_FLAG)
-    private val focusRing = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; color = 0xFFE0B252.toInt() }
-    private val focusDot = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFFE0B252.toInt() }
+    private val focusRing = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; color = 0xFFE9B65B.toInt() }
+    private val focusDot = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFFE9B65B.toInt() }
 
     // ---- second exposure: centre in base-bitmap px, width as a fraction of base width, rotation in degrees
     var second: Bitmap? = null
@@ -142,7 +142,7 @@ class CropView(ctx: Context) : View(ctx) {
     }
 
     private val d = resources.displayMetrics.density
-    private val painter = GuidePainter(d)
+    private val painter = GuidePainter(d).apply { opacity = context.getSharedPreferences("fibcam", android.content.Context.MODE_PRIVATE).getFloat("guideOpacity", 0.75f) }
     private val dim = Paint().apply { color = 0xBD07080C.toInt() }
     private val edge = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = 1.2f * d; color = 0xE6FFFFFF.toInt() }
     private val handle = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xF2FFFFFF.toInt() }

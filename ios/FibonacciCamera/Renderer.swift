@@ -14,6 +14,7 @@ struct ArtUniforms {
     var msk = SIMD4<Float>(0.5, 0.5, 0, 0)    // centre x, y, angle, type
     var msz = SIMD4<Float>(0.08, 1, 0, 0)     // size, feather, strength
     var lks: Float = 0
+    var p4: Float = 0
 }
 
 /** Layout must match `struct B` in Shaders.metal. */
@@ -142,6 +143,7 @@ final class Renderer {
                 u.org = SIMD2(Float(b.minX), Float(b.minY)); u.res = SIMD2(Float(b.width), Float(b.height))
             }
             u.amt = r.values[0]; u.p1 = r.values[1]; u.p2 = r.values[2]; u.p3 = r.values[3]; u.seed = r.seed
+            u.p4 = r.values.count > 6 ? r.values[6] : r.mode.p4Default
             u.vpo = SIMD2(Float(viewport.minX), Float(viewport.minY))
             u.vps = SIMD2(Float(src.width) / Float(viewport.width), Float(src.height) / Float(viewport.height))
             enc.setRenderPipelineState(p)

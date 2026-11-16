@@ -47,16 +47,20 @@ class OverlayView @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? =
     /** Hide the guide lines (the guide still drives any linked focus). */
     var hidden = false
         set(v) { field = v; invalidate() }
+    /** Settings › Guide opacity, applied to every guide alike. */
+    var guideOpacity: Float
+        get() = painter.opacity
+        set(v) { painter.opacity = v; invalidate() }
     private var mask: FocusMask? = null
     private var maskAlpha = 0f
     private var maskAnim: ValueAnimator? = null
     private var dragging = false
-    private val maskLine = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; color = 0xFFE0B252.toInt() }
-    private val maskSoft = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; color = 0xFFE0B252.toInt() }
+    private val maskLine = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; color = 0xFFE9B65B.toInt() }
+    private val maskSoft = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; color = 0xFFE9B65B.toInt() }
 
     private val d = resources.displayMetrics.density
     private val painter = GuidePainter(d)
-    private val gold = 0xFFE0B252.toInt()
+    private val gold = 0xFFE9B65B.toInt()
     private val white = 0xFFFFFFFF.toInt()
     private val edge = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = 1f; color = white; alpha = 26 }
     private val mark = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = 1.5f * d }

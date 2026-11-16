@@ -5,13 +5,11 @@ import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.content.res.ColorStateList
 import android.graphics.Bitmap
-import android.graphics.Canvas
+import android.graphics.BitmapFactory
 import android.graphics.Color
 import android.graphics.ImageDecoder
 import android.graphics.Outline
-import android.graphics.Paint
 import android.graphics.PointF
 import android.graphics.RectF
 import android.graphics.RenderEffect
@@ -30,20 +28,19 @@ import android.provider.MediaStore
 import android.util.Size
 import android.util.TypedValue
 import android.view.Gravity
-import android.view.HapticFeedbackConstants
 import android.view.OrientationEventListener
 import android.view.Surface
 import android.view.View
 import android.view.ViewGroup
 import android.view.ViewOutlineProvider
 import android.widget.FrameLayout
-import android.widget.HorizontalScrollView
 import android.widget.ImageView
 import android.widget.LinearLayout
-import android.widget.SeekBar
+import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.core.Camera
@@ -61,6 +58,7 @@ import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.core.content.ContextCompat
 import androidx.core.view.ViewCompat
+import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -75,50 +73,51 @@ import kotlin.math.roundToInt
 
 class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListener {
 
-    // ---- palette
-    private val cBase = 0xFF0B0B0C.toInt()
-    private val cElev = 0xFF1F1F25.toInt()
-    private val cLine = 0xFF2E2E36.toInt()
-    private val cText = 0xFFF5F3EF.toInt()
-    private val cMuted = 0xFFA3A09A.toInt()
-    private val cGold = 0xFFE0B252.toInt()
-    private val mono: Typeface = Typeface.MONOSPACE
-    private val medium: Typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+    // ---- palette (Figma colour styles; see T)
+    private val cBase = T.CARBON
+    private val cElev = T.GRAPHITE
+    private val cLine = T.BORDER
+    private val cText = T.IVORY
+    private val cMuted = T.SUBTLE
+    private val cGold = T.AMBER
+    private val mono: Typeface get() = T.medium
+    private val medium: Typeface get() = T.medium
 
     // ---- views
+    private lateinit var root: FrameLayout
     private lateinit var stage: FrameLayout
     private lateinit var preview: PreviewView
     private lateinit var overlay: OverlayView
     private lateinit var hud: FrameLayout
+    private lateinit var hudStack: LinearLayout
     private lateinit var pill: TextView
     private lateinit var nice: TextView
-    private lateinit var sourceTxt: TextView
-    private lateinit var coachBtn: IconButton
-    private lateinit var flashBtn: IconButton
-    private lateinit var updateBtn: TextView
+    private lateinit var exposureTag: TextView
+    private lateinit var header: FrameLayout
+    private lateinit var coachBtn: TextView
+    private lateinit var doubleBtn: ImageView
+    private lateinit var flashBtn: FrameLayout
+    private lateinit var flashIcon: ImageView
+    private lateinit var flashAuto: TextView
     private lateinit var thumb: ImageView
     private lateinit var gateMsg: TextView
     private lateinit var tabRow: LinearLayout
-    private lateinit var composeLayer: LinearLayout
-    private lateinit var artLayer: LinearLayout
-    private lateinit var exposureLayer: LinearLayout
-    private lateinit var guideRow: LinearLayout
-    private lateinit var secondRow: LinearLayout
-    private lateinit var artRow: LinearLayout
-    private lateinit var paramRow: LinearLayout
-    private lateinit var artSlider: SeekBar
-    private lateinit var artValue: TextView
+    private lateinit var selector: FrameLayout
+    private lateinit var composeScroller: FadeScroller
+    private lateinit var lookScroller: FadeScroller
+    private val composeTiles = HashMap<Guide, TileView>()
+    private val lookTiles = HashMap<ArtMode, TileView>()
+    private lateinit var ctxArea: FrameLayout
+    private lateinit var composeSub: LinearLayout
+    private lateinit var lookControls: LookControls
+    private lateinit var exposureLayer: FrameLayout
     private lateinit var evValue: TextView
-    private lateinit var evSlider: SeekBar
+    private lateinit var evSlider: EvSlider
     private lateinit var zoomRow: LinearLayout
     private lateinit var camLayer: FrameLayout
     private lateinit var ghost: ImageView
-    private lateinit var exposureTag: TextView
-    private lateinit var doubleBtn: IconButton
-    private lateinit var blendLayer: LinearLayout
-    private lateinit var blendRow: LinearLayout
-    private lateinit var blendValue: TextView
-    private lateinit var blendSlider: SeekBar
+    private lateinit var shutterRow: FrameLayout
+    private var settingsView: View? = null
 
     // ---- state
     private val prefs by lazy { getSharedPreferences("fibcam", Context.MODE_PRIVATE) }
@@ -133,9 +132,10 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
     private var art = ArtMode.OFF
     private var artState = ArtState(ArtMode.OFF.defaults, false)
     private val artValues: FloatArray get() = artState.values
+    /** The active Look control: an index into art.controls. */
     private var artParam = 0
+    private val artSlot: Int get() = art.controls.getOrNull(artParam)?.slot ?: 0
     private var anchor = 0                // which thirds/φ point, or which corner's diagonal, the focus follows
-    private var guideHidden = false       // hide the overlay without changing (or unlinking) the guide
     private var liveSeed = (Math.random() * 1000).toFloat()
     private var liveShader: RuntimeShader? = null
     // double exposure
@@ -148,6 +148,14 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
     private var evMin = 0
     private var evMax = 0
     private var evStep = 1f
+    private var evSupported = true
+    /** EV to restore once the camera reports its steps (Remember my settings). */
+    private var evWanted = 0f
+    // settings
+    private var saveOriginal = true
+    private var remember = true
+    private var guideOpacity = 0.75f
+    private var shot: String? = null
 
     private var provider: ProcessCameraProvider? = null
     private var camera: Camera? = null
@@ -171,6 +179,8 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
     private var deviceRot = 0
     private lateinit var sensors: SensorManager
     private lateinit var orientation: OrientationEventListener
+    private var insetTop = 0
+    private var insetBottom = 0
 
     private val pickPhoto = registerForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
         if (uri != null) openCrop(uri)
@@ -181,32 +191,40 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
     }
 
     private val askCamera = registerForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
-        if (ok) startCamera() else gate("Camera access was refused. Allow it in Settings → Apps → Fibonacci → Permissions.")
+        if (ok) startCamera() else gate("Camera access was refused. Allow it in Settings → Apps → Crooked Light → Permissions.")
     }
 
     // =========================================================== lifecycle
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        guide = runCatching { Guide.valueOf(prefs.getString("guide", Guide.SPIRAL.name)!!) }.getOrDefault(Guide.SPIRAL)
-        quadrant = prefs.getInt("quadrant", 0)
-        triFlip = prefs.getBoolean("triFlip", false)
+        T.init(this)
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+        shot = intent?.getStringExtra("fibShot")
+        saveOriginal = prefs.getBoolean("saveOriginal", true)
+        remember = prefs.getBoolean("remember", true)
+        guideOpacity = prefs.getFloat("guideOpacity", 0.75f)
         coach = prefs.getBoolean("coach", false)
-        // A fresh launch always opens on Compose with no look. Only a restore (Android rebuilt the screen
-        // behind your back) brings back the tab and look you had. Slider positions per look are kept either way.
+        // A restore (Android rebuilt the screen behind your back) brings everything back. A fresh launch opens on
+        // Compose; with Remember my settings on it also brings back the last Look, guide and exposure value.
         val restoring = savedInstanceState != null
+        val keep = restoring || remember
         layer = if (restoring) prefs.getString("layer", "COMPOSE") ?: "COMPOSE" else "COMPOSE"
-        art = if (restoring) runCatching { ArtMode.valueOf(prefs.getString("art", ArtMode.OFF.name)!!) }.getOrDefault(ArtMode.OFF) else ArtMode.OFF
+        if (layer !in listOf("COMPOSE", "ART", "EXPOSURE")) layer = "COMPOSE"
+        guide = if (keep) runCatching { Guide.valueOf(prefs.getString("guide", Guide.SPIRAL.name)!!) }.getOrDefault(Guide.SPIRAL) else Guide.SPIRAL
+        quadrant = if (keep) prefs.getInt("quadrant", 0) else 0
+        triFlip = if (keep) prefs.getBoolean("triFlip", false) else false
+        art = if (keep) runCatching { ArtMode.valueOf(prefs.getString("art", ArtMode.OFF.name)!!) }.getOrDefault(ArtMode.OFF) else ArtMode.OFF
         if (!Art.supported) art = ArtMode.OFF
         artState = Art.loadState(prefs, art)
+        evWanted = if (keep) prefs.getFloat("ev", 0f) else 0f
         anchor = prefs.getInt("anchor", 0)
-        guideHidden = prefs.getBoolean("guideHidden", false)
         Haptics.enabled = prefs.getBoolean("haptics", true)
         lastUri = prefs.getString("lastUri", null)?.let { Uri.parse(it) }
         double = prefs.getBoolean("double", false)
         firstUri = prefs.getString("firstUri", null)?.let { Uri.parse(it) }
         blend = runCatching { Blend.valueOf(prefs.getString("blend", Blend.SCREEN.name)!!) }.getOrDefault(Blend.SCREEN)
         blendStrength = prefs.getFloat("blendStrength", 0.6f)
-        if (layer == "BLEND" && !double) layer = "COMPOSE"
+        shot?.let { applyShot(it) }
         setContentView(buildUi())
         sensors = getSystemService(Context.SENSOR_SERVICE) as SensorManager
         orientation = object : OrientationEventListener(this) {
@@ -217,13 +235,36 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
             }
         }
         overlay.squareGuide = art == ArtMode.HOLGA
-        applyGuide(); applyArtUi(); applyBlendUi(); applyLayer(); syncCoachBtn(); syncFlashBtn(); syncDoubleBtn()
+        overlay.guideOpacity = guideOpacity
+        applyGuide(); applyArtUi(); applyLayer(); syncCoachBtn(); syncFlashBtn(); syncDoubleBtn()
         firstUri?.let { if (double) loadFirst(it) }
         loadThumb()
+        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() { if (settingsView != null) closeSettings() else { isEnabled = false; onBackPressedDispatcher.onBackPressed(); isEnabled = true } }
+        })
+        if (shot == "settings") root.post { openSettings() }
         Updater.listener = { st -> runOnUiThread { onUpdateStatus(st) } }
         analysisExecutor.execute { Updater.cleanUp(this) }     // the first check happens in onResume
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) startCamera()
         else askCamera.launch(Manifest.permission.CAMERA)
+    }
+
+    /**
+     * Test hook for the CI screenshots: `-e fibShot look:HOLGA:3` etc. It only sets screen state, the same
+     * as tapping would, and is never sent by the app itself.
+     */
+    private fun applyShot(s: String) {
+        val p = s.split(":")
+        when (p[0]) {
+            "compose" -> { layer = "COMPOSE"; guide = runCatching { Guide.valueOf(p[1]) }.getOrDefault(guide)
+                p.getOrNull(2)?.toIntOrNull()?.let { if (guide == Guide.SPIRAL) quadrant = it else triFlip = it == 1 } }
+            "look" -> { layer = "ART"; art = runCatching { ArtMode.valueOf(p[1]) }.getOrDefault(ArtMode.OFF); artState = Art.loadState(prefs, art)
+                artParam = p.getOrNull(2)?.toIntOrNull() ?: 0
+                p.getOrNull(3)?.toIntOrNull()?.let { artValues[5] = it.toFloat() }
+                if (p.getOrNull(4) == "follow") artState.follow = true }
+            "exposure" -> layer = "EXPOSURE"
+            "double" -> { double = true; coach = true; flashMode = ImageCapture.FLASH_MODE_ON }
+        }
     }
 
     override fun onResume() {
@@ -232,9 +273,11 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
         if (g != null) sensors.registerListener(this, g, SensorManager.SENSOR_DELAY_UI)
         if (orientation.canDetectOrientation()) orientation.enable()
         loadThumb()
-        checkForUpdate(manual = false)                 // throttled to every six hours inside
-        pendingInstall?.let { f -> if (canInstall()) { pendingInstall = null; launchInstall(f) } }
-        overlay.postDelayed({ maybeOfferUpdate() }, 1500)
+        if (shot == null) {
+            checkForUpdate(manual = false)                 // throttled to every six hours inside
+            pendingInstall?.let { f -> if (canInstall()) { pendingInstall = null; launchInstall(f) } }
+            overlay.postDelayed({ maybeOfferUpdate() }, 1500)
+        }
     }
 
     override fun dispatchTouchEvent(ev: android.view.MotionEvent): Boolean {
@@ -257,9 +300,12 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
         prefs.edit().putString("guide", guide.name).putInt("quadrant", quadrant)
             .putBoolean("triFlip", triFlip).putBoolean("coach", coach)
             .putString("layer", layer).putString("art", art.name)
-            .putInt("anchor", anchor).putBoolean("guideHidden", guideHidden).putBoolean("haptics", Haptics.enabled)
+            .putInt("anchor", anchor).putBoolean("haptics", Haptics.enabled)
             .putBoolean("double", double).putString("firstUri", firstUri?.toString())
-            .putString("blend", blend.name).putFloat("blendStrength", blendStrength).apply()
+            .putString("blend", blend.name).putFloat("blendStrength", blendStrength)
+            .putFloat("ev", if (evSupported) evIndex * evStep else evWanted)
+            .putBoolean("saveOriginal", saveOriginal).putBoolean("remember", remember).putFloat("guideOpacity", guideOpacity)
+            .apply()
     }
 
     // =========================================================== UI helpers
@@ -270,83 +316,52 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
     }
     private fun withAlpha(c: Int, a: Float) = Color.argb((a * 255).roundToInt(), Color.red(c), Color.green(c), Color.blue(c))
 
-    private fun label(text: String, size: Float, color: Int, face: Typeface = Typeface.DEFAULT, spacing: Float = 0f) = TextView(this).apply {
+    /** Text for sheets and messages (sp, so it follows the system text size). Controls use [text] in dp. */
+    private fun label(text: String, size: Float, color: Int, face: Typeface = T.regular, spacing: Float = 0f) = TextView(this).apply {
         this.text = text; setTextSize(TypedValue.COMPLEX_UNIT_SP, size); setTextColor(color); typeface = face; letterSpacing = spacing
         includeFontPadding = false
-    }
-
-    private fun chip(text: String, on: Boolean, onClick: () -> Unit) = label(text, 12f, if (on) cGold else cMuted, medium, 0.04f).apply {
-        background = if (on) rounded(withAlpha(cGold, 0.18f), withAlpha(cGold, 0.85f)) else rounded(cElev)
-        setPadding(dpi(12f), dpi(8f), dpi(12f), dpi(8f))
-        setOnClickListener { onClick() }
-    }
-
-    private fun iconButton(icon: IconButton.Icon, size: Float, onClick: () -> Unit) = IconButton(this, icon, cMuted).apply {
-        background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(cElev) }
-        setOnClickListener { onClick() }
-        layoutParams = LinearLayout.LayoutParams(dpi(size), dpi(size))
-    }
-
-    /** A slider with dial-like detents every 10% (a firmer one at [neutral], e.g. 0 EV). It never snaps. */
-    private fun slider(neutral: Float? = null, onStop: (() -> Unit)? = null, onMove: (Int) -> Unit) = SeekBar(this).apply {
-        max = 100
-        progressTintList = ColorStateList.valueOf(cGold)
-        progressBackgroundTintList = ColorStateList.valueOf(cLine)
-        thumbTintList = ColorStateList.valueOf(Color.WHITE)
-        val det = Detents(neutral)
-        setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-            override fun onProgressChanged(s: SeekBar, v: Int, fromUser: Boolean) {
-                if (!fromUser) return
-                det.move(s, v.toFloat() / s.max.coerceAtLeast(1)); onMove(v)
-            }
-            override fun onStartTrackingTouch(s: SeekBar) { det.begin(s.progress.toFloat() / s.max.coerceAtLeast(1)) }
-            override fun onStopTrackingTouch(s: SeekBar) { onStop?.invoke() }
-        })
     }
 
     private fun lp(w: Int, h: Int, g: Int = Gravity.NO_GRAVITY) = FrameLayout.LayoutParams(w, h, g)
     private val wrap = ViewGroup.LayoutParams.WRAP_CONTENT
     private val match = ViewGroup.LayoutParams.MATCH_PARENT
-    private fun hrow() = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(dpi(16f), 0, dpi(16f), 0) }
     private fun spacer() = View(this).apply { layoutParams = LinearLayout.LayoutParams(0, 1, 1f) }
+    private fun at(v: View, x: Int, y: Int, w: Int, h: Int) {
+        val l = v.layoutParams as FrameLayout.LayoutParams
+        if (l.leftMargin != x || l.topMargin != y || l.width != w || l.height != h) { l.leftMargin = x; l.topMargin = y; l.width = w; l.height = h; l.gravity = Gravity.NO_GRAVITY; v.layoutParams = l }
+    }
+    private fun bmp(id: Int): Bitmap? = BitmapFactory.decodeResource(resources, id, BitmapFactory.Options().apply { inScaled = false })
+
+    /** A 44dp (or [size]) round Carbon button with a 24dp Ivory line icon. */
+    private fun roundIcon(icon: Int, size: Float, desc: String, onClick: () -> Unit) = ImageView(this).apply {
+        setImageResource(icon); scaleType = ImageView.ScaleType.CENTER
+        background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(T.CARBON) }
+        contentDescription = desc
+        setOnClickListener { onClick() }
+        layoutParams = lp(dpi(size), dpi(size))
+    }
+
+    /** Header button states (Figma Toggle button): Carbon; active adds a 1dp Amber ring and an Amber icon. */
+    private fun setActive(v: View, icon: ImageView?, on: Boolean) {
+        (v.background as GradientDrawable).setStroke(if (on) dpi(1f).coerceAtLeast(1) else 0, T.AMBER)
+        icon?.setColorFilter(if (on) T.AMBER else T.IVORY)
+    }
 
     // =========================================================== layout
     private fun buildUi(): View {
-        val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(cBase) }
-        ViewCompat.setOnApplyWindowInsetsListener(root) { v, insets ->
-            val b = insets.getInsets(WindowInsetsCompat.Type.systemBars())
-            v.setPadding(b.left, b.top, b.right, b.bottom); insets
+        root = FrameLayout(this).apply { setBackgroundColor(T.CARBON) }
+        ViewCompat.setOnApplyWindowInsetsListener(root) { _, insets ->
+            val b = insets.getInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout())
+            if (b.top != insetTop || b.bottom != insetBottom) { insetTop = b.top; insetBottom = b.bottom; root.post { relayout() } }
+            insets
         }
+        root.addOnLayoutChangeListener { _, l, t, r, b, ol, ot, or, ob -> if (r - l != or - ol || b - t != ob - ot) root.post { relayout() } }
 
-        // top bar
-        val top = hrow().apply { setPadding(dpi(16f), dpi(8f), dpi(12f), dpi(8f)) }
-        val titles = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        titles.addView(label("Fibonacci Camera", 15f, cText, Typeface.DEFAULT_BOLD))
-        sourceTxt = label("LIVE · REAR", 10f, cMuted, mono, 0.1f).apply { setPadding(0, dpi(3f), 0, 0) }
-        titles.addView(sourceTxt)
-        top.addView(titles, LinearLayout.LayoutParams(0, wrap, 1f))
-        updateBtn = chip("UPDATE", true) { onUpdateChip() }.apply { visibility = View.GONE }
-        top.addView(updateBtn, LinearLayout.LayoutParams(wrap, wrap).apply { rightMargin = dpi(8f) })
-        coachBtn = iconButton(IconButton.Icon.COACH, 40f) {
-            coach = !coach
-            if (coach) hintUntil = SystemClock.uptimeMillis() + 4000
-            save(); syncCoachBtn(); updateHud(); overlay.invalidate()
-        }.apply { contentDescription = "Coaching" }
-        doubleBtn = iconButton(IconButton.Icon.DOUBLE, 40f) { toggleDouble() }.apply { contentDescription = "Double exposure" }
-        top.addView(doubleBtn, (doubleBtn.layoutParams as LinearLayout.LayoutParams).apply { rightMargin = dpi(8f) })
-        top.addView(coachBtn)
-        flashBtn = iconButton(IconButton.Icon.FLASH_OFF, 40f) { cycleFlash() }.apply { contentDescription = "Flash" }
-        top.addView(flashBtn, (flashBtn.layoutParams as LinearLayout.LayoutParams).apply { leftMargin = dpi(8f) })
-        val more = iconButton(IconButton.Icon.MORE, 40f) {}.apply { contentDescription = "Settings" }
-        more.setOnClickListener { showSettings(more) }
-        top.addView(more, (more.layoutParams as LinearLayout.LayoutParams).apply { leftMargin = dpi(8f) })
-        root.addView(top, LinearLayout.LayoutParams(match, wrap))
-
-        // viewfinder
+        // viewfinder: the live picture, then the guides, then messages
         stage = FrameLayout(this).apply { setBackgroundColor(Color.BLACK); clipChildren = true }
         preview = PreviewView(this).apply {
             scaleType = PreviewView.ScaleType.FIT_CENTER
-            implementationMode = PreviewView.ImplementationMode.COMPATIBLE   // a TextureView, so art modes can be applied live
+            implementationMode = PreviewView.ImplementationMode.COMPATIBLE   // a TextureView, so Looks can be applied live
         }
         camLayer = FrameLayout(this)
         camLayer.addView(preview, lp(match, match))
@@ -357,117 +372,222 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
         stage.addView(overlay, lp(match, match))
         hud = FrameLayout(this)
         stage.addView(hud, lp(0, 0))
-        pill = label("", 14f, cText, medium).apply { setPadding(dpi(16f), dpi(9f), dpi(16f), dpi(9f)); visibility = View.GONE }
-        hud.addView(pill, lp(wrap, wrap, Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply { topMargin = dpi(12f) })
-        nice = label("Nice", 13f, cGold, medium, 0.04f).apply {
-            setPadding(dpi(14f), dpi(7f), dpi(14f), dpi(7f)); visibility = View.GONE
-            background = rounded(0xD93C2E14.toInt(), withAlpha(cGold, 0.85f))
-        }
-        hud.addView(nice, lp(wrap, wrap, Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply { topMargin = dpi(12f) })
-        exposureTag = label("", 10.5f, cGold, mono, 0.1f).apply {
-            setPadding(dpi(10f), dpi(6f), dpi(10f), dpi(6f)); visibility = View.GONE
-            background = rounded(withAlpha(cBase, 0.7f), withAlpha(cGold, 0.6f))
-            setOnClickListener { discardFirst() }
-        }
-        hud.addView(exposureTag, lp(wrap, wrap, Gravity.BOTTOM or Gravity.START).apply { leftMargin = dpi(12f); bottomMargin = dpi(12f) })
         gateMsg = label("", 14f, cMuted).apply { gravity = Gravity.CENTER; setPadding(dpi(32f), 0, dpi(32f), 0); visibility = View.GONE }
         stage.addView(gateMsg, lp(match, match))
         stage.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> layoutFrame() }
-        root.addView(stage, LinearLayout.LayoutParams(match, 0, 1f))
+        root.addView(stage, lp(0, 0))
 
-        // layer switch
-        tabRow = hrow().apply { setPadding(dpi(16f), dpi(10f), dpi(16f), dpi(4f)) }
-        root.addView(tabRow, LinearLayout.LayoutParams(match, wrap))
+        // messages under the header: double exposure progress, coaching, "Nice"
+        hudStack = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_HORIZONTAL }
+        exposureTag = text("", 12f, T.IVORY, T.medium).apply {
+            setPadding(dpi(12f), dpi(7f), dpi(12f), dpi(7f)); visibility = View.GONE
+            background = pill(T.alpha(T.CARBON, 0.85f), dp(16f), T.AMBER, dpi(1f))
+            setTextColor(T.AMBER)
+            setOnClickListener { discardFirst() }
+        }
+        hudStack.addView(exposureTag, LinearLayout.LayoutParams(wrap, wrap))
+        pill = text("", 12f, T.IVORY, T.medium).apply { setPadding(dpi(14f), dpi(8f), dpi(14f), dpi(8f)); visibility = View.GONE }
+        hudStack.addView(pill, LinearLayout.LayoutParams(wrap, wrap).apply { topMargin = dpi(8f) })
+        nice = text("Nice", 12f, T.AMBER, T.semibold).apply {
+            setPadding(dpi(14f), dpi(8f), dpi(14f), dpi(8f)); visibility = View.GONE
+            background = pill(T.alpha(T.CARBON, 0.85f), dp(16f), T.AMBER, dpi(1f))
+        }
+        hudStack.addView(nice, LinearLayout.LayoutParams(wrap, wrap).apply { topMargin = dpi(8f) })
+        root.addView(hudStack, lp(0, 0))
 
-        // the three layers share one space
-        val layers = FrameLayout(this)
-        composeLayer = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        val gscroll = HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false }
-        guideRow = hrow(); gscroll.addView(guideRow)
-        composeLayer.addView(gscroll, LinearLayout.LayoutParams(match, dpi(52f)))
-        secondRow = hrow(); composeLayer.addView(secondRow, LinearLayout.LayoutParams(match, dpi(52f)))
-        layers.addView(composeLayer, lp(match, match))
+        // header (Figma Camera / Header): Coach on the left; Double exposure and Flash on the right
+        header = FrameLayout(this)
+        coachBtn = text("Coach", 10f, T.IVORY, T.semibold, caps = true).apply {
+            gravity = Gravity.CENTER; setPadding(dpi(8f), 0, dpi(8f), 0)
+            background = pill(T.CARBON, dp(16f))
+            contentDescription = "Coach"
+            setOnClickListener {
+                coach = !coach
+                if (coach) hintUntil = SystemClock.uptimeMillis() + 4000
+                save(); syncCoachBtn(); updateHud(); overlay.invalidate()
+            }
+        }
+        header.addView(coachBtn, lp(wrap, dpi(32f), Gravity.START or Gravity.CENTER_VERTICAL))
+        doubleBtn = roundIcon(R.drawable.ic_double, 34f, "Double exposure") { onDoubleBtn() }
+        header.addView(doubleBtn, lp(dpi(34f), dpi(34f), Gravity.END or Gravity.CENTER_VERTICAL).apply { rightMargin = dpi(48f) })
+        flashBtn = FrameLayout(this).apply {
+            background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(T.CARBON) }
+            setOnClickListener { cycleFlash() }
+        }
+        flashIcon = ImageView(this).apply { setImageResource(R.drawable.ic_flash); scaleType = ImageView.ScaleType.CENTER }
+        flashBtn.addView(flashIcon, lp(match, match))
+        flashAuto = text("A", 7f, T.AMBER, T.semibold).apply { visibility = View.GONE }
+        flashBtn.addView(flashAuto, lp(wrap, wrap, Gravity.BOTTOM or Gravity.END).apply { rightMargin = dpi(6f); bottomMargin = dpi(5f) })
+        header.addView(flashBtn, lp(dpi(32f), dpi(32f), Gravity.END or Gravity.CENTER_VERTICAL))
+        root.addView(header, lp(0, 0))
 
-        artLayer = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        val ascroll = HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false }
-        artRow = hrow(); ascroll.addView(artRow)
-        artLayer.addView(ascroll, LinearLayout.LayoutParams(match, dpi(48f)))
-        val pscroll = HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false }
-        paramRow = hrow(); pscroll.addView(paramRow)
-        artLayer.addView(pscroll, LinearLayout.LayoutParams(match, dpi(34f)))
-        val sRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(dpi(4f), 0, dpi(16f), 0) }
-        artSlider = slider(onStop = { overlay.fadeMask() }) { v -> onArtSlider(v / 100f) }
-        sRow.addView(artSlider, LinearLayout.LayoutParams(0, dpi(32f), 1f))
-        artValue = label("", 11f, cGold, mono).apply { gravity = Gravity.END }
-        sRow.addView(artValue, LinearLayout.LayoutParams(dpi(30f), wrap))
-        artLayer.addView(sRow, LinearLayout.LayoutParams(match, dpi(32f)))
-        layers.addView(artLayer, lp(match, match))
+        // zoom (Figma Camera / Zoom), over the bottom of the viewfinder
+        zoomRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
+            setPadding(dpi(8f), dpi(2f), dpi(8f), dpi(2f))
+            background = pill(T.GRAPHITE, dp(16f)); alpha = 0.85f; visibility = View.GONE
+        }
+        root.addView(zoomRow, lp(wrap, dpi(31f)))
 
-        exposureLayer = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        val evHead = hrow()
-        evHead.addView(label("EXPOSURE", 10f, cMuted, mono, 0.13f)); evHead.addView(spacer())
-        evValue = label("0.0 EV", 13f, cGold, mono)
-        evHead.addView(evValue)
-        exposureLayer.addView(evHead, LinearLayout.LayoutParams(match, dpi(34f)))
-        evSlider = slider(neutral = 0.5f) { v -> onEvSlider(v) }
-        exposureLayer.addView(evSlider, LinearLayout.LayoutParams(match, dpi(36f)).apply { leftMargin = dpi(4f); rightMargin = dpi(4f) })
-        val evFoot = hrow()
-        evFoot.addView(label("−2", 11f, cMuted, mono)); evFoot.addView(spacer())
-        evFoot.addView(label("Reset", 12f, cText, medium).apply { setPadding(dpi(12f), dpi(6f), dpi(12f), dpi(6f)); setOnClickListener { setEv(0) } })
-        evFoot.addView(spacer()); evFoot.addView(label("+2", 11f, cMuted, mono))
-        exposureLayer.addView(evFoot, LinearLayout.LayoutParams(match, dpi(34f)))
-        layers.addView(exposureLayer, lp(match, match))
+        // tabs
+        tabRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL; setPadding(dpi(2f), dpi(2f), dpi(2f), dpi(2f))
+            background = pill(T.GRAPHITE, dp(16f))
+        }
+        for ((key, name) in listOf("COMPOSE" to "Compose", "ART" to "Look", "EXPOSURE" to "Exposure")) {
+            tabRow.addView(text(name, 12f, T.IVORY, T.medium).apply {
+                gravity = Gravity.CENTER; tag = key
+                setOnClickListener { if (layer != key) { layer = key; save(); applyLayer() } }
+            }, LinearLayout.LayoutParams(0, match, 1f).apply { if (key != "COMPOSE") leftMargin = dpi(8f) })
+        }
+        root.addView(tabRow, lp(0, 0))
 
-        blendLayer = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        blendRow = hrow(); blendLayer.addView(blendRow, LinearLayout.LayoutParams(match, dpi(48f)))
-        val bHead = hrow()
-        bHead.addView(label("STRENGTH", 10f, cMuted, mono, 0.13f)); bHead.addView(spacer())
-        blendValue = label("60%", 12f, cGold, mono); bHead.addView(blendValue)
-        blendLayer.addView(bHead, LinearLayout.LayoutParams(match, dpi(24f)))
-        blendSlider = slider { v -> blendStrength = v / 100f; blendValue.text = "$v%"; applyGhost(); save() }
-        blendLayer.addView(blendSlider, LinearLayout.LayoutParams(match, dpi(32f)).apply { leftMargin = dpi(4f); rightMargin = dpi(4f) })
-        layers.addView(blendLayer, lp(match, match))
-        root.addView(layers, LinearLayout.LayoutParams(match, dpi(116f)))
+        // selector row: compositions or Looks
+        selector = FrameLayout(this)
+        composeScroller = FadeScroller(this, dp(36f))
+        val cRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(dpi(16f), 0, dpi(16f), 0) }
+        val comps = listOf(Guide.OFF to ("Off" to R.drawable.comp_off), Guide.THIRDS to ("Thirds" to R.drawable.comp_thirds),
+            Guide.PHI_GRID to ("Grid" to R.drawable.comp_grid), Guide.SPIRAL to ("Spiral" to R.drawable.comp_spiral),
+            Guide.TRIANGLES to ("Triangle" to R.drawable.comp_triangles), Guide.DIAGONALS to ("Diagonals" to R.drawable.comp_diagonals),
+            Guide.DYNAMIC to ("Dynamic" to R.drawable.comp_dynamic), Guide.CENTRE to ("Centre" to R.drawable.comp_centre),
+            Guide.MARKS to ("Crop" to R.drawable.comp_crop))
+        comps.forEachIndexed { i, (g, v) ->
+            val t = TileView(this, bmp(v.second), 60f, 50f, RectF(0f, 0f, 60f, 50f), 4f, T.GRAPHITE, v.first, 8f, crop = false).apply {
+                contentDescription = "${v.first} guide"
+                setOnClickListener { if (guide != g) { guide = g; aligned = false; save(); applyGuide(); guideMoved() } }
+            }
+            composeTiles[g] = t
+            cRow.addView(t, LinearLayout.LayoutParams(wrap, wrap).apply { if (i > 0) leftMargin = dpi(8f) })
+        }
+        composeScroller.addView(cRow, lp(wrap, match))
+        selector.addView(composeScroller, lp(match, match))
+        lookScroller = FadeScroller(this, dp(36f))
+        val lRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(dpi(16f), 0, dpi(16f), 0) }
+        val looks = listOf(ArtMode.OFF to ("Original" to R.drawable.look_original), ArtMode.HOLGA to ("Holga" to R.drawable.look_holga),
+            ArtMode.PINHOLE to ("Pinhole" to R.drawable.look_pinhole), ArtMode.TILT_SHIFT to ("Tilt shift" to R.drawable.look_tilt_shift),
+            ArtMode.GRAINY_FILM to ("Grainy film" to R.drawable.look_grainy_film), ArtMode.CROSS_PROCESS to ("Cross process" to R.drawable.look_cross_process),
+            ArtMode.CYANOTYPE to ("Cyanotype" to R.drawable.look_cyanotype), ArtMode.DREAM_LENS to ("Dream lens" to R.drawable.look_dream_lens),
+            ArtMode.INFRARED to ("Infrared" to R.drawable.look_infrared), ArtMode.KINO to ("Kino" to R.drawable.look_kino),
+            ArtMode.EXPIRED to ("Expired" to R.drawable.look_expired), ArtMode.REDSCALE to ("Redscale" to R.drawable.look_redscale),
+            ArtMode.SOLARISED to ("Solarised" to R.drawable.look_solarised), ArtMode.INSTANT to ("Instant" to R.drawable.look_instant),
+            ArtMode.BLEACH_BYPASS to ("Bleach bypass" to R.drawable.look_bleach_bypass))
+        looks.forEachIndexed { i, (m, v) ->
+            val t = TileView(this, bmp(v.second), 60f, 50f, RectF(0f, 0f, 60f, 50f), 8f, null, v.first, 8f, crop = true).apply {
+                contentDescription = "${v.first} look"
+                setOnClickListener { selectLook(m) }
+            }
+            lookTiles[m] = t
+            lRow.addView(t, LinearLayout.LayoutParams(wrap, wrap).apply { if (i > 0) leftMargin = dpi(8f) })
+        }
+        lookScroller.addView(lRow, lp(wrap, match))
+        selector.addView(lookScroller, lp(match, match))
+        root.addView(selector, lp(0, 0))
 
-        // zoom, then the shutter bar
-        zoomRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER }
-        root.addView(zoomRow, LinearLayout.LayoutParams(match, dpi(44f)))
+        // contextual area: composition alternatives, or the Look's controls
+        ctxArea = FrameLayout(this)
+        composeSub = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        ctxArea.addView(composeSub, lp(wrap, wrap))
+        lookControls = LookControls(this).apply {
+            onSelect = { i -> artParam = i; applyArtUi(); if (art.isFocusSlider(artSlot)) showMask() }
+            onFollow = {
+                artState.follow = !artState.follow
+                if (!artState.follow && art == ArtMode.TILT_SHIFT) unlinkTiltBand()
+                Art.saveState(prefs, art, artState); applyArtUi(); applyLiveArt(); showMask()
+            }
+            onChoice = { i ->
+                artValues[5] = i.toFloat()
+                if (art.isRandom(i)) liveSeed = (Math.random() * 1000).toFloat()   // Random: a fresh, stable variant
+                Art.saveState(prefs, art, artState); applyArtUi(); applyLiveArt()
+            }
+            slider.onChange = { v -> onArtSlider(v) }
+            slider.onStop = { overlay.fadeMask() }
+        }
+        ctxArea.addView(lookControls, lp(match, wrap))
+        root.addView(ctxArea, lp(0, 0))
 
-        val bar = FrameLayout(this)
+        // exposure: replaces the selector row and the contextual area
+        exposureLayer = buildExposure()
+        root.addView(exposureLayer, lp(0, 0))
+
+        root.addView(buildShutterRow(), lp(0, 0))
+        return root
+    }
+
+    private fun buildShutterRow(): View {
+        val bar = FrameLayout(this).apply { setBackgroundColor(T.CARBON) }
+        shutterRow = bar
         thumb = ImageView(this).apply {
-            background = rounded(cElev, cLine, 12f); scaleType = ImageView.ScaleType.CENTER_CROP
-            outlineProvider = object : ViewOutlineProvider() { override fun getOutline(v: View, o: Outline) { o.setRoundRect(0, 0, v.width, v.height, dp(12f)) } }
+            scaleType = ImageView.ScaleType.CENTER_CROP
+            foreground = rounded(Color.TRANSPARENT, T.alpha(Color.WHITE, 0.25f), 10f)
+            background = rounded(T.GRAPHITE, null, 10f)
+            outlineProvider = object : ViewOutlineProvider() { override fun getOutline(v: View, o: Outline) { o.setRoundRect(0, 0, v.width, v.height, dp(10f)) } }
             clipToOutline = true
             contentDescription = "Edit the last photo"
             setOnClickListener { val u = lastUri; if (u != null) openCrop(u) else pickFromLibrary() }
             setOnLongClickListener { pickFromLibrary(); true }
         }
-        bar.addView(thumb, lp(dpi(54f), dpi(54f), Gravity.CENTER_VERTICAL or Gravity.START).apply { leftMargin = dpi(24f) })
+        bar.addView(thumb, lp(dpi(44f), dpi(44f)))
+        val importBtn = roundIcon(R.drawable.ic_import, 44f, "Import a photo") {
+            if (double && firstUri == null) pickFirst.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) else pickFromLibrary()
+        }
+        bar.addView(importBtn)
         val shutter = FrameLayout(this).apply {
-            background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(Color.TRANSPARENT); setStroke(dpi(3f), withAlpha(Color.WHITE, 0.95f)) }
-            val inner = View(context).apply { background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(Color.WHITE) } }
-            addView(inner, lp(match, match).apply { setMargins(dpi(7f), dpi(7f), dpi(7f), dpi(7f)) })
+            background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(Color.TRANSPARENT); setStroke(dpi(3f), T.IVORY) }
+            val inner = View(context).apply { background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(T.IVORY) } }
+            addView(inner, lp(dpi(60f), dpi(60f), Gravity.CENTER))
             setOnClickListener { capture(this) }
             contentDescription = "Take photo"
         }
-        bar.addView(shutter, lp(dpi(78f), dpi(78f), Gravity.CENTER))
-        val importBtn = IconButton(this, IconButton.Icon.PHOTO, cText).apply {
-            glyphFraction = 0.5f
-            background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(cElev); setStroke(dpi(1f), cLine) }
-            contentDescription = "Import a photo"
-            translationX = -dp(84f)
-            setOnClickListener { if (double) pickFirst.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) else pickFromLibrary() }
+        bar.addView(shutter, lp(dpi(72f), dpi(72f)))
+        val flip = roundIcon(R.drawable.ic_flip, 44f, "Switch camera") {
+            front = !front; tracker.clear(); trackState = null; overlay.target = null; bindCamera()
         }
-        bar.addView(importBtn, lp(dpi(48f), dpi(48f), Gravity.CENTER))
-        val flip = IconButton(this, IconButton.Icon.FLIP, cText).apply {
-            glyphFraction = 0.56f
-            background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(cElev); setStroke(dpi(1f), cLine) }
-            contentDescription = "Switch camera"
-            setOnClickListener { front = !front; tracker.clear(); trackState = null; this@MainActivity.overlay.target = null; bindCamera() }
-        }
-        bar.addView(flip, lp(dpi(60f), dpi(60f), Gravity.CENTER_VERTICAL or Gravity.END).apply { rightMargin = dpi(22f) })
-        root.addView(bar, LinearLayout.LayoutParams(match, dpi(104f)))
-        return root
+        bar.addView(flip)
+        val settings = roundIcon(R.drawable.ic_settings, 44f, "Settings") { openSettings() }
+        bar.addView(settings)
+        return bar
+    }
+
+    /**
+     * Places everything for this screen: the 3:4 viewfinder under the status bar, the controls block under it
+     * (tabs +12, selector +53, contextual area +125), and the shutter row with its shutter ending at the
+     * navigation area, as in the Figma frame. Short screens first slide the viewfinder up under the status bar,
+     * and only then shrink it; tall screens give the extra to the contextual area.
+     */
+    private fun relayout() {
+        val w = root.width; val h = root.height
+        if (w <= 0 || h <= 0) return
+        val rowTop = h - insetBottom - dpi(84f)
+        val maxBottom = rowTop - dpi(197f)
+        val fullH = w * 4 / 3
+        var vfTop = insetTop
+        if (vfTop + fullH > maxBottom) vfTop = max(0, maxBottom - fullH)
+        val vfH = max(dpi(200f), min(fullH, maxBottom - vfTop))
+        val vfBottom = vfTop + vfH
+        at(stage, 0, vfTop, w, vfH)
+        val headTop = max(vfTop, insetTop) + dpi(12f)
+        at(header, dpi(16f), headTop, w - dpi(32f), dpi(34f))
+        at(hudStack, 0, headTop + dpi(46f), w, wrap)
+        // zoom: centred, its bottom edge 10dp above the viewfinder's
+        (zoomRow.layoutParams as FrameLayout.LayoutParams).apply { gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL; topMargin = vfBottom - dpi(41f); width = wrap; height = dpi(31f) }
+        zoomRow.requestLayout()
+        at(tabRow, dpi(16f), vfBottom + dpi(12f), w - dpi(32f), dpi(31f))
+        at(selector, 0, vfBottom + dpi(53f), w, dpi(62f))
+        val ctxTop = vfBottom + dpi(125f)
+        val ctxH = max(0, rowTop + dpi(12f) - ctxTop)
+        at(ctxArea, dpi(16f), ctxTop, w - dpi(32f), ctxH)
+        lookControls.available = ctxH
+        at(exposureLayer, dpi(16f), vfBottom + dpi(53f), w - dpi(32f), dpi(124f))
+        at(shutterRow, 0, rowTop, w, h - rowTop)
+        // the shutter row: last shot, import, shutter, flip, settings (Figma x 16 / 86 / 156 / 254 / 324 on 384)
+        val cx = w / 2
+        val kids = (0 until shutterRow.childCount).map { shutterRow.getChildAt(it) }
+        at(kids[0], dpi(16f), dpi(26f), dpi(44f), dpi(44f))
+        at(kids[1], cx - dpi(84f) - dpi(22f), dpi(26f), dpi(44f), dpi(44f))
+        at(kids[2], cx - dpi(36f), dpi(12f), dpi(72f), dpi(72f))
+        at(kids[3], cx + dpi(84f) - dpi(22f), dpi(26f), dpi(44f), dpi(44f))
+        at(kids[4], w - dpi(60f), dpi(26f), dpi(44f), dpi(44f))
+        settingsView?.let { applySettingsInsets(it) }
     }
 
     /** The camera feed is 4:3, letterboxed exactly like the preview's FIT_CENTER. */
@@ -489,50 +609,74 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
 
     // =========================================================== layers
     private fun applyLayer() {
-        tabRow.removeAllViews()
-        val evText = if (evIndex == 0) "" else " · " + String.format(Locale.US, "%+.1f", evIndex * evStep)
-        val tabs = mutableListOf("COMPOSE" to "COMPOSE", "ART" to ("ART" + if (art != ArtMode.OFF) " · " + art.label else ""), "EXPOSURE" to ("EXPOSURE$evText"))
-        if (double) tabs.add("BLEND" to "BLEND")
-        for ((key, text) in tabs) {
-            val on = key == layer
-            val t = label(text, 11f, if (on) cGold else cMuted, medium, 0.06f).apply {
-                gravity = Gravity.CENTER; maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END
-                background = if (on) rounded(withAlpha(cGold, 0.14f), withAlpha(cGold, 0.7f), 10f) else rounded(Color.TRANSPARENT, cLine, 10f)
-                setPadding(dpi(6f), dpi(8f), dpi(6f), dpi(8f))
-                setOnClickListener { layer = key; save(); applyLayer() }
-            }
-            tabRow.addView(t, LinearLayout.LayoutParams(0, wrap, if (key == "COMPOSE") 0.9f else 1.2f).apply { if (key != "COMPOSE") leftMargin = dpi(6f) })
+        for (i in 0 until tabRow.childCount) {
+            val t = tabRow.getChildAt(i) as TextView; val on = t.tag == layer
+            t.setTextColor(if (on) T.GRAPHITE else T.IVORY)
+            t.typeface = if (on) T.semibold else T.medium
+            t.background = if (on) pill(T.AMBER, dp(24f)) else null
         }
-        composeLayer.visibility = if (layer == "COMPOSE") View.VISIBLE else View.GONE
-        artLayer.visibility = if (layer == "ART") View.VISIBLE else View.GONE
-        exposureLayer.visibility = if (layer == "EXPOSURE") View.VISIBLE else View.GONE
-        blendLayer.visibility = if (layer == "BLEND") View.VISIBLE else View.GONE
+        val c = layer == "COMPOSE"; val a = layer == "ART"; val e = layer == "EXPOSURE"
+        composeScroller.visibility = if (c) View.VISIBLE else View.GONE
+        lookScroller.visibility = if (a) View.VISIBLE else View.GONE
+        selector.visibility = if (e) View.GONE else View.VISIBLE
+        composeSub.visibility = if (c) View.VISIBLE else View.GONE
+        lookControls.visibility = if (a) View.VISIBLE else View.GONE
+        ctxArea.visibility = if (e) View.GONE else View.VISIBLE
+        exposureLayer.visibility = if (e) View.VISIBLE else View.GONE
+        if (c) composeTiles[guide]?.let { composeScroller.reveal(it, smooth = false) }
+        if (a) lookTiles[art]?.let { lookScroller.reveal(it, smooth = false) }
     }
 
     // ---- double exposure
     private fun syncDoubleBtn() {
-        doubleBtn.tint = if (double) cGold else cMuted
-        (doubleBtn.background as GradientDrawable).setColor(if (double) withAlpha(cGold, 0.18f) else cElev)
-        doubleBtn.invalidate()
+        setActive(doubleBtn, doubleBtn, double)
+        doubleBtn.contentDescription = if (double) "Double exposure on" else "Double exposure off"
         exposureTag.visibility = if (double) View.VISIBLE else View.GONE
-        exposureTag.text = if (firstUri == null) "EXPOSURE 1 OF 2" else "EXPOSURE 2 OF 2  ✕"
+        exposureTag.text = if (firstUri == null) "Exposure 1 of 2" else "Exposure 2 of 2  ✕"
     }
 
-    private fun toggleDouble() {
-        double = !double
-        if (double) { layer = "BLEND"; firstUri?.let { loadFirst(it) } }
-        else { if (layer == "BLEND") layer = "COMPOSE"; ghostBmp = null }
-        save(); syncDoubleBtn(); applyGhost(); applyLayer()
+    /** Off: turns double exposure on. On: opens its options (blend, strength, first frame, turn off). */
+    private fun onDoubleBtn() {
+        if (!double) {
+            double = true; firstUri?.let { loadFirst(it) }
+            save(); syncDoubleBtn(); applyGhost()
+            Toast.makeText(this, "Double exposure on · tap again for blend options", Toast.LENGTH_SHORT).show()
+        } else showDoubleSheet()
     }
 
-    private fun applyBlendUi() {
-        blendRow.removeAllViews()
-        for (b in Blend.values()) {
-            blendRow.addView(chip(b.label.uppercase(Locale.US), b == blend) { blend = b; save(); applyBlendUi(); applyGhost() },
-                LinearLayout.LayoutParams(wrap, wrap).apply { rightMargin = dpi(8f) })
+    private fun turnOffDouble() {
+        double = false; ghostBmp = null
+        save(); syncDoubleBtn(); applyGhost()
+    }
+
+    private fun showDoubleSheet() {
+        sheet { box, dlg ->
+            box.addView(label("Double exposure", 17f, cText, T.semibold))
+            box.addView(label(if (firstUri == null) "The next photo is the first exposure; the one after is laid over it." else "The first exposure floats over the viewfinder. The next photo completes the pair.", 13f, cMuted).apply { setPadding(0, dpi(6f), 0, dpi(16f)) })
+            box.addView(label("BLEND", 10f, cGold, T.medium, 0.08f))
+            val modes = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(0, dpi(8f), 0, dpi(14f)) }
+            fun paint() { for (i in 0 until modes.childCount) { val t = modes.getChildAt(i) as TextView; val on = t.tag == blend
+                t.setTextColor(if (on) T.AMBER else T.IVORY); t.background = pill(T.CARBON, dp(13f), if (on) T.AMBER else T.BORDER, dpi(1f)) } }
+            for (b in Blend.values()) modes.addView(text(b.label, 10f, T.IVORY, T.medium, 0.08f, caps = true).apply {
+                tag = b; gravity = Gravity.CENTER; setPadding(dpi(10f), 0, dpi(10f), 0)
+                setOnClickListener { blend = b; save(); applyGhost(); paint() }
+            }, LinearLayout.LayoutParams(wrap, dpi(26f)).apply { rightMargin = dpi(8f) })
+            paint(); box.addView(modes)
+            val head = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+            head.addView(label("STRENGTH", 10f, cGold, T.medium, 0.08f)); head.addView(spacer())
+            val sv = label("${(blendStrength * 100).roundToInt()}%", 11f, cGold, T.medium); head.addView(sv)
+            box.addView(head)
+            box.addView(ValueSlider(this).apply { value = blendStrength
+                onChange = { v -> blendStrength = v; sv.text = "${(v * 100).roundToInt()}%"; applyGhost() }
+                onStop = { save() } }, LinearLayout.LayoutParams(match, dpi(18f)).apply { topMargin = dpi(10f); bottomMargin = dpi(18f) })
+            if (firstUri == null) box.addView(sheetButton("Use a photo as the first exposure", false) {
+                dlg.dismiss(); pickFirst.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+            }, LinearLayout.LayoutParams(match, wrap).apply { bottomMargin = dpi(8f) })
+            else box.addView(sheetButton("Discard the first exposure", false) { discardFirst(); dlg.dismiss() },
+                LinearLayout.LayoutParams(match, wrap).apply { bottomMargin = dpi(8f) })
+            box.addView(sheetButton("Turn off double exposure", false) { turnOffDouble(); dlg.dismiss() }, LinearLayout.LayoutParams(match, wrap).apply { bottomMargin = dpi(8f) })
+            box.addView(sheetButton("Done", true) { dlg.dismiss() }, LinearLayout.LayoutParams(match, wrap))
         }
-        blendSlider.progress = (blendStrength * 100).roundToInt()
-        blendValue.text = "${(blendStrength * 100).roundToInt()}%"
     }
 
     /** The first exposure floats over the live picture with the chosen blend, so you compose the pair. */
@@ -568,18 +712,16 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
     }
 
     private fun syncCoachBtn() {
-        coachBtn.tint = if (coach) cGold else cMuted
-        (coachBtn.background as GradientDrawable).setColor(if (coach) withAlpha(cGold, 0.18f) else cElev)
-        coachBtn.invalidate()
+        coachBtn.background = pill(T.CARBON, dp(16f), if (coach) T.AMBER else null, dpi(1f))
+        coachBtn.setTextColor(if (coach) T.AMBER else T.IVORY)
+        coachBtn.contentDescription = if (coach) "Coach on" else "Coach off"
     }
 
     private fun syncFlashBtn() {
-        flashBtn.icon = when (flashMode) { ImageCapture.FLASH_MODE_AUTO -> IconButton.Icon.FLASH_AUTO; ImageCapture.FLASH_MODE_ON -> IconButton.Icon.FLASH_ON; else -> IconButton.Icon.FLASH_OFF }
         val on = flashMode != ImageCapture.FLASH_MODE_OFF
-        flashBtn.tint = if (on) cGold else cMuted
-        (flashBtn.background as GradientDrawable).setColor(if (on) withAlpha(cGold, 0.18f) else cElev)
+        setActive(flashBtn, flashIcon, on)
+        flashAuto.visibility = if (flashMode == ImageCapture.FLASH_MODE_AUTO) View.VISIBLE else View.GONE
         flashBtn.contentDescription = when (flashMode) { ImageCapture.FLASH_MODE_AUTO -> "Flash auto"; ImageCapture.FLASH_MODE_ON -> "Flash on"; else -> "Flash off" }
-        flashBtn.invalidate()
     }
 
     private fun cycleFlash() {
@@ -591,154 +733,51 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
     // ---- compose
     private fun applyGuide() {
         overlay.guide = guide; overlay.quadrant = quadrant; overlay.triFlip = triFlip; overlay.align = align
+        overlay.hidden = false
         if (::preview.isInitialized) overlay.post { applyLiveArt() }
-        guideRow.removeAllViews()
-        for (g in Guide.values()) {
-            guideRow.addView(chip(g.label, g == guide) { guide = g; aligned = false; save(); applyGuide(); guideMoved() },
-                LinearLayout.LayoutParams(wrap, wrap).apply { rightMargin = dpi(8f) })
+        for ((g, t) in composeTiles) t.selected = g == guide
+        composeSub.removeAllViews()
+        // only guides with real alternatives get a submenu; the space stays empty otherwise
+        val alts: List<Triple<String, Int, () -> Unit>> = when (guide) {
+            Guide.SPIRAL -> listOf("Top left" to R.drawable.or_spiral_tl, "Top right" to R.drawable.or_spiral_tr,
+                "Bottom left" to R.drawable.or_spiral_bl, "Bottom right" to R.drawable.or_spiral_br).mapIndexed { q, (n, r) ->
+                Triple(n, r) { quadrant = q; aligned = false; save(); applyGuide(); guideMoved() } }
+            Guide.TRIANGLES -> listOf("Diagonal A" to R.drawable.or_tri_a, "Diagonal B" to R.drawable.or_tri_b).mapIndexed { i, (n, r) ->
+                Triple(n, r) { triFlip = i == 1; aligned = false; save(); applyGuide(); guideMoved() } }
+            else -> emptyList()
         }
-        secondRow.removeAllViews()
-        val tileLp = { LinearLayout.LayoutParams(dpi(52f), dpi(40f)).apply { rightMargin = dpi(8f) } }
-        when (guide) {
-            Guide.SPIRAL -> for (q in 0..3) secondRow.addView(tile(q == quadrant, { c, p, on -> drawMiniSpiral(c, p, q, on) }) { quadrant = q; aligned = false; save(); applyGuide(); guideMoved() }, tileLp())
-            Guide.TRIANGLES, Guide.DYNAMIC -> for (f in listOf(false, true)) secondRow.addView(tile(f == triFlip, { c, p, on -> drawDir(c, p, f, on) }) { triFlip = f; aligned = false; save(); applyGuide(); guideMoved() }, tileLp())
-            Guide.THIRDS, Guide.PHI_GRID, Guide.DIAGONALS ->
-                // which point (or corner diagonal) a guide-linked focus sits on
-                for (a in 0..3) secondRow.addView(tile(a == anchor, { c, p, on -> drawAnchor(c, p, a, on, guide == Guide.DIAGONALS) }) { anchor = a; save(); applyGuide(); guideMoved() }, tileLp())
-            else -> {}
+        alts.forEachIndexed { i, (name, res, act) ->
+            val sel = if (guide == Guide.SPIRAL) i == quadrant else (i == 1) == triFlip
+            composeSub.addView(TileView(this, bmp(res), 48f, 35f, RectF(3f, 1f, 43f, 34f), 4f, T.GRAPHITE, name, 8f, crop = false).apply {
+                selected = sel; contentDescription = name; setOnClickListener { act() }
+            }, LinearLayout.LayoutParams(wrap, wrap).apply { if (i > 0) leftMargin = dpi(8f) })
         }
-        secondRow.addView(spacer())
-        if (guide != Guide.OFF) secondRow.addView(chip(if (guideHidden) "SHOW" else "HIDE", guideHidden) {
-            guideHidden = !guideHidden; save(); applyGuide()       // hiding never unlinks the focus
-        })
-        overlay.hidden = guideHidden
         overlay.invalidate(); updateHud()
     }
 
-    private fun tile(on: Boolean, painter: View.(Canvas, Paint, Boolean) -> Unit, onClick: () -> Unit) = object : View(this) {
-        val p = Paint(Paint.ANTI_ALIAS_FLAG)
-        override fun onDraw(c: Canvas) { painter.invoke(this, c, p, on) }
-    }.apply {
-        background = if (on) rounded(withAlpha(cGold, 0.14f), cGold, 10f) else rounded(cElev, cLine, 10f)
-        setOnClickListener { onClick() }
+    // ---- looks
+    private fun selectLook(m: ArtMode) {
+        if (!Art.supported && m != ArtMode.OFF) { Toast.makeText(this, "Looks need Android 13 or newer.", Toast.LENGTH_SHORT).show(); return }
+        if (m == art) return
+        // each look keeps its own settings; Original just pauses the look, nothing is forgotten
+        art = m; artState = Art.loadState(prefs, m); artParam = 0
+        overlay.squareGuide = art == ArtMode.HOLGA; overlay.invalidate(); updateHud()
+        save(); applyArtUi(); applyLiveArt()
+        lookTiles[m]?.let { lookScroller.reveal(it) }
     }
 
-    /** A mini frame with the chosen thirds point (or corner diagonal) marked. */
-    private fun View.drawAnchor(c: Canvas, p: Paint, a: Int, on: Boolean, diagonal: Boolean) {
-        val h = height * 0.62f; val w = h * 0.75f
-        val l = (width - w) / 2; val t = (height - h) / 2
-        p.style = Paint.Style.STROKE; p.strokeWidth = dp(1f); p.color = if (on) cGold else cMuted
-        c.drawRect(l, t, l + w, t + h, p)
-        val x = if (a % 2 == 0) l else l + w; val y = if (a < 2) t else t + h
-        if (diagonal) {
-            val dx = if (a % 2 == 0) 1f else -1f; val dy = if (a < 2) 1f else -1f
-            val k = minOf(w, h); c.drawLine(x, y, x + dx * k, y + dy * k, p)
-        } else {
-            val px = if (a % 2 == 0) l + w / 3 else l + w * 2 / 3; val py = if (a < 2) t + h / 3 else t + h * 2 / 3
-            p.style = Paint.Style.FILL; c.drawCircle(px, py, dp(2.6f), p)
-        }
-    }
-
-    private fun View.drawMiniSpiral(c: Canvas, p: Paint, q: Int, on: Boolean) {
-        val s = Spiral.of(q)
-        val h = height * 0.62f; val u = h / s.bh
-        val left = (width - s.bw * u) / 2; val top = (height - h) / 2
-        val ex = left - s.ox * u; val ey = top - s.oy * u
-        val path = android.graphics.Path()
-        val pts = s.pts
-        path.moveTo(ex + pts[0] * u, ey + pts[1] * u)
-        var i = 6
-        while (i < pts.size) { path.lineTo(ex + pts[i] * u, ey + pts[i + 1] * u); i += 6 }
-        p.style = Paint.Style.STROKE; p.strokeWidth = dp(1.4f); p.strokeCap = Paint.Cap.ROUND; p.color = if (on) cGold else withAlpha(cText, 0.7f)
-        c.drawPath(path, p)
-        p.style = Paint.Style.FILL; c.drawCircle(ex, ey, dp(1.8f), p)
-    }
-
-    private fun View.drawAlign(c: Canvas, p: Paint, a: Int, on: Boolean) {
-        val fw = dp(20f); val fh = dp(24f); val x0 = (width - fw) / 2; val y0 = (height - fh) / 2
-        p.style = Paint.Style.STROKE; p.strokeWidth = dp(1f); p.color = if (on) cGold else cMuted; p.alpha = 120
-        c.drawRect(x0, y0, x0 + fw, y0 + fh, p)
-        val bw = fh * 0.639f; val bx = when (a) { 0 -> x0; 2 -> x0 + fw - bw; else -> x0 + (fw - bw) / 2 }
-        p.style = Paint.Style.FILL; p.alpha = if (on) 200 else 150
-        c.drawRect(bx, y0, bx + bw, y0 + fh, p)
-    }
-
-    private fun View.drawDir(c: Canvas, p: Paint, flip: Boolean, on: Boolean) {
-        val s = dp(20f); val x0 = (width - s) / 2; val y0 = (height - s) / 2
-        p.style = Paint.Style.STROKE; p.strokeWidth = dp(1.2f); p.color = if (on) cGold else cMuted
-        p.alpha = 110; c.drawRect(x0, y0, x0 + s, y0 + s, p); p.alpha = 255
-        val a = if (!flip) PointF(x0, y0) else PointF(x0 + s, y0)
-        val b = if (!flip) PointF(x0 + s, y0 + s) else PointF(x0, y0 + s)
-        val c1 = if (!flip) PointF(x0 + s, y0) else PointF(x0, y0)
-        val c2 = if (!flip) PointF(x0, y0 + s) else PointF(x0 + s, y0 + s)
-        c.drawLine(a.x, a.y, b.x, b.y, p)
-        val f1 = Geo.footOf(a, b, c1); val f2 = Geo.footOf(a, b, c2)
-        c.drawLine(c1.x, c1.y, f1.x, f1.y, p); c.drawLine(c2.x, c2.y, f2.x, f2.y, p)
-    }
-
-    // ---- art
     private fun applyArtUi() {
-        artRow.removeAllViews(); paramRow.removeAllViews()
-        if (!Art.supported) {
-            paramRow.addView(label("Art modes need Android 13 or newer.", 12f, cMuted))
-            artSlider.visibility = View.INVISIBLE
-            return
-        }
-        for (m in ArtMode.values()) {
-            artRow.addView(chip(m.label, m == art) {
-                // each look keeps its own settings; Off just pauses the look, nothing is forgotten
-                art = m; artState = Art.loadState(prefs, m); artParam = 0
-                overlay.squareGuide = art == ArtMode.HOLGA; overlay.invalidate(); updateHud()
-                save(); applyArtUi(); applyLiveArt(); applyLayer()
-            }, LinearLayout.LayoutParams(wrap, wrap).apply { rightMargin = dpi(8f) })
-        }
-        if (art == ArtMode.OFF) {
-            paramRow.addView(label("Pick a look. The untouched original is always saved too.", 11.5f, cMuted))
-            artSlider.visibility = View.INVISIBLE; artValue.text = ""
-            return
-        }
-        art.shown.forEach { i ->
-            val on = i == artParam
-            paramRow.addView(label(art.sliders[i].first.uppercase(Locale.US), 10f, if (on) cGold else cMuted, mono, 0.1f).apply {
-                setPadding(0, dpi(8f), dpi(12f), dpi(8f)); setOnClickListener { artParam = i; applyArtUi(); if (art.isFocusSlider(i)) showMask() }
-            })
-        }
-        if (art.variations.isNotEmpty()) {
-            val vi = artValues[5].roundToInt().coerceIn(0, art.variations.size - 1)
-            paramRow.addView(miniChip(art.variationLabel + " · " + art.variations[vi], art.variations[vi] != "OFF") {
-                val next = (vi + 1) % art.variations.size
-                artValues[5] = next.toFloat()
-                if (art.isRandom(next)) liveSeed = (Math.random() * 1000).toFloat()   // Random: a fresh, stable variant
-                Art.saveState(prefs, art, artState); applyArtUi(); applyLiveArt()
-            })
-        }
-        if (art.follows) paramRow.addView(miniChip("FOLLOW GUIDE", artState.follow) {
-            artState.follow = !artState.follow
-            if (!artState.follow && art == ArtMode.TILT_SHIFT) unlinkTiltBand()
-            Art.saveState(prefs, art, artState); applyArtUi(); applyLiveArt(); showMask()
-        })
-        paramRow.addView(miniChip("RESET", false) {
-            artState = Art.resetState(prefs, art); artParam = 0; applyArtUi(); applyLiveArt(); applyLayer()
-        })
-        if (art.about.isNotEmpty() && artParam == 0) paramRow.addView(label(art.about, 10.5f, cMuted).apply { setPadding(dpi(6f), 0, 0, 0) })
-        artSlider.visibility = View.VISIBLE
-        artSlider.progress = (artValues[artParam] * 100).roundToInt()
-        artValue.text = "${(artValues[artParam] * 100).roundToInt()}"
-    }
-
-    private fun miniChip(text: String, on: Boolean, onClick: () -> Unit) = label(text, 9.5f, if (on) cGold else cMuted, mono, 0.1f).apply {
-        setPadding(dpi(9f), dpi(5f), dpi(9f), dpi(5f))
-        background = if (on) rounded(withAlpha(cGold, 0.16f), withAlpha(cGold, 0.8f), 8f) else rounded(cElev, cLine, 8f)
-        setOnClickListener { onClick() }
-        layoutParams = LinearLayout.LayoutParams(wrap, wrap).apply { leftMargin = dpi(6f) }
+        for ((m, t) in lookTiles) t.selected = m == art
+        artParam = artParam.coerceIn(0, (art.controls.size - 1).coerceAtLeast(0))
+        lookControls.bind(art, artValues, artParam, artState.follow)
     }
 
     private fun onArtSlider(v: Float) {
-        artValues[artParam] = v
+        artValues[artSlot] = v
         Art.saveState(prefs, art, artState)
-        artValue.text = "${(v * 100).roundToInt()}"
+        lookControls.setValue(v)
         applyLiveArt()
-        if (art.isFocusSlider(artParam)) showMask()
+        if (art.isFocusSlider(artSlot)) showMask()
     }
 
     /** Turning Follow guide off leaves Tilt Shift's band where the guide had put it, ready to adjust by hand. */
@@ -769,11 +808,10 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
     private fun showMask() {
         if (art == ArtMode.OFF) return
         val m = liveMask()
-        if (m.type == 0 || (art != ArtMode.TILT_SHIFT && m.strength <= 0f)) return
+        if (m.type == 0 || m.strength <= 0f && art != ArtMode.TILT_SHIFT) return
         overlay.showMask(m)
     }
 
-    /** The art mode runs on the preview itself, so the viewfinder shows the finished look. */
     private var lastFocus = PointF(0.5f, 0.5f)
 
     /** The subject you tapped (0..1 across the frame), followed as you move. Null before any tap. */
@@ -785,6 +823,7 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
     }
     private fun liveFocus(): PointF = liveMask().let { PointF(it.cx, it.cy) }
 
+    /** The look runs on the preview itself, so the viewfinder shows the finished look. */
     private fun applyLiveArt() {
         if (!::preview.isInitialized) return
         if (!Art.supported || art == ArtMode.OFF || overlay.frame.isEmpty) { if (Build.VERSION.SDK_INT >= 31) camLayer.setRenderEffect(null); liveShader = null; return }
@@ -800,33 +839,218 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
     private fun liveFor(m: ArtMode): RuntimeShader? = if (liveMode == m) liveShader else null
 
     // ---- exposure
+    private fun buildExposure(): FrameLayout {
+        val box = FrameLayout(this)
+        box.addView(text("Exposure compensation", 10f, T.IVORY, T.medium, 0.08f, caps = true).apply { gravity = Gravity.CENTER_VERTICAL },
+            lp(wrap, dpi(32f)))
+        val reset = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER
+            background = pill(T.CARBON, dp(13f), T.IVORY, dpi(1f))
+            contentDescription = "Reset exposure to 0"
+            addView(ImageView(context).apply { setImageResource(R.drawable.ic_reset_ev) }, LinearLayout.LayoutParams(dpi(12f), dpi(12f)))
+            addView(text("Reset", 10f, T.IVORY, T.medium, 0.08f, caps = true), LinearLayout.LayoutParams(wrap, wrap).apply { leftMargin = dpi(5f) })
+            setOnClickListener { setEv(0); Haptics.neutral(this) }
+        }
+        box.addView(reset, lp(dpi(72f), dpi(26f), Gravity.END).apply { topMargin = dpi(3f) })
+        evValue = text("0.0 EV", 18f, T.AMBER, T.medium).apply { gravity = Gravity.CENTER }
+        box.addView(evValue, lp(match, dpi(24f)).apply { topMargin = dpi(39f) })
+        evSlider = EvSlider(this).apply { onChange = { ev -> onEvSlider(ev) } }
+        box.addView(evSlider, lp(match, dpi(28f)).apply { topMargin = dpi(73f) })
+        // −2 … +2 under the whole-stop ticks
+        val marks = object : FrameLayout(this) {
+            override fun onLayout(changed: Boolean, l: Int, t: Int, r: Int, b: Int) {
+                val w = (r - l - dpi(1f)).toFloat()
+                for (i in 0 until childCount) {
+                    val c = getChildAt(i); val x = w * i / 4f + dp(0.5f)
+                    val left = (x - c.measuredWidth / 2f).roundToInt().coerceIn(0, r - l - c.measuredWidth)
+                    c.layout(left, 0, left + c.measuredWidth, c.measuredHeight)
+                }
+            }
+        }
+        for (s in listOf("−2", "−1", "0", "+1", "+2")) marks.addView(text(s, 10f, if (s == "0") T.AMBER else T.IVORY, T.medium), lp(wrap, wrap))
+        box.addView(marks, lp(match, dpi(14f)).apply { topMargin = dpi(105f) })
+        return box
+    }
+
+    private fun evText() = String.format(Locale.US, "%+.1f EV", evIndex * evStep).replace("+0.0", "0.0").replace("-", "−")
+
     private fun refreshExposure() {
         val st = camera?.cameraInfo?.exposureState ?: return
-        if (!st.isExposureCompensationSupported) { evValue.text = "not adjustable"; evSlider.isEnabled = false; return }
+        if (!st.isExposureCompensationSupported) { evSupported = false; evValue.text = "Not adjustable on this camera"; evSlider.isEnabled = false; evSlider.alpha = 0.4f; return }
+        evSupported = true; evSlider.isEnabled = true; evSlider.alpha = 1f
         evStep = st.exposureCompensationStep.toFloat()
         val r = st.exposureCompensationRange
         // offer up to ±2 EV, or the camera's own limit if that's smaller
         evMin = max(r.lower, (-2f / evStep).roundToInt()); evMax = min(r.upper, (2f / evStep).roundToInt())
         evIndex = st.exposureCompensationIndex.coerceIn(evMin, evMax)
-        evSlider.isEnabled = true
-        evSlider.max = evMax - evMin
-        evSlider.progress = evIndex - evMin
-        evValue.text = String.format(Locale.US, "%+.1f EV", evIndex * evStep).replace("+0.0", "0.0")
+        evSlider.ev = evIndex * evStep
+        evValue.text = evText()
     }
 
-    private fun onEvSlider(v: Int) = setEv(v + evMin)
+    /** The slider reports EV; it snaps to the camera's own step and limits. */
+    private fun onEvSlider(ev: Float) { val i = (ev / evStep).roundToInt(); if (i != evIndex) setEv(i) else evSlider.ev = evIndex * evStep }
 
     private fun setEv(index: Int) {
         val cam = camera ?: return
+        if (!evSupported) return
         evIndex = index.coerceIn(evMin, evMax)
         cam.cameraControl.setExposureCompensationIndex(evIndex)
-        evSlider.progress = evIndex - evMin
-        evValue.text = String.format(Locale.US, "%+.1f EV", evIndex * evStep).replace("+0.0", "0.0")
-        applyLayer()
+        evSlider.ev = evIndex * evStep
+        evValue.text = evText()
+        save()
     }
 
     private fun gate(msg: String) { gateMsg.text = msg; gateMsg.visibility = View.VISIBLE }
 
+    // =========================================================== settings
+    private fun applySettingsInsets(v: View) {
+        val lp = v.layoutParams as FrameLayout.LayoutParams
+        lp.width = match; lp.height = match; v.layoutParams = lp
+        v.findViewWithTag<View>("settingsHeader")?.let { (it.layoutParams as LinearLayout.LayoutParams).topMargin = insetTop + dpi(8f); it.requestLayout() }
+        v.findViewWithTag<View>("settingsBody")?.setPadding(dpi(16f), dpi(20f), dpi(16f), insetBottom + dpi(24f))
+    }
+
+    private fun card() = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; background = pill(T.GRAPHITE, dp(12f)) }
+
+    private fun section(parent: LinearLayout, title: String, first: Boolean = false): LinearLayout {
+        parent.addView(text(title, 10f, T.AMBER, T.medium, 0.08f, caps = true), LinearLayout.LayoutParams(wrap, dpi(14f)).apply { if (!first) topMargin = dpi(24f) })
+        val c = card(); parent.addView(c, LinearLayout.LayoutParams(match, wrap).apply { topMargin = dpi(10f) }); return c
+    }
+
+    private fun switchRow(title: String, desc: String, on: Boolean, onToggle: (Boolean, View) -> Unit): View {
+        val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(dpi(16f), dpi(14f), dpi(12f), dpi(14f)) }
+        val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        col.addView(text(title, 14f, T.IVORY, T.medium))
+        col.addView(text(desc, 11f, T.SUBTLE, T.regular).apply { maxLines = 3; setLineSpacing(0f, 1.4f) }, LinearLayout.LayoutParams(wrap, wrap).apply { topMargin = dpi(6f) })
+        row.addView(col, LinearLayout.LayoutParams(0, wrap, 1f).apply { rightMargin = dpi(12f) })
+        val sw = SwitchView(this).apply { checked = on; contentDescription = title; onToggle = { v -> onToggle(v, this) } }
+        row.addView(sw)
+        row.minimumHeight = dpi(82f)
+        return row
+    }
+
+    private fun actionCard(title: String, icon: Int, onClick: () -> Unit) = LinearLayout(this).apply {
+        orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(dpi(16f), 0, dpi(16f), 0)
+        background = pill(T.GRAPHITE, dp(12f))
+        addView(text(title, 13f, T.IVORY, T.medium), LinearLayout.LayoutParams(0, wrap, 1f))
+        addView(ImageView(context).apply { setImageResource(icon) }, LinearLayout.LayoutParams(dpi(18f), dpi(18f)))
+        setOnClickListener { onClick() }
+    }
+
+    private fun openSettings() {
+        if (settingsView != null) return
+        val page = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(T.CARBON); isClickable = true }
+        val head = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; tag = "settingsHeader"; setPadding(dpi(6f), 0, dpi(16f), 0) }
+        head.addView(ImageView(this).apply {
+            setImageResource(R.drawable.ic_back); scaleType = ImageView.ScaleType.CENTER; contentDescription = "Back to camera"
+            setOnClickListener { closeSettings() }
+        }, LinearLayout.LayoutParams(dpi(44f), dpi(48f)))
+        head.addView(text("Settings", 22f, T.IVORY, T.semibold), LinearLayout.LayoutParams(wrap, wrap).apply { leftMargin = dpi(2f) })
+        page.addView(head, LinearLayout.LayoutParams(match, dpi(48f)))
+        val scroll = ScrollView(this).apply { isVerticalScrollBarEnabled = false; overScrollMode = View.OVER_SCROLL_NEVER }
+        val body = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; tag = "settingsBody" }
+        scroll.addView(body)
+        page.addView(scroll, LinearLayout.LayoutParams(match, 0, 1f))
+
+        section(body, "Photos", first = true).addView(switchRow("Save original copy", "Keep an unfiltered copy when a Look is applied.", saveOriginal) { v, _ -> saveOriginal = v; save() })
+        val cam = section(body, "Camera")
+        cam.addView(switchRow("Remember my settings", "Restore the last Look, guide and exposure value.", remember) { v, _ -> remember = v; save() })
+        cam.addView(View(this).apply { setBackgroundColor(T.alpha(T.CARBON, 0.7f)) }, LinearLayout.LayoutParams(dpi(320f), dpi(1f)))
+        cam.addView(switchRow("Haptic feedback", "Use subtle vibrations when adjusting controls.", Haptics.enabled) { v, sw -> Haptics.enabled = v; save(); if (v) Haptics.confirm(sw) })
+
+        val g = section(body, "Composition guides")
+        val gBox = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dpi(16f), dpi(16f), dpi(16f), dpi(16f)) }
+        val gHead = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        gHead.addView(text("Guide opacity", 14f, T.IVORY, T.medium)); gHead.addView(spacer())
+        val pct = text("${(guideOpacity * 100).roundToInt()}%", 12f, T.AMBER, T.medium); gHead.addView(pct)
+        gBox.addView(gHead, LinearLayout.LayoutParams(match, dpi(20f)))
+        gBox.addView(text("Keep guides visible without obscuring your photo.", 11f, T.SUBTLE, T.regular), LinearLayout.LayoutParams(wrap, dpi(16f)).apply { topMargin = dpi(12f) })
+        gBox.addView(plainSlider(this).apply {
+            value = guideOpacity; contentDescription = "Guide opacity"
+            onChange = { v -> guideOpacity = v; pct.text = "${(v * 100).roundToInt()}%"; overlay.guideOpacity = v }
+            onStop = { save() }
+        }, LinearLayout.LayoutParams(match, dpi(22f)).apply { topMargin = dpi(12f) })
+        g.addView(gBox)
+
+        body.addView(actionCard("Reset camera settings", R.drawable.ic_reset_cam) { confirmReset() }, LinearLayout.LayoutParams(match, dpi(48f)).apply { topMargin = dpi(24f) })
+        body.addView(actionCard("About Crooked Light", R.drawable.ic_chevron) { showAbout() }, LinearLayout.LayoutParams(match, dpi(48f)).apply { topMargin = dpi(10f) })
+
+        root.addView(page, lp(match, match))
+        settingsView = page
+        applySettingsInsets(page)
+    }
+
+    private fun closeSettings() { settingsView?.let { root.removeView(it) }; settingsView = null }
+
+    /** Clears camera preferences (guide, Looks, exposure, toggles). Photos and their saved Look recipes are untouched. */
+    private fun confirmReset() {
+        sheet { box, dlg ->
+            box.addView(label("Reset camera settings?", 17f, cText, T.semibold))
+            box.addView(label("Guides, Looks, exposure and these preferences go back to their defaults. Your photos aren't affected.", 13f, cMuted).apply { setPadding(0, dpi(8f), 0, dpi(16f)) })
+            val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+            row.addView(sheetButton("Cancel", false) { dlg.dismiss() }, LinearLayout.LayoutParams(0, wrap, 1f).apply { rightMargin = dpi(10f) })
+            row.addView(sheetButton("Reset", true) {
+                dlg.dismiss()
+                val keep = setOf("lastUri", "thumbUri", "firstUri")
+                val e = prefs.edit()
+                for (k in prefs.all.keys) if (k !in keep && !k.startsWith("art:") && !k.startsWith("upd")) e.remove(k)
+                e.putBoolean("double", false).commit()
+                camera?.cameraControl?.setExposureCompensationIndex(0)
+                prefs.edit().remove("firstUri").putFloat("ev", 0f).commit()
+                recreate()
+            }, LinearLayout.LayoutParams(0, wrap, 1f))
+            box.addView(row)
+        }
+    }
+
+    private var settingsStatus: TextView? = null
+    private var settingsAction: TextView? = null
+
+    private fun showAbout() {
+        sheet { box, dlg ->
+            box.addView(label("Crooked Light", 17f, cText, T.semibold))
+            box.addView(label("Version ${Updater.installedName(this)} (build ${Updater.installedCode(this)})", 13f, cMuted).apply { setPadding(0, dpi(6f), 0, dpi(14f)) })
+            if (!Updater.enabled) {
+                box.addView(label("Updates come through Google Play.", 12f, cMuted).apply { setPadding(0, 0, 0, dpi(12f)) })
+            } else {
+                settingsStatus = label("", 12.5f, cGold).apply { setPadding(0, 0, 0, dpi(12f)) }
+                box.addView(settingsStatus)
+                settingsAction = sheetButton("Check for updates", false) { onSettingsAction() }
+                box.addView(settingsAction, LinearLayout.LayoutParams(match, wrap))
+                onUpdateStatus(Updater.status)
+            }
+            box.addView(sheetButton("Done", true) { dlg.dismiss() }, LinearLayout.LayoutParams(match, wrap).apply { topMargin = dpi(8f) })
+            dlg.setOnDismissListener { settingsStatus = null; settingsAction = null }
+        }
+    }
+
+    // =========================================================== sheets
+    private var lastTouch = 0L
+    private var offered: Updater.Release? = null      // the release waiting for a quiet moment to be offered
+    private var pendingInstall: java.io.File? = null  // a verified APK waiting on the "install unknown apps" permission
+
+    /** A dark sheet in the app's own style. */
+    private fun sheet(build: (LinearLayout, android.app.Dialog) -> Unit): android.app.Dialog {
+        val dlg = android.app.Dialog(this)
+        val box = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL; setPadding(dpi(20f), dpi(20f), dpi(20f), dpi(16f))
+            background = rounded(T.GRAPHITE, null, 16f)
+        }
+        build(box, dlg)
+        dlg.setContentView(box)
+        dlg.window?.setBackgroundDrawable(android.graphics.drawable.ColorDrawable(Color.TRANSPARENT))
+        dlg.window?.setLayout((resources.displayMetrics.widthPixels * 0.9f).toInt(), ViewGroup.LayoutParams.WRAP_CONTENT)
+        dlg.show()
+        return dlg
+    }
+    private fun sheetButton(text: String, primary: Boolean, onClick: () -> Unit) = label(text, 14f, if (primary) T.CARBON else T.IVORY, T.medium).apply {
+        gravity = Gravity.CENTER; setPadding(dpi(16f), dpi(12f), dpi(16f), dpi(12f))
+        background = if (primary) rounded(T.AMBER, null, 12f) else rounded(T.CARBON, T.BORDER, 12f)
+        setOnClickListener { onClick() }
+    }
+
+
+    // =========================================================== camera
     // =========================================================== camera
     private fun startCamera() {
         val f = ProcessCameraProvider.getInstance(this)
@@ -862,12 +1086,18 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
             gate("The camera could not start: ${e.message}"); return
         }
         gateMsg.visibility = View.GONE
-        sourceTxt.text = if (front) "LIVE · FRONT" else "LIVE · REAR"
         chipsFor = ""
         lensStops = camera?.let { measureLenses(it) }
         camera?.cameraInfo?.zoomState?.observe(this) { z -> onZoom(z) }
         refreshExposure()
-        if (evIndex != 0) camera?.cameraControl?.setExposureCompensationIndex(evIndex)
+        if (evSupported) {
+            // restore the remembered (or current) exposure, snapped to this camera's steps
+            val want = if (evWanted != 0f) evWanted else evIndex * evStep
+            evWanted = 0f
+            evIndex = (want / evStep).roundToInt().coerceIn(evMin, evMax)
+            camera?.cameraControl?.setExposureCompensationIndex(evIndex)
+            evSlider.ev = evIndex * evStep; evValue.text = evText()
+        }
         hintUntil = SystemClock.uptimeMillis() + 4000
         updateHud(); applyLiveArt()
     }
@@ -926,14 +1156,15 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
     private fun buildZoomChips() {
         zoomRow.removeAllViews()
         val stops = zoomStops()
+        zoomRow.visibility = if (stops.size < 2) View.GONE else View.VISIBLE
         if (stops.size < 2) return
-        for (s in stops) {
-            val b = label(zoomLabel(s), 12f, cText, mono).apply {
-                gravity = Gravity.CENTER; setPadding(0, 0, 0, 0); tag = s; maxLines = 1
+        stops.forEachIndexed { i, s ->
+            val b = text(zoomLabel(s), 12f, T.IVORY, T.medium).apply {
+                gravity = Gravity.CENTER; tag = s
                 contentDescription = "Zoom ${zoomLabel(s)}"
                 setOnClickListener { camera?.cameraControl?.setZoomRatio(s) }
             }
-            zoomRow.addView(b, LinearLayout.LayoutParams(dpi(42f), dpi(42f)).apply { leftMargin = dpi(5f); rightMargin = dpi(5f) })
+            zoomRow.addView(b, LinearLayout.LayoutParams(dpi(44f), dpi(27f)).apply { if (i > 0) leftMargin = dpi(8f) })
         }
     }
 
@@ -952,11 +1183,13 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
             val v = zoomRow.getChildAt(i) as TextView; val on = v === active
             val stop = v.tag as Float
             v.text = if (on && abs(stop - zoomRatio) > 0.04f) zoomLabel(zoomRatio) else zoomLabel(stop)
-            v.setTextColor(if (on) cGold else cMuted)
-            v.background = if (on) rounded(withAlpha(cGold, 0.16f), withAlpha(cGold, 0.5f)) else rounded(withAlpha(cElev, 0.9f))
+            v.setTextColor(if (on) T.GRAPHITE else T.IVORY)
+            v.typeface = if (on) T.semibold else T.medium
+            v.background = if (on) pill(T.AMBER, dp(16f)) else null
         }
     }
 
+    // =========================================================== gestures
     // =========================================================== gestures
     override fun onSubjectTap(sx: Float, sy: Float) {
         val fr = overlay.frame
@@ -973,6 +1206,7 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
                 if (front) nx = 1f - nx                                   // the preview is mirrored, the analysis frames aren't
                 tracker.target(nx, ny)
                 aligned = false
+                pickAnchor(sx, sy)
             }
         }
         camera?.let { cam ->
@@ -993,7 +1227,7 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
     override fun onFocusDrag(dy: Float): Boolean {
         if (layer != "ART" || art != ArtMode.TILT_SHIFT || artState.follow || overlay.frame.isEmpty) return false
         artValues[1] = (artValues[1] + dy / overlay.frame.height()).coerceIn(0f, 1f)
-        if (artParam == 1) { artSlider.progress = (artValues[1] * 100).roundToInt(); artValue.text = "${(artValues[1] * 100).roundToInt()}" }
+        if (artSlot == 1) applyArtUi()
         Art.saveState(prefs, art, artState); applyLiveArt(); showMask()
         return true
     }
@@ -1029,65 +1263,27 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
 
     private fun buzz() = Haptics.confirm(overlay)
 
-    // =========================================================== settings + updates
-    private var lastTouch = 0L
-    private var offered: Updater.Release? = null      // the release waiting for a quiet moment to be offered
-    private var pendingInstall: java.io.File? = null  // a verified APK waiting on the "install unknown apps" permission
-    private var settingsStatus: TextView? = null
-    private var settingsAction: TextView? = null
-
-    /** A dark sheet in the app's own style. */
-    private fun sheet(build: (LinearLayout, android.app.Dialog) -> Unit): android.app.Dialog {
-        val dlg = android.app.Dialog(this)
-        val box = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL; setPadding(dpi(22f), dpi(20f), dpi(22f), dpi(16f))
-            background = rounded(cBase, withAlpha(cGold, 0.5f), 18f)
-        }
-        build(box, dlg)
-        dlg.setContentView(box)
-        dlg.window?.setBackgroundDrawable(android.graphics.drawable.ColorDrawable(Color.TRANSPARENT))
-        dlg.window?.setLayout((resources.displayMetrics.widthPixels * 0.88f).toInt(), ViewGroup.LayoutParams.WRAP_CONTENT)
-        dlg.show()
-        return dlg
-    }
-    private fun sheetButton(text: String, primary: Boolean, onClick: () -> Unit) = label(text, 14f, if (primary) cBase else cText, medium).apply {
-        gravity = Gravity.CENTER; setPadding(dpi(16f), dpi(12f), dpi(16f), dpi(12f))
-        background = if (primary) rounded(cGold, null, 12f) else rounded(cElev, cLine, 12f)
-        setOnClickListener { onClick() }
-    }
-
-    private fun showSettings(anchorView: View) {
-        sheet { box, dlg ->
-            box.addView(label("Settings", 17f, cText, Typeface.DEFAULT_BOLD))
-            val hRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(0, dpi(16f), 0, dpi(8f)) }
-            hRow.addView(LinearLayout(this).apply {
-                orientation = LinearLayout.VERTICAL
-                addView(label("Haptic feedback", 14f, cText, medium))
-                addView(label("Slider ticks and the composition buzz", 11.5f, cMuted))
-            }, LinearLayout.LayoutParams(0, wrap, 1f))
-            val sw = android.widget.Switch(this).apply {
-                isChecked = Haptics.enabled
-                thumbTintList = ColorStateList.valueOf(Color.WHITE); trackTintList = ColorStateList.valueOf(cGold)
-                setOnCheckedChangeListener { v, on -> Haptics.enabled = on; save(); if (on) Haptics.confirm(v) }
+    /**
+     * Thirds, Grid and Diagonals have four places a guide-linked focus can sit. Tapping your subject near
+     * one of them picks it (this replaces the old anchor tiles, which the new design doesn't have).
+     */
+    private fun pickAnchor(sx: Float, sy: Float) {
+        val fr = overlay.guideFrame
+        if (fr.isEmpty) return
+        val pts: List<PointF> = when (guide) {
+            Guide.THIRDS, Guide.PHI_GRID -> {
+                val a = if (guide == Guide.THIRDS) 1 / 3f else (1 - 1 / PHI).toFloat(); val b = 1 - a
+                listOf(PointF(a, a), PointF(b, a), PointF(a, b), PointF(b, b))
             }
-            hRow.addView(sw); box.addView(hRow)
-            box.addView(View(this).apply { setBackgroundColor(cLine) }, LinearLayout.LayoutParams(match, 1).apply { topMargin = dpi(8f); bottomMargin = dpi(14f) })
-            box.addView(label("UPDATES", 10f, cMuted, mono, 0.13f))
-            box.addView(label("Version ${Updater.installedName(this)} (build ${Updater.installedCode(this)})", 13f, cText).apply { setPadding(0, dpi(8f), 0, 0) })
-            if (!Updater.enabled) {
-                box.addView(label("Updates come through Google Play.", 12f, cMuted).apply { setPadding(0, dpi(6f), 0, 0) })
-            } else {
-                settingsStatus = label("", 12.5f, cGold).apply { setPadding(0, dpi(6f), 0, dpi(12f)) }
-                box.addView(settingsStatus)
-                settingsAction = sheetButton("Check for updates", false) { onSettingsAction() }
-                box.addView(settingsAction, LinearLayout.LayoutParams(match, wrap))
-                onUpdateStatus(Updater.status)
-            }
-            box.addView(sheetButton("Done", false) { dlg.dismiss() }, LinearLayout.LayoutParams(match, wrap).apply { topMargin = dpi(8f) })
-            dlg.setOnDismissListener { settingsStatus = null; settingsAction = null }
+            Guide.DIAGONALS -> listOf(PointF(0f, 0f), PointF(1f, 0f), PointF(0f, 1f), PointF(1f, 1f))
+            else -> return
         }
+        val nx = (sx - fr.left) / fr.width(); val ny = (sy - fr.top) / fr.height()
+        val best = pts.indices.minByOrNull { val p = pts[it]; (p.x - nx) * (p.x - nx) + (p.y - ny) * (p.y - ny) } ?: return
+        if (best != anchor) { anchor = best; save(); guideMoved() }
     }
 
+    // =========================================================== updates
     private fun onSettingsAction() {
         when (val st = Updater.status) {
             is Updater.Status.Available -> startDownload(st.r)
@@ -1120,14 +1316,14 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
     private fun showUpdateOffer(r: Updater.Release) {
         offered = null
         sheet { box, dlg ->
-            box.addView(label("Update available", 17f, cText, Typeface.DEFAULT_BOLD))
-            box.addView(label("Fibonacci Camera v${r.versionName} is ready to install.", 13f, cMuted).apply { setPadding(0, dpi(6f), 0, dpi(12f)) })
+            box.addView(label("Update available", 17f, cText, T.semibold))
+            box.addView(label("Crooked Light v${r.versionName} is ready to install.", 13f, cMuted).apply { setPadding(0, dpi(6f), 0, dpi(12f)) })
             if (r.notes.isNotEmpty()) {
                 box.addView(label("WHAT'S NEW", 10f, cGold, mono, 0.13f))
                 for (n in r.notes) box.addView(label("·  $n", 13f, cText).apply { setPadding(0, dpi(5f), 0, 0) })
             }
             val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(0, dpi(18f), 0, 0) }
-            row.addView(sheetButton("Not now", false) { Updater.dismiss(prefs, r); updateBtn.visibility = View.GONE; dlg.dismiss() },
+            row.addView(sheetButton("Not now", false) { Updater.dismiss(prefs, r); dlg.dismiss() },
                 LinearLayout.LayoutParams(0, wrap, 1f).apply { rightMargin = dpi(10f) })
             row.addView(sheetButton("Download update", true) { dlg.dismiss(); startDownload(r) }, LinearLayout.LayoutParams(0, wrap, 1.4f))
             box.addView(row)
@@ -1142,7 +1338,7 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
                 when {
                     apk != null -> installOrAsk(apk)
                     err != null -> sheet { box, dlg ->
-                        box.addView(label("Update not installed", 17f, cText, Typeface.DEFAULT_BOLD))
+                        box.addView(label("Update not installed", 17f, cText, T.semibold))
                         box.addView(label(err, 13f, cMuted).apply { setPadding(0, dpi(8f), 0, dpi(16f)) })
                         box.addView(sheetButton("Open the download page instead", false) {
                             dlg.dismiss(); startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(r.url)))
@@ -1156,7 +1352,7 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
 
     private fun confirmCancel() {
         sheet { box, dlg ->
-            box.addView(label("Stop the download?", 17f, cText, Typeface.DEFAULT_BOLD))
+            box.addView(label("Stop the download?", 17f, cText, T.semibold))
             val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(0, dpi(18f), 0, 0) }
             row.addView(sheetButton("Keep going", false) { dlg.dismiss() }, LinearLayout.LayoutParams(0, wrap, 1f).apply { rightMargin = dpi(10f) })
             row.addView(sheetButton("Stop", true) { Updater.cancelDownload(); dlg.dismiss() }, LinearLayout.LayoutParams(0, wrap, 1f))
@@ -1171,8 +1367,8 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
         if (canInstall()) { launchInstall(apk); return }
         pendingInstall = apk
         sheet { box, dlg ->
-            box.addView(label("One permission", 17f, cText, Typeface.DEFAULT_BOLD))
-            box.addView(label("Android requires permission to install updates downloaded directly from Fibonacci Camera. Enable this permission to continue.",
+            box.addView(label("One permission", 17f, cText, T.semibold))
+            box.addView(label("Android requires permission to install updates downloaded directly from Crooked Light. Enable this permission to continue.",
                 13f, cMuted).apply { setPadding(0, dpi(8f), 0, dpi(16f)) })
             box.addView(sheetButton("Open settings", true) {
                 dlg.dismiss()
@@ -1196,15 +1392,6 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
         }
     }
 
-    private fun onUpdateChip() {
-        when (val st = Updater.status) {
-            is Updater.Status.Available -> showUpdateOffer(st.r)
-            is Updater.Status.Downloading -> confirmCancel()
-            is Updater.Status.Ready -> installOrAsk(st.apk)
-            else -> {}
-        }
-    }
-
     private fun onUpdateStatus(st: Updater.Status) {
         val (text, action) = when (st) {
             is Updater.Status.Checking -> "Checking for updates…" to "Checking…"
@@ -1216,13 +1403,6 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
             else -> "" to "Check for updates"
         }
         settingsStatus?.text = text; settingsAction?.text = action
-        // the chip in the top bar: progress while downloading, a way back to an offer you skipped
-        when (st) {
-            is Updater.Status.Downloading -> { updateBtn.visibility = View.VISIBLE; updateBtn.text = if (st.pct >= 0) "UPDATE ${st.pct}%" else "UPDATE…" }
-            is Updater.Status.Ready -> { updateBtn.visibility = View.VISIBLE; updateBtn.text = "INSTALL" }
-            is Updater.Status.Available -> updateBtn.text = "UPDATE"
-            else -> updateBtn.visibility = View.GONE
-        }
     }
 
     /** Screen offset (subject minus goal) → the move that fixes it, in the world's terms. */
@@ -1281,8 +1461,8 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
         overlay.aligned = aligned
         pill.visibility = View.VISIBLE
         pill.text = text
-        pill.setTextColor(if (on) cGold else cText)
-        pill.background = if (on) rounded(0xD93C2E14.toInt(), withAlpha(cGold, 0.85f)) else rounded(withAlpha(cBase, 0.72f), withAlpha(cText, 0.18f))
+        pill.setTextColor(if (on) T.AMBER else T.IVORY)
+        pill.background = pill(T.alpha(T.CARBON, 0.85f), dp(16f), if (on) T.AMBER else null, dpi(1f))
     }
 
     // =========================================================== level
@@ -1301,7 +1481,7 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
         val values = ContentValues().apply {
             put(MediaStore.MediaColumns.DISPLAY_NAME, name)
             put(MediaStore.MediaColumns.MIME_TYPE, "image/jpeg")
-            put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/Fibonacci Camera")
+            put(MediaStore.Images.Media.RELATIVE_PATH, PHOTO_DIR)
         }
         // The art look at the moment of the shot. The original is saved as-is; the look becomes a copy.
         // the frame is the whole photo, so the live mask (frame uv) is already in the photo's own coordinates
@@ -1345,7 +1525,7 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
                 val values = ContentValues().apply {
                     put(MediaStore.MediaColumns.DISPLAY_NAME, "${name}_double" + (if (r != null) "_${r.mode.fileTag}" else ""))
                     put(MediaStore.MediaColumns.MIME_TYPE, "image/jpeg")
-                    put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/Fibonacci Camera")
+                    put(MediaStore.Images.Media.RELATIVE_PATH, PHOTO_DIR)
                     put(MediaStore.MediaColumns.IS_PENDING, 1)
                 }
                 val dest = contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values) ?: error("no destination")
@@ -1374,7 +1554,7 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
                 val values = ContentValues().apply {
                     put(MediaStore.MediaColumns.DISPLAY_NAME, "${name}_${r.mode.fileTag}")
                     put(MediaStore.MediaColumns.MIME_TYPE, "image/jpeg")
-                    put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/Fibonacci Camera")
+                    put(MediaStore.Images.Media.RELATIVE_PATH, PHOTO_DIR)
                     put(MediaStore.MediaColumns.IS_PENDING, 1)
                 }
                 val dest = contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values) ?: error("no destination")
@@ -1384,7 +1564,17 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
                 dest
             }
             runOnUiThread {
-                res.onSuccess { dest -> prefs.edit().putString("thumbUri", dest.toString()).apply(); loadThumb() }
+                res.onSuccess { dest ->
+                    prefs.edit().putString("thumbUri", dest.toString()).apply()
+                    // Settings › Save original copy off: once the styled copy is safely written, the original goes
+                    if (!saveOriginal) runCatching {
+                        if (contentResolver.delete(original, null, null) > 0) {
+                            if (lastUri == original) lastUri = dest
+                            prefs.edit().putString("lastUri", dest.toString()).remove("art:$original").apply()
+                        }
+                    }
+                    loadThumb()
+                }
                     .onFailure { Toast.makeText(this, "Saved the original; the art copy failed: ${it.message}", Toast.LENGTH_LONG).show() }
             }
         }
@@ -1409,6 +1599,8 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
         pickPhoto.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
     }
 
-    // ---- updates: compare our build number with the latest one GitHub built
-
+    companion object {
+        /** Where photos are saved. Kept from before the rename so existing galleries stay together. */
+        const val PHOTO_DIR = "Pictures/Fibonacci Camera"
+    }
 }

@@ -1,5 +1,6 @@
-Five new looks: Kino, Expired, Redscale, Solarised, Instant
-Expired colour drift: warm, magenta, cool, random
-Every look keeps its own settings and starts at a calibrated 50%
-Follow guide: link focus effects to your composition
-Dial-like haptic ticks on every slider
+Now called Crooked Light, with the new camera design
+Look thumbnails, one adjustment at a time, Follow guide pinned beside them
+New controls: Holga grain, Cross process contrast, Instant texture, Tilt shift depth
+Spiral and triangle orientations as picture choices
+Exposure dial from −2 to +2 EV with reset
+Settings: save original copy, remember my settings, haptics, guide opacity

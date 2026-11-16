@@ -20,7 +20,7 @@ enum ArtMode: String, CaseIterable {
         case .HOLGA: return [("Intensity", 0.5), ("Vignette", 0.55), ("Softness", 0.4), ("Leaks", 0.45), ("Depth", 0.3)]
         case .PINHOLE: return [("Intensity", 0.5), ("Softness", 0.4), ("Vignette", 0.5), ("", 0), ("Depth", 0)]
         case .GRAINY_FILM: return [("Intensity", 0.5), ("Grain", 0.5), ("Contrast", 0.55), ("", 0), ("Depth", 0.35)]
-        case .CROSS_PROCESS: return [("Intensity", 0.5), ("Colour", 0.5), ("", 0), ("", 0), ("Depth", 0.35)]
+        case .CROSS_PROCESS: return [("Intensity", 0.5), ("Colour", 0.5), ("Contrast", 0.5), ("", 0), ("Depth", 0.35)]
         case .DREAM_LENS: return [("Intensity", 0.5), ("Glow", 0.5), ("Softness", 0.4), ("", 0), ("Depth", 0.35)]
         case .INFRARED: return [("Intensity", 0.5), ("Contrast", 0.5), ("Halation", 0.3), ("", 0), ("Depth", 0.35)]
         case .CYANOTYPE: return [("Intensity", 0.5), ("Contrast", 0.5), ("Paper", 0.5), ("", 0), ("Depth", 0.35)]
@@ -45,6 +45,8 @@ enum ArtMode: String, CaseIterable {
     var defaultVariation: Int { (self == .HOLGA || self == .EXPIRED) ? 1 : 0 }
     func isRandom(_ i: Int) -> Bool { i < variations.count && variations[i] == "RANDOM" }
     var about: String { self == .INFRARED ? "Infrared-inspired: a simulation from visible light, not real infrared." : "" }
+    /** A fourth look parameter (Holga grain, Instant texture), shared with Android; iOS keeps it at its calibrated default. */
+    var p4Default: Float { self == .HOLGA ? 0.3 : (self == .INSTANT ? 0.4 : 0) }
     var defaults: [Float] { (0..<6).map { i in i == 5 ? Float(defaultVariation) : (i < sliders.count ? sliders[i].1 : 0) } }
     /** Sliders to show; unnamed padding is skipped but indexes stay put. */
     var shown: [Int] { sliders.indices.filter { !sliders[$0].0.isEmpty } }
