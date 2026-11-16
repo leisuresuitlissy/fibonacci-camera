@@ -9,6 +9,7 @@ adb shell wm density 450
 adb shell cmd overlay enable com.android.internal.systemui.navbar.gestural || true
 adb shell settings put global window_animation_scale 0
 adb shell settings put global transition_animation_scale 0
+adb shell settings put global hide_error_dialogs 1 || true
 adb install -r "$APK"
 adb shell pm grant com.lissy.fibcam android.permission.CAMERA
 sleep 3
@@ -18,6 +19,8 @@ shoot() {
   if [ -n "$extra" ]; then adb shell am start -W -n com.lissy.fibcam/.MainActivity -e fibShot "$extra" > /dev/null
   else adb shell am start -W -n com.lissy.fibcam/.MainActivity > /dev/null; fi
   sleep 6
+  adb shell am broadcast -a android.intent.action.CLOSE_SYSTEM_DIALOGS > /dev/null 2>&1 || true
+  sleep 1
   adb exec-out screencap -p > "$OUT/$name.png"
   echo "shot $name"
 }

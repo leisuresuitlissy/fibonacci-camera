@@ -187,8 +187,10 @@ half4 main(float2 p) {
     }
     float gk = p4 < 0.3 ? p4 / 0.3 : 1.0 + (p4 - 0.3) / 0.7 * 1.5;
     c += filmGrain(p, l) * (0.012 + 0.06 * a) * gk;
-    float3 fx = clamp(c, 0.0, 1.0) * inside;
-    return half4(float4(mix(o.rgb, fx, max(a, 1.0 - inside)), o.a));
+    // Holga saves a square. Outside it the viewfinder keeps the picture, a little dimmer, rather than going
+    // black, so the controls over the top and bottom of the viewfinder still sit on the picture.
+    float3 fx = clamp(c, 0.0, 1.0) * mix(0.72, 1.0, inside);
+    return half4(float4(mix(o.rgb, fx, a), o.a));
 }
 """,
         // A lensless camera: soft all over, softer and darker towards the edges, slightly muted, fine grain.
