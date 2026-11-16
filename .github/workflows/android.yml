@@ -127,7 +127,7 @@ jobs:
           target: google_apis
           arch: x86_64
           disable-animations: true
-          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back emulated
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back emulated -skin 1080x2410
           script: bash .github/scripts/android-shots.sh fibonacci-camera.apk shots
       - name: Bundle
         run: cd shots && zip -q ../android-shots.zip *.png crash-log.txt && cd .. && cp fibonacci-camera.apk crooked-light-check.apk

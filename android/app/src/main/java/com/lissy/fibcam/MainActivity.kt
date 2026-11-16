@@ -483,6 +483,8 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
         selector.addView(lookScroller, lp(match, match))
         root.addView(selector, lp(0, 0))
 
+        root.addView(buildShutterRow(), lp(0, 0))
+
         // contextual area: composition alternatives, or the Look's controls
         ctxArea = FrameLayout(this)
         composeSub = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
@@ -509,7 +511,6 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
         exposureLayer = buildExposure()
         root.addView(exposureLayer, lp(0, 0))
 
-        root.addView(buildShutterRow(), lp(0, 0))
         return root
     }
 

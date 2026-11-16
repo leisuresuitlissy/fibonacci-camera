@@ -87,13 +87,14 @@ class FadeScroller(ctx: Context, private val fadeW: Float, private val fadeColor
 
     override fun onScrollChanged(l: Int, t: Int, oldl: Int, oldt: Int) { super.onScrollChanged(l, t, oldl, oldt); invalidate() }
 
-    /** Brings [v] fully into view (clear of the fades) without jumping if it already is. */
-    fun reveal(v: View, smooth: Boolean = true) = post {
+    /** Brings [v] fully into view (clear of the fades) without jumping if it already is. Waits for layout. */
+    fun reveal(v: View, smooth: Boolean = true, tries: Int = 8) {
+        if (width == 0 || v.width == 0) { if (tries > 0) post { reveal(v, false, tries - 1) }; return }
         val pad = fadeW.roundToInt()
         val target = when {
             v.left - pad < scrollX -> v.left - pad
             v.right + pad > scrollX + width -> v.right + pad - width
-            else -> return@post
+            else -> return
         }
         if (smooth) smoothScrollTo(target.coerceAtLeast(0), 0) else scrollTo(target.coerceAtLeast(0), 0)
     }
