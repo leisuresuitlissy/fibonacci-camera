@@ -111,7 +111,10 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
     private lateinit var composeSub: LinearLayout
     private lateinit var followBtn: FollowToggle
     private lateinit var lookControls: LookControls
-    private lateinit var exposureLayer: FrameLayout
+    /** Exposure lives on the viewfinder: a chip at the end of the zoom pill opens [evBar] in its place. */
+    private lateinit var evBar: LinearLayout
+    private lateinit var evChip: TextView
+    private lateinit var evDivider: View
     private lateinit var evValue: TextView
     private lateinit var evSlider: EvSlider
     private lateinit var zoomRow: LinearLayout
@@ -176,6 +179,7 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
     private var guideOpacity = 0.75f
     private var shot: String? = null
     private var renderShot: String? = null
+    private var evAtStart = false
 
     private var provider: ProcessCameraProvider? = null
     private var camera: Camera? = null
@@ -229,7 +233,7 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
         val restoring = savedInstanceState != null
         val keep = restoring || remember
         layer = if (restoring) prefs.getString("layer", "COMPOSE") ?: "COMPOSE" else "COMPOSE"
-        if (layer !in listOf("COMPOSE", "ART", "EXPOSURE")) layer = "COMPOSE"
+        if (layer !in listOf("COMPOSE", "ART")) layer = "COMPOSE"     // Exposure is no longer a tab
         guide = if (keep) runCatching { Guide.valueOf(prefs.getString("guide", Guide.SPIRAL.name)!!) }.getOrDefault(Guide.SPIRAL) else Guide.SPIRAL
         quadrant = if (keep) prefs.getInt("quadrant", 0) else 0
         triFlip = if (keep) prefs.getBoolean("triFlip", false) else false
@@ -265,6 +269,7 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
             override fun handleOnBackPressed() {
                 when {
                     settingsView != null -> closeSettings()
+                    evBar.visibility == View.VISIBLE -> closeEv()
                     layer == "ART" && artParam != 0 -> { artParam = 0; applyArtUi() }
                     layer != "COMPOSE" -> { layer = "COMPOSE"; save(); applyLayer() }
                     else -> { isEnabled = false; onBackPressedDispatcher.onBackPressed(); isEnabled = true }
@@ -273,6 +278,7 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
         })
         if (shot == "settings") root.post { openSettings() }
         renderShot?.let { r -> root.post { showRenderTest(r) } }
+        if (evAtStart) root.postDelayed({ openEv() }, 2500)
         Updater.listener = { st -> runOnUiThread { onUpdateStatus(st) } }
         analysisExecutor.execute { Updater.cleanUp(this) }     // the first check happens in onResume
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) startCamera()
@@ -299,7 +305,7 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
                 p.getOrNull(7)?.toIntOrNull()?.let { anchor = it }
                 // "setN": put the active control at N% (for the dial screenshots)
                 p.getOrNull(8)?.removePrefix("set")?.toIntOrNull()?.let { n -> art.controls.getOrNull(artParam)?.slot?.takeIf { it >= 0 }?.let { artValues[it] = n / 100f } } }
-            "exposure" -> layer = "EXPOSURE"
+            "exposure" -> evAtStart = true
             "render" -> renderShot = s
             "double" -> { double = true; coach = true; flashMode = ImageCapture.FLASH_MODE_ON }
         }
@@ -472,7 +478,7 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
             orientation = LinearLayout.HORIZONTAL; setPadding(dpi(2f), dpi(2f), dpi(2f), dpi(2f))
             background = pill(T.GRAPHITE, dp(16f))
         }
-        for ((key, name) in listOf("COMPOSE" to "Compose", "ART" to "Look", "EXPOSURE" to "Exposure")) {
+        for ((key, name) in listOf("COMPOSE" to "Compose", "ART" to "Look")) {
             tabRow.addView(text(name, 13f, T.IVORY, T.medium).apply {
                 gravity = Gravity.CENTER; tag = key
                 setOnClickListener { if (layer != key) { layer = key; save(); applyLayer() } }
@@ -553,8 +559,8 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
         root.addView(ctxArea, lp(0, 0))
 
         // exposure: replaces the selector row and the contextual area
-        exposureLayer = buildExposure()
-        root.addView(exposureLayer, lp(0, 0))
+        evBar = buildEvBar()
+        root.addView(evBar, lp(0, 0))
 
         return root
     }
@@ -623,7 +629,7 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
         val ctxH = max(0, rowTop + dpi(12f) - ctxTop)
         at(ctxArea, dpi(16f), ctxTop, w - dpi(32f), ctxH)
         lookControls.available = ctxH
-        at(exposureLayer, dpi(16f), vfBottom + dpi(53f), w - dpi(32f), dpi(124f))
+        at(evBar, dpi(16f), vfBottom - dpi(41f), w - dpi(32f), dpi(31f))
         at(shutterRow, 0, rowTop, w, h - rowTop)
         // the shutter row: last shot, import, shutter, flip, settings (Figma x 16 / 86 / 156 / 254 / 324 on 384)
         val cx = w / 2
@@ -662,7 +668,7 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
             t.typeface = if (on) T.semibold else T.medium
             t.background = if (on) pill(T.AMBER, dp(24f)) else null
         }
-        val c = layer == "COMPOSE"; val a = layer == "ART"; val e = layer == "EXPOSURE"
+        val c = layer == "COMPOSE"; val a = layer == "ART"; val e = false
         composeScroller.visibility = if (c) View.VISIBLE else View.GONE
         lookScroller.visibility = if (a) View.VISIBLE else View.GONE
         selector.visibility = if (e) View.GONE else View.VISIBLE
@@ -670,7 +676,6 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
         followBtn.visibility = if (c) View.VISIBLE else View.GONE
         lookControls.visibility = if (a) View.VISIBLE else View.GONE
         ctxArea.visibility = if (e) View.GONE else View.VISIBLE
-        exposureLayer.visibility = if (e) View.VISIBLE else View.GONE
         if (c) composeTiles[guide]?.let { composeScroller.reveal(it, smooth = false) }
         if (a) lookTiles[art]?.let { lookScroller.reveal(it, smooth = false) }
     }
@@ -925,44 +930,73 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
     private fun liveFor(m: ArtMode): RuntimeShader? = if (liveMode == m) liveShader else null
 
     // ---- exposure
-    private fun buildExposure(): FrameLayout {
-        val box = FrameLayout(this)
-        box.addView(text("Exposure compensation", 11f, T.IVORY, T.medium, caps = true).apply { gravity = Gravity.CENTER_VERTICAL },
-            lp(wrap, dpi(32f)))
-        val reset = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER
-            background = pill(T.CARBON, dp(13f), T.IVORY, dpi(1f))
-            contentDescription = "Reset exposure to 0"
-            addView(ImageView(context).apply { setImageResource(R.drawable.ic_reset_ev) }, LinearLayout.LayoutParams(dpi(12f), dpi(12f)))
-            addView(text("Reset", 11f, T.IVORY, T.medium, caps = true), LinearLayout.LayoutParams(wrap, wrap).apply { leftMargin = dpi(5f) })
-            setOnClickListener { setEv(0); Haptics.neutral(this) }
+    /**
+     * The exposure dial over the bottom of the viewfinder, in the zoom pill's place: −2 … +2 EV with the
+     * whole stops marked, the value (tap it, or double-tap the dial, for 0) and a close button. It closes
+     * itself a few seconds after you stop adjusting.
+     */
+    private fun buildEvBar(): LinearLayout {
+        val bar = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
+            setPadding(dpi(12f), 0, dpi(4f), 0)
+            background = pill(T.alpha(T.GRAPHITE, 0.92f), dp(16f)); visibility = View.GONE
+            isClickable = true
         }
-        box.addView(reset, lp(dpi(76f), dpi(26f), Gravity.END).apply { topMargin = dpi(3f) })
-        evValue = text("0.0 EV", 18f, T.AMBER, T.medium).apply { gravity = Gravity.CENTER }
-        box.addView(evValue, lp(match, dpi(24f)).apply { topMargin = dpi(39f) })
-        evSlider = EvSlider(this).apply { onChange = { ev -> onEvSlider(ev) } }
-        box.addView(evSlider, lp(match, dpi(28f)).apply { topMargin = dpi(73f) })
-        // −2 … +2 under the whole-stop ticks
-        val marks = object : FrameLayout(this) {
-            override fun onLayout(changed: Boolean, l: Int, t: Int, r: Int, b: Int) {
-                val w = (r - l - dpi(1f)).toFloat()
-                for (i in 0 until childCount) {
-                    val c = getChildAt(i); val x = w * i / 4f + dp(0.5f)
-                    val left = (x - c.measuredWidth / 2f).roundToInt().coerceIn(0, r - l - c.measuredWidth)
-                    c.layout(left, 0, left + c.measuredWidth, c.measuredHeight)
-                }
-            }
+        bar.addView(text("−2", 11f, T.IVORY, T.medium))
+        evSlider = EvSlider(this).apply {
+            contentDescription = "Exposure compensation"
+            onChange = { ev -> onEvSlider(ev); scheduleEvClose() }
+            onDoubleTap = { setEv(0); Haptics.neutral(this); scheduleEvClose() }
         }
-        for (s in listOf("−2", "−1", "0", "+1", "+2")) marks.addView(text(s, 11f, if (s == "0") T.AMBER else T.IVORY, if (s == "0") T.semibold else T.medium), lp(wrap, wrap))
-        box.addView(marks, lp(match, dpi(14f)).apply { topMargin = dpi(105f) })
-        return box
+        bar.addView(evSlider, LinearLayout.LayoutParams(0, dpi(28f), 1f).apply { leftMargin = dpi(8f); rightMargin = dpi(8f) })
+        bar.addView(text("+2", 11f, T.IVORY, T.medium))
+        evValue = text("0.0", 12f, T.AMBER, T.medium).apply {
+            gravity = Gravity.CENTER; minWidth = dpi(34f); contentDescription = "Reset exposure to 0"
+            setOnClickListener { setEv(0); Haptics.neutral(this); scheduleEvClose() }
+        }
+        bar.addView(evValue, LinearLayout.LayoutParams(wrap, match).apply { leftMargin = dpi(6f) })
+        bar.addView(ImageView(this).apply {
+            setImageResource(R.drawable.ic_close); scaleType = ImageView.ScaleType.FIT_CENTER; contentDescription = "Close exposure"
+            setPadding(dpi(6f), dpi(6f), dpi(6f), dpi(6f)); setOnClickListener { closeEv() }
+        }, LinearLayout.LayoutParams(dpi(28f), dpi(28f)))
+        return bar
     }
+
+    private val evCloser = Runnable { closeEv() }
+    private fun scheduleEvClose() { if (shot != null) return; root.removeCallbacks(evCloser); root.postDelayed(evCloser, 4000) }
+
+    private fun openEv() {
+        if (!evSupported) return
+        zoomRow.visibility = View.INVISIBLE; evBar.visibility = View.VISIBLE
+        scheduleEvClose()
+    }
+
+    private fun closeEv() {
+        root.removeCallbacks(evCloser)
+        evBar.visibility = View.GONE
+        zoomRow.visibility = if (zoomRow.childCount > 0) View.VISIBLE else View.GONE
+    }
+
+    /** The chip reads "EV" at 0, and the value in Amber once you've changed it, so a leftover offset is never hidden. */
+    private fun syncEvChip() {
+        if (!::evChip.isInitialized) return
+        val show = evSupported && camera != null
+        evChip.visibility = if (show) View.VISIBLE else View.GONE
+        evDivider.visibility = if (show && zoomRow.childCount > 2) View.VISIBLE else View.GONE
+        val zero = evIndex == 0
+        evChip.text = if (zero) "EV" else evShort()
+        evChip.setTextColor(if (zero) T.IVORY else T.AMBER)
+        evChip.contentDescription = "Exposure ${evText()}"
+        if (zoomRow.visibility == View.GONE && show && evBar.visibility != View.VISIBLE) zoomRow.visibility = View.VISIBLE
+    }
+
+    private fun evShort() = String.format(Locale.US, "%+.1f", evIndex * evStep).replace("+0.0", "0.0").replace("-", "−")
 
     private fun evText() = String.format(Locale.US, "%+.1f EV", evIndex * evStep).replace("+0.0", "0.0").replace("-", "−")
 
     private fun refreshExposure() {
         val st = camera?.cameraInfo?.exposureState ?: return
-        if (!st.isExposureCompensationSupported) { evSupported = false; evValue.text = "Not adjustable on this camera"; evSlider.isEnabled = false; evSlider.alpha = 0.4f; return }
+        if (!st.isExposureCompensationSupported) { evSupported = false; closeEv(); syncEvChip(); return }
         evSupported = true; evSlider.isEnabled = true; evSlider.alpha = 1f
         evStep = st.exposureCompensationStep.toFloat()
         val r = st.exposureCompensationRange
@@ -970,7 +1004,8 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
         evMin = max(r.lower, (-2f / evStep).roundToInt()); evMax = min(r.upper, (2f / evStep).roundToInt())
         evIndex = st.exposureCompensationIndex.coerceIn(evMin, evMax)
         evSlider.ev = evIndex * evStep
-        evValue.text = evText()
+        evValue.text = evShort()
+        syncEvChip()
     }
 
     /** The slider reports EV; it snaps to the camera's own step and limits. */
@@ -982,7 +1017,8 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
         evIndex = index.coerceIn(evMin, evMax)
         cam.cameraControl.setExposureCompensationIndex(evIndex)
         evSlider.ev = evIndex * evStep
-        evValue.text = evText()
+        evValue.text = evShort()
+        syncEvChip()
         save()
     }
 
@@ -1182,7 +1218,7 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
             evWanted = 0f
             evIndex = (want / evStep).roundToInt().coerceIn(evMin, evMax)
             camera?.cameraControl?.setExposureCompensationIndex(evIndex)
-            evSlider.ev = evIndex * evStep; evValue.text = evText()
+            evSlider.ev = evIndex * evStep; evValue.text = evShort(); syncEvChip()
         }
         hintUntil = SystemClock.uptimeMillis() + 4000
         updateHud(); applyLiveArt()
@@ -1242,9 +1278,7 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
 
     private fun buildZoomChips() {
         zoomRow.removeAllViews()
-        val stops = zoomStops()
-        zoomRow.visibility = if (stops.size < 2) View.GONE else View.VISIBLE
-        if (stops.size < 2) return
+        val stops = zoomStops().let { if (it.size < 2) emptyList() else it }
         stops.forEachIndexed { i, s ->
             val b = text(zoomLabel(s), 12f, T.IVORY, T.medium).apply {
                 gravity = Gravity.CENTER; tag = s
@@ -1253,6 +1287,17 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
             }
             zoomRow.addView(b, LinearLayout.LayoutParams(dpi(44f), dpi(27f)).apply { if (i > 0) leftMargin = dpi(8f) })
         }
+        // exposure: a divider and a chip at the end of the pill
+        evDivider = View(this).apply { setBackgroundColor(T.BORDER) }
+        zoomRow.addView(evDivider, LinearLayout.LayoutParams(dpi(1f), dpi(17f)).apply { leftMargin = dpi(6f) })
+        evChip = text("EV", 12f, T.IVORY, T.medium).apply {
+            gravity = Gravity.CENTER; minWidth = dpi(38f); setPadding(dpi(6f), 0, dpi(4f), 0)
+            setOnClickListener { openEv() }
+        }
+        zoomRow.addView(evChip, LinearLayout.LayoutParams(wrap, dpi(27f)))
+        if (stops.isEmpty()) evDivider.visibility = View.GONE
+        if (evBar.visibility != View.VISIBLE) zoomRow.visibility = View.VISIBLE
+        syncEvChip()
     }
 
     /**
@@ -1261,13 +1306,11 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
      */
     private fun syncZoomChips() {
         var active: TextView? = null
-        for (i in 0 until zoomRow.childCount) {
-            val v = zoomRow.getChildAt(i) as TextView
-            if ((v.tag as Float) <= zoomRatio + 0.02f) active = v
-        }
-        if (active == null && zoomRow.childCount > 0) active = zoomRow.getChildAt(0) as TextView
-        for (i in 0 until zoomRow.childCount) {
-            val v = zoomRow.getChildAt(i) as TextView; val on = v === active
+        val stops = (0 until zoomRow.childCount).map { zoomRow.getChildAt(it) }.filter { it.tag is Float }.map { it as TextView }
+        for (v in stops) if ((v.tag as Float) <= zoomRatio + 0.02f) active = v
+        if (active == null) active = stops.firstOrNull()
+        for (v in stops) {
+            val on = v === active
             val stop = v.tag as Float
             v.text = if (on && abs(stop - zoomRatio) > 0.04f) zoomLabel(zoomRatio) else zoomLabel(stop)
             v.setTextColor(if (on) T.GRAPHITE else T.IVORY)
@@ -1357,6 +1400,8 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
     override fun onFocusDragEnd() { overlay.fadeMask() }
 
     override fun onPinch(factor: Float) {
+        // Tilt Shift in the Look tab: a second finger while you move the band must not zoom. Zoom stays on the pill.
+        if (layer == "ART" && art == ArtMode.TILT_SHIFT) return
         val cam = camera ?: return
         cam.cameraControl.setZoomRatio((zoomRatio * factor).coerceIn(zoomMin, zoomMax))
     }

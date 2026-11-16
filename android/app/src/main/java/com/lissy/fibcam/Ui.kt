@@ -246,9 +246,13 @@ class EvSlider(ctx: Context) : View(ctx) {
     var ev = 0f
         set(v) { field = v.coerceIn(-2f, 2f); invalidate() }
     var onChange: ((Float) -> Unit)? = null
+    /** Double-tap anywhere on the dial (back to 0). */
+    var onDoubleTap: (() -> Unit)? = null
     private val d = ctx.dp(1f)
     private val p = Paint(Paint.ANTI_ALIAS_FLAG)
     private val det = Detents(0.5f)
+    private var lastUp = 0L
+    private var swallow = false
 
     override fun onDraw(c: Canvas) {
         val w = width.toFloat() - d; val ty = 12 * d
@@ -269,8 +273,13 @@ class EvSlider(ctx: Context) : View(ctx) {
         if (!isEnabled) return false
         val f = (e.x / width).coerceIn(0f, 1f)
         when (e.actionMasked) {
-            MotionEvent.ACTION_DOWN -> { parent.requestDisallowInterceptTouchEvent(true); det.begin((ev + 2f) / 4f); move(f) }
-            MotionEvent.ACTION_MOVE, MotionEvent.ACTION_UP -> move(f)
+            MotionEvent.ACTION_DOWN -> {
+                parent.requestDisallowInterceptTouchEvent(true)
+                if (onDoubleTap != null && e.eventTime - lastUp < 300) { swallow = true; onDoubleTap?.invoke(); return true }
+                swallow = false; det.begin((ev + 2f) / 4f); move(f)
+            }
+            MotionEvent.ACTION_MOVE -> if (!swallow) move(f)
+            MotionEvent.ACTION_UP -> { if (!swallow) move(f); lastUp = e.eventTime; swallow = false }
         }
         return true
     }
