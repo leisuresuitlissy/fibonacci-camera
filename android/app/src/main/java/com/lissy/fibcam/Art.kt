@@ -50,6 +50,8 @@ enum class ArtMode(
     val defaultVariation: Int = 0,
     /** Defaults for values[6] and values[7]. */
     val extra: Pair<Float, Float> = 0f to 0f,
+    /** Sliders that don't start at 50% (slot to starting position). */
+    val start: Map<Int, Float> = emptyMap(),
 ) {
     OFF("OFF", emptyList()),
     TILT_SHIFT("TILT SHIFT", listOf("Intensity" to 0.5f, "Focus" to 0.5f, "Width" to 0.3f, "Angle" to 0.5f, "Feather" to 0.5f),
@@ -59,8 +61,9 @@ enum class ArtMode(
         variations = listOf("OFF", "WARM", "COOL", "NEUTRAL", "MIXED", "RANDOM"), variationLabel = "LEAK", defaultVariation = 1, extra = 0.3f to 0f),
     PINHOLE("PINHOLE", listOf("Intensity" to 0.5f, "Softness" to 0.3f, "Vignette" to 0.5f, "" to 0f, "Depth" to DEPTH_50),
         listOf(INTENSITY, c("Softness", 1), c("Vignette", 2), DEPTH)),
-    GRAINY_FILM("GRAINY FILM", listOf("Intensity" to 0.5f, "Grain" to 0.5f, "Contrast" to 0.55f, "" to 0f, "Depth" to DEPTH_50),
-        listOf(INTENSITY, c("Grain", 1), c("Contrast", 2), DEPTH)),
+    // Black and white by default: Saturation starts at 0 and brings colour back as you raise it.
+    GRAINY_FILM("GRAINY FILM", listOf("Intensity" to 0.5f, "Grain" to 0.5f, "Contrast" to 0.55f, "Saturation" to 0.5f, "Depth" to DEPTH_50),
+        listOf(INTENSITY, c("Grain", 1), c("Contrast", 2), c("Saturation", 3), DEPTH), start = mapOf(3 to 0f)),
     CROSS_PROCESS("CROSS PROCESS", listOf("Intensity" to 0.5f, "Colour" to 0.5f, "Contrast" to 0.5f, "" to 0f, "Depth" to DEPTH_50),
         listOf(INTENSITY, c("Colour", 1), c("Contrast", 2), DEPTH)),
     DREAM_LENS("DREAM LENS", listOf("Intensity" to 0.5f, "Glow" to 0.5f, "Softness" to 0.3f, "" to 0f, "Depth" to DEPTH_50),
@@ -88,7 +91,7 @@ enum class ArtMode(
         listOf(INTENSITY, c("Warmth", 1), c("Fade", 2), c("Texture", 6), DEPTH), extra = 0.4f to 0f);
 
     /** Every slider starts at 50%; [calib] says what 50% looks like. */
-    val defaults: FloatArray get() = FloatArray(Art.SLOTS) { i -> if (i == 5) defaultVariation.toFloat() else 0.5f }
+    val defaults: FloatArray get() = FloatArray(Art.SLOTS) { i -> if (i == 5) defaultVariation.toFloat() else start[i] ?: 0.5f }
     /**
      * The calibrated value each slot renders at 50% (the numbers in [sliders] and [extra]). Values below
      * 50% scale down to 0, above it up to 1, so the slider still covers the whole range.

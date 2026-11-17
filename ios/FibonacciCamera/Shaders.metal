@@ -258,8 +258,14 @@ static float4 fx_GRAINY_FILM(texture2d<float> T, constant U& uu, float2 p) {
     l = (l - 0.5) * (1.0 + (0.3 + p2 * 1.1) * a) + 0.5;
     l = smoothstep(-0.06, 1.04, l);
     l += filmGrain(p, l) * (0.04 + p1 * 0.24) * a;
-    float3 mono = float3(clamp(l, 0.0, 1.0));
-    return float4(float4(mix(o.rgb, mono, pow(a, 0.7)), o.a));
+    l = clamp(l, 0.0, 1.0);
+    float3 mono = float3(l);
+    // Saturation (p3): 0 is black and white; higher brings the scene's own colour back under the same
+    // contrast curve and grain, up to a little richer than the original at 100%.
+    float3 col = clamp(o.rgb * (l / max(luma(o.rgb), 0.02)), 0.0, 1.0);
+    col = satur(col, 0.6 + 0.6 * p3);
+    float3 film = mix(mono, col, smoothstep(0.0, 1.0, p3));
+    return float4(float4(mix(o.rgb, film, pow(a, 0.7)), o.a));
 }
 
 fragment float4 art_GRAINY_FILM(VOut in [[stage_in]], texture2d<float> T [[texture(0)]], constant U& uu [[buffer(0)]]) {
