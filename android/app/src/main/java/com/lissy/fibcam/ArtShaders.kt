@@ -43,8 +43,6 @@ float4 vignette(float2 p, float4 c) {
     float2 d = (p - org) / res - 0.5;
     float e = length(d * 2.0) * 0.7071;
     float k = vgn * min(1.0, amt * 2.0) * 0.95 * pow(smoothstep(0.18, 1.0, e), 1.3);
-    // gentler where the picture is already dark, so shadows keep their detail instead of going black
-    k *= 0.55 + 0.45 * smoothstep(0.0, 0.4, luma(c.rgb));
     return float4(c.rgb * (1.0 - k), c.a);
 }
 float3 contrast(float3 c, float k) { return clamp((c - 0.5) * k + 0.5, 0.0, 1.0); }
