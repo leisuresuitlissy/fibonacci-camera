@@ -31,7 +31,7 @@ head = """// GENERATED from android/.../ArtShaders.kt by tools/gen_metal.py — 
 #include <metal_stdlib>
 using namespace metal;
 
-struct U { float2 org_; float2 res_; float amt_; float p1_; float p2_; float p3_; float seed_; float2 vpo_; float2 vps_; float4 msk_; float4 msz_; float lks_; float p4_; };
+struct U { float2 org_; float2 res_; float amt_; float p1_; float p2_; float p3_; float seed_; float2 vpo_; float2 vps_; float4 msk_; float4 msz_; float lks_; float p4_; float vig_; };
 struct VOut { float4 pos [[position]]; float2 uv; };
 constexpr sampler smp(coord::normalized, address::clamp_to_edge, filter::linear);
 
@@ -42,6 +42,7 @@ constexpr sampler smp(coord::normalized, address::clamp_to_edge, filter::linear)
 #define p2 uu.p2_
 #define p3 uu.p3_
 #define p4 uu.p4_
+#define vig uu.vig_
 #define seed uu.seed_
 #define msk uu.msk_
 #define msz uu.msz_

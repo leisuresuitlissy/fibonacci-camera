@@ -27,6 +27,7 @@ uniform float p1;
 uniform float p2;
 uniform float p3;
 uniform float p4;
+uniform float vig;
 uniform float seed;
 uniform float4 msk;
 uniform float3 msz;
@@ -35,6 +36,15 @@ uniform float lks;
 float luma(float3 c) { return dot(c, float3(0.299, 0.587, 0.114)); }
 float hash(float2 p) { return fract(sin(dot(p, float2(12.9898, 78.233)) + seed * 17.0) * 43758.5453); }
 float3 satur(float3 c, float s) { return mix(float3(luma(c)), c, s); }
+// Vignette, shared by every Look: 0 = none; darkens smoothly from the middle to the frame's corners,
+// up to nearly black at 100%. It follows Intensity (none at 0, full from 50% up).
+half4 vignette(float2 p, half4 c) {
+    if (vig <= 0.0001) return c;
+    float2 d = (p - org) / res - 0.5;
+    float e = length(d * 2.0) * 0.7071;
+    float k = vig * min(1.0, amt * 2.0) * 0.95 * pow(smoothstep(0.18, 1.0, e), 1.3);
+    return half4(float4(float3(c.rgb) * (1.0 - k), c.a));
+}
 float3 contrast(float3 c, float k) { return clamp((c - 0.5) * k + 0.5, 0.0, 1.0); }
 float3 scurve(float3 c, float k) { float3 x = clamp(c, 0.0, 1.0); return clamp(mix(x, x * x * (3.0 - 2.0 * x), k), 0.0, 1.0); }
 float3 screen(float3 a, float3 b) { return 1.0 - (1.0 - a) * (1.0 - clamp(b, 0.0, 1.0)); }
@@ -134,7 +144,7 @@ half4 main(float2 p) {
     float r = pow(soft, 1.35) * s * 0.05 * msz.z;
     float3 base = r < 0.6 ? o.rgb : blurWide(p, r);
     float3 fx = satur(scurve(base, 0.35), 1.32);
-    return half4(float4(mix(o.rgb, fx, amt), o.a));
+    return vignette(p, half4(float4(mix(o.rgb, fx, amt), o.a)));
 }
 """,
         // A plastic lens on a square camera: soft, uneven edges, colour fringing, a vignette that isn't
@@ -170,11 +180,11 @@ half4 main(float2 p) {
     float ca = s * 0.005 * edge * edge * a;
     c.r = mix(c.r, px(p + cd * ca).r, 0.6);
     c.b = mix(c.b, px(p - cd * ca).b, 0.6);
-    c = satur(scurve(c, 0.5 * a), 1.0 + 0.22 * a);
+    // Saturation (p4): 50% sits just under the original, so the contrast curve doesn't push reds over;
+    // 0 is close to muted, 100% richer than the original.
+    c = satur(scurve(c, 0.5 * a), 1.0 + (0.45 + p4 - 1.0) * a);
     float l = luma(c);
-    c += (float3(-0.025, 0.02, 0.045) * (1.0 - l) + float3(0.05, 0.02, -0.04) * l) * a;
-    // Vignette: from the control alone (0 = none), feathered from the middle out to the corners.
-    c *= 1.0 - p1 * pow(smoothstep(0.25, 1.1, edge), 1.4);
+    c += (float3(-0.025, 0.02, 0.045) * (1.0 - l) + float3(0.035, 0.018, -0.03) * l) * a;
     if (lks > 0.5 && p3 > 0.001) {
         float side = floor(hash(float2(seed, 3.0)) * 4.0);
         float2 q = side < 1.0 ? sq : (side < 2.0 ? float2(sq.y, 1.0 - sq.x) : (side < 3.0 ? float2(1.0 - sq.x, 1.0 - sq.y) : float2(1.0 - sq.y, sq.x)));
@@ -190,12 +200,10 @@ half4 main(float2 p) {
         float3 lc = leakColour(lks, along, d, pick) * body + leakColour(lks, 1.0 - along, 0.9, pick) * corner * 0.6;
         c = screen(c, lc * p3 * (0.55 + 0.45 * a));
     }
-    float gk = p4 < 0.3 ? p4 / 0.3 : 1.0 + (p4 - 0.3) / 0.7 * 1.5;
-    c += filmGrain(p, l) * (0.012 + 0.06 * a) * gk;
     // Holga saves a square. Outside it the viewfinder keeps the picture, a little dimmer, rather than going
     // black, so the controls over the top and bottom of the viewfinder still sit on the picture.
     float3 fx = clamp(c, 0.0, 1.0) * mix(0.72, 1.0, inside);
-    return half4(float4(mix(o.rgb, fx, a), o.a));
+    return vignette(p, half4(float4(mix(o.rgb, fx, a), o.a)));
 }
 """,
         // A lensless camera: soft all over, softer and darker towards the edges, slightly muted, fine grain.
@@ -214,9 +222,8 @@ half4 main(float2 p) {
     c *= 1.0 + (vnoise(uvOf(p) * 2.5 + seed) - 0.5) * 0.06 * a;
     c = satur(c, 1.0 - 0.18 * a) * mix(float3(1.0), float3(1.03, 1.0, 0.94), a);
     // Vignette: from the control alone (0 = none), smooth from the centre to the corners.
-    c *= 1.0 - p2 * (0.45 + 0.5 * a) * pow(smoothstep(0.15, 1.1, e), 1.6);
     c += filmGrain(p, luma(c)) * 0.025 * a;
-    return half4(float4(mix(o.rgb, clamp(c, 0.0, 1.0), min(1.0, a * 2.0)), o.a));
+    return vignette(p, half4(float4(mix(o.rgb, clamp(c, 0.0, 1.0), min(1.0, a * 2.0)), o.a)));
 }
 """,
         // Pushed black-and-white film: colour drains away as intensity rises, contrast and organic grain build.
@@ -237,7 +244,7 @@ half4 main(float2 p) {
     float3 col = clamp(o.rgb * (l / max(luma(o.rgb), 0.02)), 0.0, 1.0);
     col = satur(col, 0.6 + 0.6 * p3);
     float3 film = mix(mono, col, smoothstep(0.0, 1.0, p3));
-    return half4(float4(mix(o.rgb, film, pow(a, 0.7)), o.a));
+    return vignette(p, half4(float4(mix(o.rgb, film, pow(a, 0.7)), o.a)));
 }
 """,
         // Film in the wrong chemistry: yellow-green highlights, blue-cyan shadows, a film-like curve.
@@ -257,7 +264,7 @@ half4 main(float2 p) {
     x += float3(0.07, 0.05, -0.09) * l * k;
     x += float3(0.05, -0.05, 0.07) * max(-bias, 0.0) * (1.0 - l) * k;
     x = satur(contrast(x, 1.0 + 0.15 * a + (p2 - 0.5) * 0.6 * a), 1.0 + 0.3 * a);
-    return half4(float4(mix(c, clamp(x, 0.0, 1.0), pow(a, 0.8)), o.a));
+    return vignette(p, half4(float4(mix(c, clamp(x, 0.0, 1.0), pow(a, 0.8)), o.a)));
 }
 """,
         // A diffusion filter: the picture stays sharp underneath; light from bright things spills softly
@@ -276,7 +283,7 @@ half4 main(float2 p) {
     c = screen(c, halo * (0.9 + 1.8 * p1) * a);
     c = mix(c, c * 0.96 + 0.015, a);
     c = satur(c, 1.0 - 0.08 * a);
-    return half4(float4(clamp(c, 0.0, 1.0), o.a));
+    return vignette(p, half4(float4(clamp(c, 0.0, 1.0), o.a)));
 }
 """,
         // Infrared-inspired: foliage glows, blue skies go dark, smooth tonal separation, optional halation.
@@ -297,7 +304,7 @@ half4 main(float2 p) {
     ir = smoothstep(-0.08, 1.06, ir);
     float glow = luma(bloomAt(p, min(res.x, res.y) * 0.02, 0.62));
     ir = 1.0 - (1.0 - ir) * (1.0 - glow * p2 * 0.7);
-    return half4(float4(mix(c, float3(clamp(ir, 0.0, 1.0)), a), o.a));
+    return vignette(p, half4(float4(mix(c, float3(clamp(ir, 0.0, 1.0)), a), o.a)));
 }
 """,
         // A cyanotype print: Prussian-blue shadows, warm paper whites, a little paper grain.
@@ -319,7 +326,7 @@ half4 main(float2 p) {
     float fib = vnoise(float2(p.x / (g * 0.12), p.y / (g * 2.5)));
     c *= 1.0 + ((n - 0.5) * 0.08 + (fib - 0.5) * 0.03) * p2 * (0.4 + 0.6 * l);
     c *= vig(p, 0.12);
-    return half4(float4(mix(o.rgb, clamp(c, 0.0, 1.0), pow(a, 0.8)), o.a));
+    return vignette(p, half4(float4(mix(o.rgb, clamp(c, 0.0, 1.0), pow(a, 0.8)), o.a)));
 }
 """,
         // Bleach bypass: colour pulled back, silvery highlights, dense but not crushed blacks.
@@ -338,7 +345,7 @@ half4 main(float2 p) {
     x = mix(x, 1.0 - (1.0 - x) * (1.0 - x) * 1.02, 0.12);
     x *= float3(0.98, 1.0, 1.03);
     x += filmGrain(p, luma(x)) * 0.03;
-    return half4(float4(mix(c, clamp(x, 0.0, 1.0), a), o.a));
+    return vignette(p, half4(float4(mix(c, clamp(x, 0.0, 1.0), a), o.a)));
 }
 """,
         // Tungsten cinema film at night: cool surroundings, warm lights, a smooth shoulder and red halation
@@ -364,7 +371,7 @@ half4 main(float2 p) {
     float glow = luma(b) * (1.0 + 2.6 * p1) * a;
     c = screen(c, float3(1.0, 0.28, 0.08) * glow * (1.0 - 0.55 * l));
     c += filmGrain(p, l) * (0.008 + 0.06 * p3) * a;
-    return half4(float4(clamp(c, 0.0, 1.0), o.a));
+    return vignette(p, half4(float4(clamp(c, 0.0, 1.0), o.a)));
 }
 """,
         // Aged colour film: lifted, faded density; shadows, mids and highlights drifting in different
@@ -402,7 +409,7 @@ half4 main(float2 p) {
     float g = filmGrain(p, l) * (0.02 + 0.08 * p2) * a * (0.7 + 0.6 * age);
     float gc = (hash(floor(p / max(1.0, res.y / 700.0)) + 5.3) - 0.5) * 0.02 * age * a;
     c += g + float3(gc, -gc * 0.5, gc * 0.3);
-    return half4(float4(clamp(c, 0.0, 1.0), o.a));
+    return vignette(p, half4(float4(clamp(c, 0.0, 1.0), o.a)));
 }
 """,
         // Colour negative exposed through its base: blue suppressed, a warm ramp from deep red-brown
@@ -426,7 +433,7 @@ half4 main(float2 p) {
     r *= 1.0 - 0.25 * max(c.b - max(c.r, c.g), 0.0);
     r.r = min(r.r, 0.985);
     r += filmGrain(p, L) * (0.01 + 0.05 * p2);
-    return half4(float4(mix(o.rgb, clamp(r, 0.0, 1.0), a), o.a));
+    return vignette(p, half4(float4(mix(o.rgb, clamp(r, 0.0, 1.0), a), o.a)));
 }
 """,
         // Darkroom solarisation (Sabattier): tones above a threshold fold back down, smoothly, giving silver
@@ -451,7 +458,7 @@ half4 main(float2 p) {
     y = clamp(y + edge * near * p3 * 0.55, 0.0, 1.0);
     float3 silver = float3(y) * float3(0.97, 0.99, 1.03);
     float3 base = mix(o.rgb, float3(luma(o.rgb)), smoothstep(0.0, 0.7, a));
-    return half4(float4(mix(base, clamp(silver, 0.0, 1.0), pow(a, 0.8)), o.a));
+    return vignette(p, half4(float4(mix(base, clamp(silver, 0.0, 1.0), pow(a, 0.8)), o.a)));
 }
 """,
         // Instant film: a little soft, creamy highlights, lifted blacks with a cool cast, gentle warmth
@@ -472,7 +479,7 @@ half4 main(float2 p) {
     c = mix(c, smoothstep(float3(-0.1), float3(1.1), c), -0.3 * a);
     c *= vig(p, 0.16 * a);
     c += filmGrain(p, l) * 0.015 * a * (p4 / 0.4);
-    return half4(float4(clamp(c, 0.0, 1.0), o.a));
+    return vignette(p, half4(float4(clamp(c, 0.0, 1.0), o.a)));
 }
 """,
     )

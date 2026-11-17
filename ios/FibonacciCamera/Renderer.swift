@@ -15,6 +15,7 @@ struct ArtUniforms {
     var msz = SIMD4<Float>(0.08, 1, 0, 0)     // size, feather, strength
     var lks: Float = 0
     var p4: Float = 0
+    var vig: Float = 0
 }
 
 /** Layout must match `struct B` in Shaders.metal. */
@@ -144,6 +145,8 @@ final class Renderer {
             }
             u.amt = r.values[0]; u.p1 = r.values[1]; u.p2 = r.values[2]; u.p3 = r.values[3]; u.seed = r.seed
             u.p4 = r.values.count > 6 ? r.values[6] : r.mode.p4Default
+            // the shared vignette: iOS keeps Holga's and Pinhole's own Vignette sliders feeding it
+            u.vig = r.mode == .HOLGA ? r.values[1] : (r.mode == .PINHOLE ? r.values[2] : 0)
             u.vpo = SIMD2(Float(viewport.minX), Float(viewport.minY))
             u.vps = SIMD2(Float(src.width) / Float(viewport.width), Float(src.height) / Float(viewport.height))
             enc.setRenderPipelineState(p)

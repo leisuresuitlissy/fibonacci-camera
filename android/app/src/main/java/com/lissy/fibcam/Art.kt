@@ -36,6 +36,10 @@ class LookControl(
 private fun c(label: String, slot: Int, choices: Boolean = false, degrees: Boolean = false) = LookControl(label, slot, choices, degrees)
 private val INTENSITY = c("Intensity", 0)
 private val DEPTH = c("Depth", 4)
+/** The shared vignette, on every Look (slot 8). */
+private val VIGNETTE = c("Vignette", 8)
+/** What Vignette at 50% renders as. */
+private const val VIG_50 = 0.45f
 /** What Depth at 50% renders as: a gentle falloff (lower than the older looks' 30–35%). */
 private const val DEPTH_50 = 0.25f
 
@@ -55,40 +59,40 @@ enum class ArtMode(
 ) {
     OFF("OFF", emptyList()),
     TILT_SHIFT("TILT SHIFT", listOf("Intensity" to 0.5f, "Focus" to 0.5f, "Width" to 0.3f, "Angle" to 0.5f, "Feather" to 0.5f),
-        listOf(INTENSITY, c("Focus", 1), c("Width", 2), c("Angle", 3, degrees = true), c("Feather", 4), c("Depth", 7)), extra = 0f to 0.5f),
+        listOf(INTENSITY, c("Focus", 1), c("Width", 2), c("Angle", 3, degrees = true), c("Feather", 4), VIGNETTE, c("Depth", 7)), extra = 0f to 0.5f),
     HOLGA("HOLGA", listOf("Intensity" to 0.5f, "Vignette" to 0.55f, "Softness" to 0.3f, "Leaks" to 0.45f, "Depth" to DEPTH_50),
-        listOf(INTENSITY, c("Softness", 2), c("Vignette", 1), c("Leaks", 3, choices = true), c("Grain", 6), DEPTH),
-        variations = listOf("OFF", "WARM", "COOL", "NEUTRAL", "MIXED", "RANDOM"), variationLabel = "LEAK", defaultVariation = 1, extra = 0.3f to 0f),
+        listOf(INTENSITY, c("Softness", 2), VIGNETTE, c("Leaks", 3, choices = true), c("Saturation", 6), DEPTH),
+        variations = listOf("OFF", "WARM", "COOL", "NEUTRAL", "MIXED", "RANDOM"), variationLabel = "LEAK", defaultVariation = 1, extra = 0.5f to 0f),
     PINHOLE("PINHOLE", listOf("Intensity" to 0.5f, "Softness" to 0.3f, "Vignette" to 0.5f, "" to 0f, "Depth" to DEPTH_50),
-        listOf(INTENSITY, c("Softness", 1), c("Vignette", 2), DEPTH)),
+        listOf(INTENSITY, c("Softness", 1), VIGNETTE, DEPTH)),
     // Black and white by default: Saturation starts at 0 and brings colour back as you raise it.
     GRAINY_FILM("GRAINY FILM", listOf("Intensity" to 0.5f, "Grain" to 0.5f, "Contrast" to 0.55f, "Saturation" to 0.5f, "Depth" to DEPTH_50),
-        listOf(INTENSITY, c("Grain", 1), c("Contrast", 2), c("Saturation", 3), DEPTH), start = mapOf(3 to 0f)),
+        listOf(INTENSITY, c("Grain", 1), c("Contrast", 2), c("Saturation", 3), VIGNETTE, DEPTH), start = mapOf(3 to 0f)),
     CROSS_PROCESS("CROSS PROCESS", listOf("Intensity" to 0.5f, "Colour" to 0.5f, "Contrast" to 0.5f, "" to 0f, "Depth" to DEPTH_50),
-        listOf(INTENSITY, c("Colour", 1), c("Contrast", 2), DEPTH)),
+        listOf(INTENSITY, c("Colour", 1), c("Contrast", 2), VIGNETTE, DEPTH)),
     DREAM_LENS("DREAM LENS", listOf("Intensity" to 0.5f, "Glow" to 0.5f, "Softness" to 0.3f, "" to 0f, "Depth" to DEPTH_50),
-        listOf(INTENSITY, c("Glow", 1), c("Softness", 2), DEPTH)),
+        listOf(INTENSITY, c("Glow", 1), c("Softness", 2), VIGNETTE, DEPTH)),
     // Halation stays at its calibrated 0.3; the camera shows Contrast and Depth only.
     INFRARED("INFRARED", listOf("Intensity" to 0.5f, "Contrast" to 0.5f, "Halation" to 0.3f, "" to 0f, "Depth" to DEPTH_50),
-        listOf(INTENSITY, c("Contrast", 1), DEPTH),
+        listOf(INTENSITY, c("Contrast", 1), VIGNETTE, DEPTH),
         about = "Infrared-inspired: a simulation from visible light, not real infrared."),
     CYANOTYPE("CYANOTYPE", listOf("Intensity" to 0.5f, "Contrast" to 0.5f, "Paper" to 0.5f, "" to 0f, "Depth" to DEPTH_50),
-        listOf(INTENSITY, c("Contrast", 1), c("Paper", 2), DEPTH)),
+        listOf(INTENSITY, c("Contrast", 1), c("Paper", 2), VIGNETTE, DEPTH)),
     BLEACH_BYPASS("BLEACH BYPASS", listOf("Intensity" to 0.5f, "Saturation" to 0.35f, "Contrast" to 0.5f, "" to 0f, "Depth" to DEPTH_50),
-        listOf(INTENSITY, c("Saturation", 1), c("Contrast", 2), DEPTH)),
+        listOf(INTENSITY, c("Saturation", 1), c("Contrast", 2), VIGNETTE, DEPTH)),
     // The newer looks are colour and tone first: Depth starts at 0 and stays optional.
     KINO("KINO", listOf("Intensity" to 0.5f, "Halation" to 0.5f, "Coolness" to 0.5f, "Grain" to 0.35f, "Depth" to DEPTH_50),
-        listOf(INTENSITY, c("Halation", 1), c("Coolness", 2), c("Grain", 3), DEPTH)),
+        listOf(INTENSITY, c("Halation", 1), c("Coolness", 2), c("Grain", 3), VIGNETTE, DEPTH)),
     EXPIRED("EXPIRED", listOf("Intensity" to 0.5f, "Age" to 0.5f, "Grain" to 0.45f, "" to 0f, "Depth" to DEPTH_50),
-        listOf(INTENSITY, c("Age", 1), c("Colour shift", -1, choices = true), c("Grain", 2), DEPTH),
+        listOf(INTENSITY, c("Age", 1), c("Colour shift", -1, choices = true), c("Grain", 2), VIGNETTE, DEPTH),
         variations = listOf("WARM", "MAGENTA", "COOL", "RANDOM"), variationLabel = "COLOUR", defaultVariation = 1),
     REDSCALE("REDSCALE", listOf("Intensity" to 0.5f, "Tone" to 0.45f, "Grain" to 0.3f, "" to 0f, "Depth" to DEPTH_50),
-        listOf(INTENSITY, c("Tone", 1), c("Grain", 2), DEPTH)),
+        listOf(INTENSITY, c("Tone", 1), c("Grain", 2), VIGNETTE, DEPTH)),
     SOLARISED("SOLARISED", listOf("Intensity" to 0.5f, "Reversal" to 0.7f, "Threshold" to 0.45f, "Contour" to 0.35f, "Depth" to DEPTH_50),
-        listOf(INTENSITY, c("Reversal", 1), c("Threshold", 2), c("Contour", 3), DEPTH)),
+        listOf(INTENSITY, c("Reversal", 1), c("Threshold", 2), c("Contour", 3), VIGNETTE, DEPTH)),
     // Texture is the film's grain (values[6]); the slight softness stays at its calibrated 0.4.
     INSTANT("INSTANT", listOf("Intensity" to 0.5f, "Warmth" to 0.55f, "Fade" to 0.5f, "Softness" to 0.4f, "Depth" to DEPTH_50),
-        listOf(INTENSITY, c("Warmth", 1), c("Fade", 2), c("Texture", 6), DEPTH), extra = 0.4f to 0f);
+        listOf(INTENSITY, c("Warmth", 1), c("Fade", 2), c("Texture", 6), VIGNETTE, DEPTH), extra = 0.4f to 0f);
 
     /** Every slider starts at 50%; [calib] says what 50% looks like. */
     val defaults: FloatArray get() = FloatArray(Art.SLOTS) { i -> if (i == 5) defaultVariation.toFloat() else start[i] ?: 0.5f }
@@ -97,7 +101,7 @@ enum class ArtMode(
      * 50% scale down to 0, above it up to 1, so the slider still covers the whole range.
      */
     val calib: FloatArray get() = FloatArray(Art.SLOTS) { i ->
-        when (i) { 0 -> 0.5f; 5 -> 0.5f; 6 -> extra.first; 7 -> extra.second; else -> sliders.getOrNull(i)?.second ?: 0f }
+        when (i) { 0 -> 0.5f; 5 -> 0.5f; 6 -> extra.first; 7 -> extra.second; 8 -> VIG_50; else -> sliders.getOrNull(i)?.second ?: 0f }
     }
     /** Whether variation [i] is the random one (it gets a fresh, stable seed when chosen). */
     fun isRandom(i: Int) = variations.getOrNull(i) == "RANDOM"
@@ -250,7 +254,7 @@ data class Recipe(val mode: ArtMode, val values: FloatArray, val seed: Float, va
 
 object Art {
     /** How many values each look keeps (see [ArtMode]). */
-    const val SLOTS = 8
+    const val SLOTS = 9
 
     /** AGSL needs Android 13. On older phones the Art layer explains that instead of crashing. */
     val supported: Boolean get() = Build.VERSION.SDK_INT >= 33
@@ -291,7 +295,7 @@ object Art {
         return ArtState(mode.defaults, false)
     }
 
-    fun pad(mode: ArtMode, v: FloatArray): FloatArray = FloatArray(SLOTS) { i -> v.getOrNull(i) ?: mode.defaults[i] }
+    fun pad(mode: ArtMode, v: FloatArray): FloatArray = FloatArray(SLOTS) { i -> v.getOrNull(i) ?: if (i == 8) 0f else mode.defaults[i] }   // older photos had no shared vignette
 
     @RequiresApi(33)
     fun newShader(mode: ArtMode): RuntimeShader? =
@@ -313,7 +317,7 @@ object Art {
         set("org", x, y); set("res", w, h)
         set("amt", v.getOrElse(0) { 0f }); set("p1", v.getOrElse(1) { 0f })
         set("p2", v.getOrElse(2) { 0f }); set("p3", v.getOrElse(3) { 0f })
-        set("seed", seed); set("lks", v.getOrElse(5) { 0f }); set("p4", v.getOrElse(6) { 0f })
+        set("seed", seed); set("lks", v.getOrElse(5) { 0f }); set("p4", v.getOrElse(6) { 0f }); set("vig", v.getOrElse(8) { 0f })
         set("msk", m.cx, m.cy, m.angle, m.type.toFloat()); set("msz", m.size, m.feather, m.strength)
     }
 
