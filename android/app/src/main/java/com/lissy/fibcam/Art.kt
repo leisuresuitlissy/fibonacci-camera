@@ -39,7 +39,7 @@ private val DEPTH = c("Depth", 4)
 /** The shared vignette, on every Look (slot 8). */
 private val VIGNETTE = c("Vignette", 8)
 /** What Vignette at 50% renders as. */
-private const val VIG_50 = 0.45f
+private const val VIG_50 = 0.33f
 /** What Depth at 50% renders as: a gentle falloff (lower than the older looks' 30–35%). */
 private const val DEPTH_50 = 0.25f
 

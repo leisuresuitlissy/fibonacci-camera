@@ -56,6 +56,8 @@ static float4 vignette_(texture2d<float> T, constant U& uu, float2 p, float4 c) 
     float2 d = (p - org) / res - 0.5;
     float e = length(d * 2.0) * 0.7071;
     float k = vgn * min(1.0, amt * 2.0) * 0.95 * pow(smoothstep(0.18, 1.0, e), 1.3);
+    // gentler where the picture is already dark, so shadows keep their detail instead of going black
+    k *= 0.55 + 0.45 * smoothstep(0.0, 0.4, luma(c.rgb));
     return float4(c.rgb * (1.0 - k), c.a);
 }
 #define vignette(...) vignette_(T, uu, __VA_ARGS__)
@@ -202,9 +204,15 @@ static float4 fx_HOLGA(texture2d<float> T, constant U& uu, float2 p) {
     float rad = s * p2 * (0.005 + 0.015 * pow(smoothstep(0.1, 1.1, edge), 1.3)) * (0.35 + 0.65 * a);
     float dr = depthR(p);
     float3 c = blurAt(p, sqrt(rad * rad + dr * dr));
-    float ca = s * 0.005 * edge * edge * a;
-    c.r = mix(c.r, px(p + cd * ca).r, 0.6);
-    c.b = mix(c.b, px(p - cd * ca).b, 0.6);
+    // Colour fringing: a faint red/blue halo in the outer edge only, about a third of what it was. The
+    // offset copies are taken from the same softened picture, so they never read as a sharp ghost image.
+    float fr = smoothstep(0.6, 1.15, edge);
+    if (fr > 0.01) {
+        float ca = s * 0.0035 * fr * a;
+        float rr = sqrt(rad * rad + dr * dr);
+        c.r = mix(c.r, blurAt(p + cd * ca, rr).r, 0.5);
+        c.b = mix(c.b, blurAt(p - cd * ca, rr).b, 0.5);
+    }
     // Saturation (p4): 50% sits just under the original, so the contrast curve doesn't push reds over;
     // 0 is close to muted, 100% richer than the original.
     c = satur(scurve(c, 0.5 * a), 1.0 + (0.45 + p4 - 1.0) * a);
