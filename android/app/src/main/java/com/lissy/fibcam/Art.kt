@@ -317,7 +317,7 @@ object Art {
         set("org", x, y); set("res", w, h)
         set("amt", v.getOrElse(0) { 0f }); set("p1", v.getOrElse(1) { 0f })
         set("p2", v.getOrElse(2) { 0f }); set("p3", v.getOrElse(3) { 0f })
-        set("seed", seed); set("lks", v.getOrElse(5) { 0f }); set("p4", v.getOrElse(6) { 0f }); set("vig", v.getOrElse(8) { 0f })
+        set("seed", seed); set("lks", v.getOrElse(5) { 0f }); set("p4", v.getOrElse(6) { 0f }); set("vgn", v.getOrElse(8) { 0f })
         set("msk", m.cx, m.cy, m.angle, m.type.toFloat()); set("msz", m.size, m.feather, m.strength)
     }
 
