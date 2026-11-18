@@ -1763,7 +1763,11 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
         val first = if (double) firstUri else null
         val takingFirst = double && first == null
         val blendNow = blend; val strengthNow = blendStrength
-        val opts = ImageCapture.OutputFileOptions.Builder(contentResolver, MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values).build()
+        // Selfies are saved the way the viewfinder showed them (mirrored), so the photo, its Look copy and
+        // the focus mask all match what you framed. CameraX records the flip in the photo's EXIF orientation.
+        val opts = ImageCapture.OutputFileOptions.Builder(contentResolver, MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
+            .setMetadata(ImageCapture.Metadata().apply { isReversedHorizontal = front })
+            .build()
         cap.takePicture(opts, ContextCompat.getMainExecutor(this), object : ImageCapture.OnImageSavedCallback {
             override fun onImageSaved(out: ImageCapture.OutputFileResults) {
                 val uri = out.savedUri ?: return

@@ -222,7 +222,7 @@ object Focus {
         var far = 0f
         for (sx in floatArrayOf(-0.5f, 0.5f)) for (sy in floatArrayOf(-0.5f, 0.5f))
             far = maxOf(far, kotlin.math.abs((sx * aspect - cx) * nx + (sy - cy) * ny))
-        return maxOf(far - m.size, 0.05f) * (0.12f + 0.6f * m.feather)
+        return maxOf(far - m.size, 0.05f) * (0.2f + 0.52f * m.feather)
     }
 
     /** The Focus value whose band passes through (u, v) at angle [a] (radians). */

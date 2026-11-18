@@ -83,14 +83,14 @@ float3 blurWide(float2 p, float r) {
 // The focus mask: 0 inside the sharp region, rising smoothly to 1 across the feather.
 // Measured in frame heights from the mask's centre (radial) or centre line (band).
 // Tilt Shift's band (type 3) takes Feather as a share of the room left between the sharp band and the
-// frame's far corner, so even full Feather leaves a fully blurred region (12% of the room at 0, 72% at 100%).
+// frame's far corner, so even full Feather leaves a fully blurred region (20% of the room at 0, 72% at 100%).
 float bandFeather() {
     float a = res.x / res.y;
     float2 n = float2(-sin(msk.z), cos(msk.z));
     float2 c = (msk.xy - 0.5) * float2(a, 1.0);
     float far = max(max(abs(dot(float2(-0.5 * a, -0.5) - c, n)), abs(dot(float2(0.5 * a, -0.5) - c, n))),
                     max(abs(dot(float2(-0.5 * a, 0.5) - c, n)), abs(dot(float2(0.5 * a, 0.5) - c, n))));
-    return max(far - msz.x, 0.05) * (0.12 + 0.6 * msz.y);
+    return max(far - msz.x, 0.05) * (0.2 + 0.52 * msz.y);
 }
 float maskSoft(float2 p) {
     if (msk.w < 0.5) return 0.0;
