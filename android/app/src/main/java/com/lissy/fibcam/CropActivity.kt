@@ -378,7 +378,7 @@ class CropActivity : ComponentActivity() {
             val m = crop.cropMask(recipe)
             val ip = crop.cropToImage(m.cx, m.cy)
             recipe = recipe.copy(follow = !recipe.follow, mask = recipe.mask.copy(cx = ip.x, cy = ip.y))
-            if (!recipe.follow && mode == ArtMode.TILT_SHIFT && m.type == 1) { recipe.values[1] = m.cy.coerceIn(0f, 1f); recipe.values[3] = (m.angle / 1.5707964f + 0.5f).coerceIn(0f, 1f) }
+            if (!recipe.follow && mode == ArtMode.TILT_SHIFT && (m.type == 1 || m.type == 3)) { recipe.values[1] = m.cy.coerceIn(0f, 1f); recipe.values[3] = (m.angle / 1.5707964f + 0.5f).coerceIn(0f, 1f) }
             crop.recipe = recipe; crop.flashMask(); rememberArt(); applyArtUi()
         })
         paramRow.addView(miniChip("RESET", false) {

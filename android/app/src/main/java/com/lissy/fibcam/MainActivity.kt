@@ -960,14 +960,24 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
         if (!::preview.isInitialized) return
         if (!Art.supported || art == ArtMode.OFF || overlay.frame.isEmpty) { if (Build.VERSION.SDK_INT >= 31) camLayer.setRenderEffect(null); liveShader = null; return }
         if (Build.VERSION.SDK_INT < 33) return
+        val f = overlay.frame
+        if (art == ArtMode.TILT_SHIFT) {
+            // the layered miniature blur, built exactly as saved photos build it (Art.render → TiltFx)
+            val fx = liveTilt ?: TiltFx.create().also { liveTilt = it }
+            if (fx != null) {
+                lastFocus = liveFocus()
+                camLayer.setRenderEffect(fx.effect(artValues, f.left, f.top, f.width(), f.height(), liveSeed, liveMask()))
+                return
+            }
+        }
         val sh = liveShader?.takeIf { it === liveFor(art) } ?: Art.newShader(art).also { liveShader = it; liveMode = art }
         if (sh == null) { camLayer.setRenderEffect(null); return }
-        val f = overlay.frame
         val fp = liveFocus(); lastFocus = fp
         Art.setUniforms(sh, art, artValues, f.left, f.top, f.width(), f.height(), liveSeed, liveMask())
         camLayer.setRenderEffect(RenderEffect.createRuntimeShaderEffect(sh, "content"))   // live picture and first exposure together
     }
     private var liveMode: ArtMode? = null
+    private var liveTilt: TiltFx? = null
     private fun liveFor(m: ArtMode): RuntimeShader? = if (liveMode == m) liveShader else null
 
     // ---- exposure

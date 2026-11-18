@@ -4,7 +4,7 @@ kt = open(sys.argv[1]).read()
 common = re.search(r'const val COMMON = """(.*?)"""', kt, re.S).group(1)
 bodies = re.findall(r'ArtMode\.(\w+) to """(.*?)"""', kt, re.S)
 common = "\n".join(l for l in common.splitlines() if not l.strip().startswith("uniform "))
-helpers = ["hash", "px", "uvOf", "inFrame", "edgeOf", "vig", "blurAt", "blurWide", "maskSoft", "depthR", "focusAt", "bloomAt", "grainAt", "vnoise", "filmGrain", "vignette"]
+helpers = ["hash", "px", "uvOf", "inFrame", "edgeOf", "vig", "blurAt", "blurWide", "bandFeather", "maskSoft", "tiltRamp", "tiltR", "tiltGrade", "depthR", "focusAt", "bloomAt", "grainAt", "vnoise", "filmGrain", "vignette"]
 out_common = []
 lines = common.splitlines()
 i = 0
@@ -15,7 +15,7 @@ for h in helpers:
     m = pat.search(src)
     assert m, h
     ret, args = m.group(1), m.group(2)
-    new = f"static {ret} {h}_(texture2d<float> T, constant U& uu, {args}) {{"
+    new = f"static {ret} {h}_(texture2d<float> T, constant U& uu{', ' + args if args.strip() else ''}) {{"
     # find end of function: matching brace
     start = m.start(); j = m.end(); depth = 1
     while depth:
@@ -23,7 +23,8 @@ for h in helpers:
         elif src[j] == "}": depth -= 1
         j += 1
     body = src[m.end():j]
-    src = src[:start] + new + body + f"\n#define {h}(...) {h}_(T, uu, __VA_ARGS__)" + src[j:]
+    macro = f"#define {h}(...) {h}_(T, uu, __VA_ARGS__)" if args.strip() else f"#define {h}() {h}_(T, uu)"
+    src = src[:start] + new + body + "\n" + macro + src[j:]
 src = src.replace("float4(content.eval(p))", "T.sample(smp, p / float2(T.get_width(), T.get_height()))")
 for f in ["luma", "satur", "contrast", "scurve", "screen"]:
     src = re.sub(r'^(float3?) ' + f + r'\(', r'static \1 ' + f + '(', src, flags=re.M)

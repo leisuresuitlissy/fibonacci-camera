@@ -103,15 +103,40 @@ static float3 blurWide_(texture2d<float> T, constant U& uu, float2 p, float r) {
 #define blurWide(...) blurWide_(T, uu, __VA_ARGS__)
 // The focus mask: 0 inside the sharp region, rising smoothly to 1 across the feather.
 // Measured in frame heights from the mask's centre (radial) or centre line (band).
+// Tilt Shift's band (type 3) takes Feather as a share of the room left between the sharp band and the
+// frame's far corner, so even full Feather leaves a fully blurred region (12% of the room at 0, 72% at 100%).
+static float bandFeather_(texture2d<float> T, constant U& uu) {
+    float a = res.x / res.y;
+    float2 n = float2(-sin(msk.z), cos(msk.z));
+    float2 c = (msk.xy - 0.5) * float2(a, 1.0);
+    float far = max(max(abs(dot(float2(-0.5 * a, -0.5) - c, n)), abs(dot(float2(0.5 * a, -0.5) - c, n))),
+                    max(abs(dot(float2(-0.5 * a, 0.5) - c, n)), abs(dot(float2(0.5 * a, 0.5) - c, n))));
+    return max(far - msz.x, 0.05) * (0.12 + 0.6 * msz.y);
+}
+#define bandFeather() bandFeather_(T, uu)
 static float maskSoft_(texture2d<float> T, constant U& uu, float2 p) {
     if (msk.w < 0.5) return 0.0;
     float2 d = (uvOf(p) - msk.xy) * float2(res.x / res.y, 1.0);
-    float dist = msk.w < 1.5 ? abs(dot(d, float2(-sin(msk.z), cos(msk.z)))) : length(d);
-    float f = 0.03 + msz.y * 0.55;
+    bool band = msk.w < 1.5 || msk.w > 2.5;
+    float dist = band ? abs(dot(d, float2(-sin(msk.z), cos(msk.z)))) : length(d);
+    float f = msk.w > 2.5 ? bandFeather() : 0.03 + msz.y * 0.55;
     float t = clamp((dist - msz.x) / f, 0.0, 1.0);
     return t * t * (3.0 - 2.0 * t);
 }
 #define maskSoft(...) maskSoft_(T, uu, __VA_ARGS__)
+// Tilt Shift: the blur radius at full distance from the band (Depth × Intensity), shared with Kotlin's TiltFx.
+static float tiltRamp_(texture2d<float> T, constant U& uu) { return amt < 0.5 ? amt * 2.0 : 1.0 + (amt - 0.5) * 0.5; }
+#define tiltRamp() tiltRamp_(T, uu)
+static float tiltR_(texture2d<float> T, constant U& uu) { return min(res.x, res.y) * 0.11 * msz.z * tiltRamp(); }
+#define tiltR() tiltR_(T, uu)
+// Tilt Shift's miniature grade: a little more colour, and crisper local contrast only where it's sharp.
+static float3 tiltGrade_(texture2d<float> T, constant U& uu, float2 p, float3 c, float soft) {
+    float k = amt;
+    float3 local = blurAt(p, min(res.x, res.y) * 0.004);
+    c = clamp(c + (c - local) * 0.45 * k * (1.0 - soft), 0.0, 1.0);
+    return satur(scurve(c, 0.18 * k), 1.0 + 0.3 * k);
+}
+#define tiltGrade(...) tiltGrade_(T, uu, __VA_ARGS__)
 // Depth: gently softer away from the sharp region, like a fast lens. msz.z is the strength.
 static float depthR_(texture2d<float> T, constant U& uu, float2 p) {
     if (msz.z <= 0.001) return 0.0;
@@ -161,14 +186,13 @@ static float filmGrain_(texture2d<float> T, constant U& uu, float2 p, float l) {
 static float4 fx_TILT_SHIFT(texture2d<float> T, constant U& uu, float2 p) {
     float4 o = px(p);
     if (!inFrame(p)) return float4(o);
-    // The finished miniature look: a fully sharp band (maskSoft 0 inside Width), blur growing across
-    // Feather to Depth's strength, toy-like colour. Intensity blends the original with it.
-    float s = min(res.x, res.y);
+    // Single-pass version (photo editor preview, iOS). On Android the camera and saved photos use TiltFx:
+    // the same band, radius and grade, with a layered GPU blur. Blur grows from 0 at the band's edge to
+    // tiltR() at the end of the feather; Intensity scales the blur and the grade, never a ghost of the original.
     float soft = maskSoft(p);
-    float r = pow(soft, 1.35) * s * 0.05 * msz.z;
+    float r = pow(soft, 1.5) * 1.15 * tiltR();
     float3 base = r < 0.6 ? o.rgb : blurWide(p, r);
-    float3 fx = satur(scurve(base, 0.35), 1.32);
-    return float4(vignette(p, float4(mix(o.rgb, fx, amt), o.a)));
+    return float4(vignette(p, float4(tiltGrade(p, base, soft), o.a)));
 }
 
 fragment float4 art_TILT_SHIFT(VOut in [[stage_in]], texture2d<float> T [[texture(0)]], constant U& uu [[buffer(0)]]) {

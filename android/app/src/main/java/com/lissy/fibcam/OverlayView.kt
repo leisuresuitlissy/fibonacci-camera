@@ -159,14 +159,14 @@ class OverlayView @JvmOverloads constructor(ctx: Context, attrs: AttributeSet? =
         if (maskAlpha <= 0.01f || frame.isEmpty) return
         val h = frame.height()
         val cx = frame.left + m.cx * frame.width(); val cy = frame.top + m.cy * h
-        val inner = m.size * h; val outer = (m.size + 0.03f + m.feather * 0.55f) * h
+        val inner = m.size * h; val outer = (m.size + Focus.featherLen(m, frame.width() / h)) * h
         maskLine.alpha = (220 * maskAlpha).toInt(); maskLine.strokeWidth = 1.3f * d; maskLine.pathEffect = null
         maskSoft.alpha = (140 * maskAlpha).toInt(); maskSoft.strokeWidth = 1f * d; maskSoft.pathEffect = DashPathEffect(floatArrayOf(4 * d, 5 * d), 0f)
         c.save(); c.clipRect(frame)
         if (m.type == 2) {
             c.drawCircle(cx, cy, inner, maskLine); c.drawCircle(cx, cy, outer, maskSoft)
             c.drawCircle(cx, cy, 3 * d, maskLine)
-        } else if (m.type == 1) {
+        } else if (m.type == 1 || m.type == 3) {
             val ux = kotlin.math.cos(m.angle); val uy = kotlin.math.sin(m.angle)
             val nx = -uy; val ny = ux
             val len = frame.width() + frame.height()

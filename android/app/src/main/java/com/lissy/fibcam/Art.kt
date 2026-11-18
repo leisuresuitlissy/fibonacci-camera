@@ -3,12 +3,14 @@ package com.lissy.fibcam
 import android.content.SharedPreferences
 import android.graphics.Bitmap
 import android.graphics.BitmapShader
+import android.graphics.BlendMode
 import android.graphics.ColorSpace
 import android.graphics.HardwareRenderer
 import android.graphics.Paint
 import android.graphics.PointF
 import android.graphics.RectF
 import android.graphics.PixelFormat
+import android.graphics.RenderEffect
 import android.graphics.RenderNode
 import android.graphics.RuntimeShader
 import android.graphics.Shader
@@ -61,7 +63,7 @@ enum class ArtMode(
 ) {
     OFF("OFF", emptyList()),
     TILT_SHIFT("TILT SHIFT", listOf("Intensity" to 0.5f, "Focus" to 0.5f, "Width" to 0.3f, "Angle" to 0.5f, "Feather" to 0.5f),
-        listOf(INTENSITY, c("Focus", 1), c("Width", 2), c("Angle", 3, degrees = true), c("Feather", 4), VIGNETTE, c("Depth", 7)), extra = 0f to 0.5f),
+        listOf(INTENSITY, c("Focus", 1), c("Width", 2), c("Angle", 3, degrees = true), c("Feather", 4), VIGNETTE, c("Depth", 7)), extra = 0f to 0.5f, vig50 = 0.15f),
     HOLGA("HOLGA", listOf("Intensity" to 0.5f, "Vignette" to 0.55f, "Softness" to 0.3f, "Leaks" to 0.45f, "Depth" to DEPTH_50),
         listOf(INTENSITY, c("Softness", 2), VIGNETTE, c("Leaks", 3, choices = true), c("Saturation", 6), DEPTH),
         variations = listOf("OFF", "WARM", "COOL", "NEUTRAL", "MIXED", "RANDOM"), variationLabel = "LEAK", defaultVariation = 1, extra = 0.5f to 0f),
@@ -202,13 +204,25 @@ object Focus {
 
     /**
      * Tilt Shift's band. Focus moves it perpendicular to its Angle: 50% runs through the middle of the frame,
-     * 0 and 100% sit half a frame height either side. Width is the fully sharp half-width, Feather the fade,
-     * Depth (slot 7) the blur strength outside. [aspect] is the frame's width / height.
+     * 0 and 100% sit half a frame height either side. Width is the fully sharp half-width; Depth (slot 7) the
+     * blur strength outside. Type 3: Feather is a share of the room between the band and the frame's far
+     * corner (see [featherLen]), so it only ever shapes the transition. [aspect] is the frame's width / height.
      */
     fun tiltBand(v: FloatArray, aspect: Float): FocusMask {
         val a = (v[3] - 0.5f) * HALF_PI
         val d = v[1] - 0.5f
-        return FocusMask(1, 0.5f - kotlin.math.sin(a) * d / aspect, 0.5f + kotlin.math.cos(a) * d, a, 0.02f + v[2] * 0.3f, v[4], v.getOrElse(7) { 0f })
+        return FocusMask(3, 0.5f - kotlin.math.sin(a) * d / aspect, 0.5f + kotlin.math.cos(a) * d, a, 0.02f + v[2] * 0.3f, v[4], v.getOrElse(7) { 0f })
+    }
+
+    /** The mask's fade length in frame heights, as the shaders work it out (bandFeather / maskSoft). */
+    fun featherLen(m: FocusMask, aspect: Float): Float {
+        if (m.type != 3) return 0.03f + m.feather * 0.55f
+        val nx = -kotlin.math.sin(m.angle); val ny = kotlin.math.cos(m.angle)
+        val cx = (m.cx - 0.5f) * aspect; val cy = m.cy - 0.5f
+        var far = 0f
+        for (sx in floatArrayOf(-0.5f, 0.5f)) for (sy in floatArrayOf(-0.5f, 0.5f))
+            far = maxOf(far, kotlin.math.abs((sx * aspect - cx) * nx + (sy - cy) * ny))
+        return maxOf(far - m.size, 0.05f) * (0.12f + 0.6f * m.feather)
     }
 
     /** The Focus value whose band passes through (u, v) at angle [a] (radians). */
@@ -229,7 +243,7 @@ object Focus {
         if (deviceRot == 180) return m.copy(cx = 1f - m.cx, cy = 1f - m.cy)
         val k = 1f / aspect                 // portrait height / landscape height
         val f = 0.03f + m.feather * 0.55f
-        val feather = ((f * k - 0.03f) / 0.55f).coerceAtLeast(0f)
+        val feather = if (m.type == 3) m.feather else ((f * k - 0.03f) / 0.55f).coerceAtLeast(0f)
         return if (deviceRot == 90) m.copy(cx = 1f - m.cy, cy = m.cx, angle = m.angle + HALF_PI, size = m.size * k, feather = feather)
         else m.copy(cx = m.cy, cy = 1f - m.cx, angle = m.angle - HALF_PI, size = m.size * k, feather = feather)
     }
@@ -338,16 +352,22 @@ object Art {
     /** Runs a mode over a whole bitmap on the GPU and returns a new software bitmap. */
     @RequiresApi(33)
     fun render(src: Bitmap, r: Recipe, m: FocusMask? = null): Bitmap {
-        val sh = newShader(r.mode) ?: return src
         val w = src.width; val h = src.height
-        setUniforms(sh, r.mode, r.values, 0f, 0f, w.toFloat(), h.toFloat(), r.seed, m ?: r.mask)
-        sh.setInputShader("content", BitmapShader(src, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP))
+        val node = RenderNode("art").apply { setPosition(0, 0, w, h) }
+        // Tilt Shift: the photo through exactly the effect the viewfinder uses (TiltFx), at full resolution
+        val tilt = if (r.mode == ArtMode.TILT_SHIFT) TiltFx.create()?.effect(r.values, 0f, 0f, w.toFloat(), h.toFloat(), r.seed, m ?: r.mask) else null
+        if (tilt != null) {
+            node.setRenderEffect(tilt)
+            node.beginRecording().drawBitmap(src, 0f, 0f, null)
+        } else {
+            val sh = newShader(r.mode) ?: return src
+            setUniforms(sh, r.mode, r.values, 0f, 0f, w.toFloat(), h.toFloat(), r.seed, m ?: r.mask)
+            sh.setInputShader("content", BitmapShader(src, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP))
+            node.beginRecording().drawRect(0f, 0f, w.toFloat(), h.toFloat(), Paint().apply { shader = sh })
+        }
+        node.endRecording()
         val reader = ImageReader.newInstance(w, h, PixelFormat.RGBA_8888, 1,
             HardwareBuffer.USAGE_GPU_SAMPLED_IMAGE or HardwareBuffer.USAGE_GPU_COLOR_OUTPUT)
-        val node = RenderNode("art").apply { setPosition(0, 0, w, h) }
-        val c = node.beginRecording()
-        c.drawRect(0f, 0f, w.toFloat(), h.toFloat(), Paint().apply { shader = sh })
-        node.endRecording()
         val renderer = HardwareRenderer()
         try {
             renderer.setSurface(reader.surface)
@@ -368,5 +388,52 @@ object Art {
         if (mode != ArtMode.HOLGA || b.width == b.height) return b
         val s = minOf(b.width, b.height)
         return Bitmap.createBitmap(b, (b.width - s) / 2, (b.height - s) / 2, s, s)
+    }
+}
+
+
+/**
+ * Tilt Shift as a layered GPU blur, built the same way for the viewfinder and for saved photos, so they match.
+ * The picture's edges are clamped (TILT_CLAMP), then blurred to three strengths: 20%, 50% and 100% of the
+ * radius ([radius]: Depth × Intensity, a share of the frame's short side, so it scales with resolution).
+ * Each level fades into the next across the feather (TILT_LAYER), the untouched picture sits on top inside
+ * the band, and the grade and vignette finish it (TILT_GRADE). The platform blur downsamples internally,
+ * so even a very large radius stays smooth and cheap.
+ */
+@RequiresApi(33)
+class TiltFx private constructor(
+    private val clamp: RuntimeShader,
+    private val layers: List<RuntimeShader>,
+    private val grade: RuntimeShader,
+) {
+    fun effect(raw: FloatArray, x: Float, y: Float, w: Float, h: Float, seed: Float, m: FocusMask): RenderEffect {
+        val mode = ArtMode.TILT_SHIFT
+        (layers + clamp + grade).forEach { Art.setUniforms(it, mode, raw, x, y, w, h, seed, m) }
+        layers.forEachIndexed { i, s -> s.setFloatUniform("lyr", i.toFloat()) }
+        val gradeFx = RenderEffect.createRuntimeShaderEffect(grade, "content")
+        val r = radius(Art.eff(mode, raw), minOf(w, h))
+        if (r < 1f) return gradeFx
+        val clamped = RenderEffect.createRuntimeShaderEffect(clamp, "content")
+        fun blur(k: Float) = RenderEffect.createChainEffect(RenderEffect.createBlurEffect(r * k, r * k, Shader.TileMode.CLAMP), clamped)
+        fun layer(i: Int, under: RenderEffect?): RenderEffect =
+            RenderEffect.createRuntimeShaderEffect(layers[i], "content").let { if (under == null) it else RenderEffect.createChainEffect(it, under) }
+        fun over(dst: RenderEffect, src: RenderEffect) = RenderEffect.createBlendModeEffect(dst, src, BlendMode.SRC_OVER)
+        var comp = over(blur(1f), layer(2, blur(0.5f)))
+        comp = over(comp, layer(1, blur(0.2f)))
+        comp = over(comp, layer(0, null))
+        return RenderEffect.createChainEffect(gradeFx, comp)
+    }
+
+    companion object {
+        fun create(): TiltFx? = runCatching {
+            TiltFx(RuntimeShader(ArtShaders.TILT_CLAMP), List(3) { RuntimeShader(ArtShaders.TILT_LAYER) }, RuntimeShader(ArtShaders.TILT_GRADE))
+        }.getOrNull()
+
+        /** Matches the shaders' tiltR(): 11% of the short side at full Depth, scaled by Intensity (full from 50%, +25% at 100%). */
+        fun radius(v: FloatArray, s: Float): Float {
+            val a = v[0]
+            val ramp = if (a < 0.5f) a * 2f else 1f + (a - 0.5f) * 0.5f
+            return s * 0.11f * v.getOrElse(7) { 0f } * ramp
+        }
     }
 }

@@ -228,7 +228,7 @@ class CropView(ctx: Context) : View(ctx) {
                     c.save(); c.translate(sc.x, sc.y); c.rotate(Math.toDegrees(theta.toDouble()).toFloat())
                     c.clipRect(-w / 2, -h / 2, w / 2, h / 2)
                     val mx = -w / 2 + m.cx * w; val my = -h / 2 + m.cy * h
-                    val inner = m.size * h; val outer = (m.size + 0.03f + m.feather * 0.55f) * h
+                    val inner = m.size * h; val outer = (m.size + Focus.featherLen(m, w / h)) * h
                     focusRing.strokeWidth = 1.4f * d; focusRing.pathEffect = null
                     if (m.type == 2) {
                         c.drawCircle(mx, my, inner, focusRing); c.drawCircle(mx, my, 2.5f * d, focusDot)
@@ -272,7 +272,7 @@ class CropView(ctx: Context) : View(ctx) {
         val ip = cropToImage(m.cx, m.cy)
         val sx = ox + ip.x * bw * k; val sy = oy + ip.y * bh * k
         val scale = (ch * k) / (y1 - y0)
-        val shown = m.copy(cx = (sx - x0) / (x1 - x0), cy = (sy - y0) / (y1 - y0), angle = m.angle + theta, size = m.size * scale, feather = m.feather * scale)
+        val shown = m.copy(cx = (sx - x0) / (x1 - x0), cy = (sy - y0) / (y1 - y0), angle = m.angle + theta, size = m.size * scale, feather = if (m.type == 3) m.feather else m.feather * scale)
         Art.setUniforms(sh, r.mode, r.values, x0, y0, x1 - x0, y1 - y0, r.seed, shown)
         artPaint.shader = sh
         c.drawRect(ox, oy, ox + b.width * k, oy + b.height * k, artPaint)

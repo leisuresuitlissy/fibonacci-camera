@@ -82,13 +82,34 @@ float3 blurWide(float2 p, float r) {
 }
 // The focus mask: 0 inside the sharp region, rising smoothly to 1 across the feather.
 // Measured in frame heights from the mask's centre (radial) or centre line (band).
+// Tilt Shift's band (type 3) takes Feather as a share of the room left between the sharp band and the
+// frame's far corner, so even full Feather leaves a fully blurred region (12% of the room at 0, 72% at 100%).
+float bandFeather() {
+    float a = res.x / res.y;
+    float2 n = float2(-sin(msk.z), cos(msk.z));
+    float2 c = (msk.xy - 0.5) * float2(a, 1.0);
+    float far = max(max(abs(dot(float2(-0.5 * a, -0.5) - c, n)), abs(dot(float2(0.5 * a, -0.5) - c, n))),
+                    max(abs(dot(float2(-0.5 * a, 0.5) - c, n)), abs(dot(float2(0.5 * a, 0.5) - c, n))));
+    return max(far - msz.x, 0.05) * (0.12 + 0.6 * msz.y);
+}
 float maskSoft(float2 p) {
     if (msk.w < 0.5) return 0.0;
     float2 d = (uvOf(p) - msk.xy) * float2(res.x / res.y, 1.0);
-    float dist = msk.w < 1.5 ? abs(dot(d, float2(-sin(msk.z), cos(msk.z)))) : length(d);
-    float f = 0.03 + msz.y * 0.55;
+    bool band = msk.w < 1.5 || msk.w > 2.5;
+    float dist = band ? abs(dot(d, float2(-sin(msk.z), cos(msk.z)))) : length(d);
+    float f = msk.w > 2.5 ? bandFeather() : 0.03 + msz.y * 0.55;
     float t = clamp((dist - msz.x) / f, 0.0, 1.0);
     return t * t * (3.0 - 2.0 * t);
+}
+// Tilt Shift: the blur radius at full distance from the band (Depth × Intensity), shared with Kotlin's TiltFx.
+float tiltRamp() { return amt < 0.5 ? amt * 2.0 : 1.0 + (amt - 0.5) * 0.5; }
+float tiltR() { return min(res.x, res.y) * 0.11 * msz.z * tiltRamp(); }
+// Tilt Shift's miniature grade: a little more colour, and crisper local contrast only where it's sharp.
+float3 tiltGrade(float2 p, float3 c, float soft) {
+    float k = amt;
+    float3 local = blurAt(p, min(res.x, res.y) * 0.004);
+    c = clamp(c + (c - local) * 0.45 * k * (1.0 - soft), 0.0, 1.0);
+    return satur(scurve(c, 0.18 * k), 1.0 + 0.3 * k);
 }
 // Depth: gently softer away from the sharp region, like a fast lens. msz.z is the strength.
 float depthR(float2 p) {
@@ -137,14 +158,13 @@ float filmGrain(float2 p, float l) {
 half4 main(float2 p) {
     float4 o = px(p);
     if (!inFrame(p)) return half4(o);
-    // The finished miniature look: a fully sharp band (maskSoft 0 inside Width), blur growing across
-    // Feather to Depth's strength, toy-like colour. Intensity blends the original with it.
-    float s = min(res.x, res.y);
+    // Single-pass version (photo editor preview, iOS). On Android the camera and saved photos use TiltFx:
+    // the same band, radius and grade, with a layered GPU blur. Blur grows from 0 at the band's edge to
+    // tiltR() at the end of the feather; Intensity scales the blur and the grade, never a ghost of the original.
     float soft = maskSoft(p);
-    float r = pow(soft, 1.35) * s * 0.05 * msz.z;
+    float r = pow(soft, 1.5) * 1.15 * tiltR();
     float3 base = r < 0.6 ? o.rgb : blurWide(p, r);
-    float3 fx = satur(scurve(base, 0.35), 1.32);
-    return half4(vignette(p, float4(mix(o.rgb, fx, amt), o.a)));
+    return half4(vignette(p, float4(tiltGrade(p, base, soft), o.a)));
 }
 """,
         // A plastic lens on a square camera: soft, uneven edges, colour fringing, a vignette that isn't
@@ -517,4 +537,31 @@ half4 main(float2 p) {
     )
 
     fun source(mode: ArtMode) = COMMON + (BODIES[mode] ?: "")
+
+    /** TiltFx, pass 1: the frame's edge pixels repeat outward, so the blur never pulls in what lies outside the frame. */
+    val TILT_CLAMP get() = COMMON + """
+half4 main(float2 p) { return content.eval(clamp(p, org + 0.5, org + res - 0.5)); }
+"""
+
+    /**
+     * TiltFx, a blur layer: the picture (lyr 0, sharp) or a blur level (lyr 1, 2) with the alpha that crossfades it into
+     * the next stronger level as you move away from the band. Outside the frame the sharp original stays.
+     */
+    val TILT_LAYER get() = COMMON + """
+uniform float lyr;
+half4 main(float2 p) {
+    float4 c = px(p);
+    float t = inFrame(p) ? maskSoft(p) * 3.0 : 0.0;
+    return half4(c * (1.0 - clamp(t - lyr, 0.0, 1.0)));
+}
+"""
+
+    /** TiltFx, last pass: the miniature grade and the vignette over the blended layers. */
+    val TILT_GRADE get() = COMMON + """
+half4 main(float2 p) {
+    float4 o = px(p);
+    if (!inFrame(p)) return half4(o);
+    return half4(vignette(p, float4(tiltGrade(p, o.rgb, maskSoft(p)), o.a)));
+}
+"""
 }
