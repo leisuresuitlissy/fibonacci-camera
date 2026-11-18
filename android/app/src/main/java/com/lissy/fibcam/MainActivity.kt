@@ -806,7 +806,7 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
                 if (flashMode == ImageCapture.FLASH_MODE_ON) { cap.screenFlash = screenFlash.screenFlash; cap.flashMode = ImageCapture.FLASH_MODE_SCREEN }
                 else cap.flashMode = ImageCapture.FLASH_MODE_OFF
             } else {
-                cap.flashMode = if (camera?.cameraInfo?.hasFlashUnit() == false) ImageCapture.FLASH_MODE_OFF else flashMode
+                cap.flashMode = ImageCapture.FLASH_MODE_OFF   // the back camera's flash is the torch, lit around the shot (see capture)
             }
         }
     }
@@ -1240,7 +1240,7 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
         val cap = ImageCapture.Builder()
             .setResolutionSelector(ResolutionSelector.Builder().setAspectRatioStrategy(ratio43).build())
             .setCaptureMode(ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY)
-            .setFlashMode(if (front) ImageCapture.FLASH_MODE_OFF else flashMode)
+            .setFlashMode(ImageCapture.FLASH_MODE_OFF)
             .build()
         imageCapture = cap
         val analysis = ImageAnalysis.Builder()
@@ -1249,6 +1249,7 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
             .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
             .build()
         analysis.setAnalyzer(analysisExecutor) { img ->
+            sceneLuma = runCatching { lumaOf(img) }.getOrDefault(sceneLuma)
             val st = try { tracker.process(img) } finally { img.close() }
             if (st != null || trackState != null) runOnUiThread { onTrack(st) }
         }
@@ -1768,8 +1769,14 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
         val opts = ImageCapture.OutputFileOptions.Builder(contentResolver, MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
             .setMetadata(ImageCapture.Metadata().apply { isReversedHorizontal = front })
             .build()
-        cap.takePicture(opts, ContextCompat.getMainExecutor(this), object : ImageCapture.OnImageSavedCallback {
+        // Flash on the back camera is lit by the torch: on, exposure settles on the lit scene, shoot, off.
+        // The one-shot flash burst left Pixel photos black (the frame was exposed for a flash that fired too early).
+        val torchFlash = !front && flashMode != ImageCapture.FLASH_MODE_OFF && camera?.cameraInfo?.hasFlashUnit() == true &&
+            (flashMode == ImageCapture.FLASH_MODE_ON || sceneLuma < AUTO_FLASH_LUMA)
+        if (torchFlash && torchShooting) return
+        val shoot = { cap.takePicture(opts, ContextCompat.getMainExecutor(this), object : ImageCapture.OnImageSavedCallback {
             override fun onImageSaved(out: ImageCapture.OutputFileResults) {
+                if (torchFlash) endTorchFlash()
                 val uri = out.savedUri ?: return
                 lastUri = uri
                 prefs.edit().putString("lastUri", uri.toString()).putString("thumbUri", uri.toString()).apply()
@@ -1787,9 +1794,32 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
                 loadThumb()
             }
             override fun onError(e: ImageCaptureException) {
+                if (torchFlash) endTorchFlash()
                 Toast.makeText(this@MainActivity, "Couldn't save: ${e.message}", Toast.LENGTH_SHORT).show()
             }
-        })
+        }) }
+        if (!torchFlash) { shoot(); return }
+        torchShooting = true
+        cap.flashMode = ImageCapture.FLASH_MODE_OFF
+        val ctl = camera?.cameraControl
+        if (ctl == null) { endTorchFlash(); shoot(); return }
+        ctl.enableTorch(true).addListener({ stage.postDelayed({ if (torchShooting) shoot() }, TORCH_SETTLE_MS) }, ContextCompat.getMainExecutor(this))
+    }
+
+    /** Average brightness of the latest analysis frame (0..1), for Auto flash. */
+    @Volatile private var sceneLuma = 1f
+    private var torchShooting = false
+    private fun endTorchFlash() {
+        torchShooting = false
+        camera?.cameraControl?.enableTorch(false)
+        applyFlash()
+    }
+    private fun lumaOf(img: androidx.camera.core.ImageProxy): Float {
+        val pl = img.planes[0]; val buf = pl.buffer; val rs = pl.rowStride
+        var sum = 0L; var n = 0
+        var y = 0
+        while (y < img.height) { var x = 0; while (x < img.width) { sum += buf.get(y * rs + x).toInt() and 0xFF; n++; x += 16 }; y += 16 }
+        return if (n == 0) 1f else sum / (n * 255f)
     }
 
     private fun saveDouble(first: Uri, second: Uri, name: String, b: Blend, strength: Float, r: Recipe?) {
@@ -1963,5 +1993,9 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
     companion object {
         /** Where photos are saved. Kept from before the rename so existing galleries stay together. */
         const val PHOTO_DIR = "Pictures/Fibonacci Camera"
+        /** Auto flash fires (as the torch) when the scene averages darker than this. */
+        const val AUTO_FLASH_LUMA = 0.18f
+        /** How long the torch lights the scene before the shot, so exposure and white balance settle. */
+        const val TORCH_SETTLE_MS = 650L
     }
 }
