@@ -56,6 +56,8 @@ enum class ArtMode(
     val extra: Pair<Float, Float> = 0f to 0f,
     /** Sliders that don't start at 50% (slot to starting position). */
     val start: Map<Int, Float> = emptyMap(),
+    /** What this look's Vignette renders at 50% (most looks share [VIG_50]). */
+    val vig50: Float = VIG_50,
 ) {
     OFF("OFF", emptyList()),
     TILT_SHIFT("TILT SHIFT", listOf("Intensity" to 0.5f, "Focus" to 0.5f, "Width" to 0.3f, "Angle" to 0.5f, "Feather" to 0.5f),
@@ -90,9 +92,10 @@ enum class ArtMode(
         listOf(INTENSITY, c("Tone", 1), c("Grain", 2), VIGNETTE, DEPTH)),
     SOLARISED("SOLARISED", listOf("Intensity" to 0.5f, "Reversal" to 0.7f, "Threshold" to 0.45f, "Contour" to 0.35f, "Depth" to DEPTH_50),
         listOf(INTENSITY, c("Reversal", 1), c("Threshold", 2), c("Contour", 3), VIGNETTE, DEPTH)),
-    // Texture is the film's grain (values[6]); the slight softness stays at its calibrated 0.4.
-    INSTANT("INSTANT", listOf("Intensity" to 0.5f, "Warmth" to 0.55f, "Fade" to 0.5f, "Softness" to 0.4f, "Depth" to DEPTH_50),
-        listOf(INTENSITY, c("Warmth", 1), c("Fade", 2), c("Texture", 6), VIGNETTE, DEPTH), extra = 0.4f to 0f);
+    // SX-70: Warmth cool → creamy → honey, Fade lifts blacks and softens contrast, Texture is grain (values[6]);
+    // the slight softness stays at its calibrated 0.4, and the vignette starts much lighter than other looks.
+    INSTANT("INSTANT", listOf("Intensity" to 0.5f, "Warmth" to 0.62f, "Fade" to 0.5f, "Softness" to 0.4f, "Depth" to DEPTH_50),
+        listOf(INTENSITY, c("Warmth", 1), c("Fade", 2), c("Texture", 6), VIGNETTE, DEPTH), extra = 0.4f to 0f, vig50 = 0.15f);
 
     /** Every slider starts at 50%; [calib] says what 50% looks like. */
     val defaults: FloatArray get() = FloatArray(Art.SLOTS) { i -> if (i == 5) defaultVariation.toFloat() else start[i] ?: 0.5f }
@@ -101,7 +104,7 @@ enum class ArtMode(
      * 50% scale down to 0, above it up to 1, so the slider still covers the whole range.
      */
     val calib: FloatArray get() = FloatArray(Art.SLOTS) { i ->
-        when (i) { 0 -> 0.5f; 5 -> 0.5f; 6 -> extra.first; 7 -> extra.second; 8 -> VIG_50; else -> sliders.getOrNull(i)?.second ?: 0f }
+        when (i) { 0 -> 0.5f; 5 -> 0.5f; 6 -> extra.first; 7 -> extra.second; 8 -> vig50; else -> sliders.getOrNull(i)?.second ?: 0f }
     }
     /** Whether variation [i] is the random one (it gets a fresh, stable seed when chosen). */
     fun isRandom(i: Int) = variations.getOrNull(i) == "RANDOM"

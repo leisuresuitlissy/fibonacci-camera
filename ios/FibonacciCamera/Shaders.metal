@@ -513,22 +513,46 @@ fragment float4 art_SOLARISED(VOut in [[stage_in]], texture2d<float> T [[texture
     return fx_SOLARISED(T, uu, (in.pos.xy - uu.vpo_) * uu.vps_);
 }
 
+// Vintage SX-70 instant film. Intensity blends the whole look in; Warmth turns the film's white balance from
+// cool green-teal (0) through creamy (50%) to honey (100%); Fade lifts and tints the blacks, flattens contrast
+// and rolls the highlights off further; Texture is fine clumping grain plus faint chemical unevenness.
 static float4 fx_INSTANT(texture2d<float> T, constant U& uu, float2 p) {
     float4 o = px(p);
     if (!inFrame(p)) return float4(o);
     float a = 1.0 - pow(1.0 - amt, 1.3);
     float s = min(res.x, res.y);
-    float3 c = focusAt(p, o.rgb);
-    c = mix(c, blurAt(p, s * (0.001 + p3 * 0.004)), (0.4 + 0.5 * p3) * a);
+    float3 base = focusAt(p, o.rgb);
+    // the plastic optics: a touch of softness, never a blur (p3 stays at its calibrated 0.4)
+    float3 c = mix(base, blurAt(p, s * 0.0012 * (0.6 + p3)), 0.45);
+    // halation: bright areas glow warmly into their surroundings; screened, so it can't clip
+    float3 halo = bloomAt(p, s * 0.024, 0.7);
+    c = screen(c, halo * float3(1.0, 0.82, 0.62) * (0.22 + 0.22 * p2));
+    // dye response: muted but characterful. Blues lean teal, greens lean olive, reds lean brick
+    c = float3(dot(c, float3(0.90, 0.12, -0.02)), dot(c, float3(0.05, 0.88, 0.07)), dot(c, float3(0.03, 0.17, 0.80)));
     float l = luma(c);
-    c = satur(c, 1.0 - 0.3 * a);
-    c += float3(0.05, 0.018, -0.05) * (p1 * 2.0 - 0.3) * a * (1.0 - abs(l - 0.5) * 1.2);
-    c = mix(c, c * 0.84 + float3(0.17, 0.15, 0.09), smoothstep(0.45, 1.0, l) * a);
-    c = c * (1.0 - 0.2 * p2 * a) + float3(0.07, 0.09, 0.1) * p2 * a;
-    c = mix(c, smoothstep(float3(-0.1), float3(1.1), c), -0.3 * a);
-    c *= vig(p, 0.16 * a);
-    c += filmGrain(p, l) * 0.015 * a * (p4 / 0.4);
-    return float4(vignette(p, float4(clamp(c, 0.0, 1.0), o.a)));
+    c = satur(c, 0.92);
+    // a yellow-green shift in the midtones, green-teal in the shadows (the cream comes later, in the whites)
+    float mid = clamp(1.0 - abs(l - 0.45) * 1.6, 0.0, 1.0);
+    c += float3(0.008, 0.022, -0.022) * mid;
+    c += float3(-0.012, 0.012, 0.016) * (1.0 - l) * (1.0 - l);
+    // warmth as white balance (it multiplies, so the blacks keep their own tint)
+    c *= 1.0 + float3(0.10, 0.035, -0.13) * (p1 * 2.0 - 1.0);
+    c = clamp(c, 0.0, 1.0);
+    // softer contrast: a shoulder so highlights roll off, then a little flatter
+    float k = 0.2 + 0.3 * p2;
+    c = c / (1.0 + c * k) * (1.0 + k);
+    float fl = 0.04 + 0.2 * p2;
+    c = clamp(c * (1.0 - fl) + 0.5 * fl, 0.0, 1.0);
+    // lifted, tinted blacks and creamy whites that stop short of paper white
+    float3 blk = mix(float3(0.07, 0.085, 0.095), float3(0.11, 0.09, 0.065), p1) * ((0.03 + 0.2 * p2) / 0.09);
+    float3 wht = mix(float3(0.93, 0.95, 0.93), float3(0.985, 0.945, 0.83), p1) * (0.995 - 0.06 * p2);
+    c = blk + c * (wht - blk);
+    // texture: fine grain that clumps a little, and faint unevenness in the developer spread
+    c += filmGrain(p, luma(c)) * (0.005 + 0.055 * p4);
+    float2 u = uvOf(p) * float2(res.x / res.y, 1.0);
+    c *= 1.0 + (vnoise(u * 9.0 + 3.1) - 0.5) * 0.06 * p4;
+    c = mix(base, clamp(c, 0.0, 1.0), a);
+    return float4(vignette(p, float4(c, o.a)));
 }
 
 fragment float4 art_INSTANT(VOut in [[stage_in]], texture2d<float> T [[texture(0)]], constant U& uu [[buffer(0)]]) {
