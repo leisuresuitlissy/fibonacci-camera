@@ -56,6 +56,7 @@ import androidx.camera.core.resolutionselector.ResolutionSelector
 import androidx.camera.core.resolutionselector.ResolutionStrategy
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
+import androidx.camera.view.ScreenFlashView
 import androidx.core.content.ContextCompat
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
@@ -99,6 +100,8 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
     private lateinit var flashBtn: FrameLayout
     private lateinit var flashIcon: ImageView
     private lateinit var flashAuto: TextView
+    /** Front camera has no flash unit: a full-screen white flash above everything (outside the live Look's effect). */
+    private lateinit var screenFlash: ScreenFlashView
     private lateinit var thumb: ImageView
     private lateinit var gateMsg: TextView
     private lateinit var tabRow: LinearLayout
@@ -258,6 +261,8 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
         blendStrength = prefs.getFloat("blendStrength", 0.6f)
         shot?.let { applyShot(it) }
         setContentView(buildUi())
+        screenFlash = ScreenFlashView(this).also { root.addView(it, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT)) }
+        screenFlash.setScreenFlashWindow(window)
         sensors = getSystemService(Context.SENSOR_SERVICE) as SensorManager
         orientation = object : OrientationEventListener(this) {
             override fun onOrientationChanged(o: Int) {
@@ -601,7 +606,7 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
         }
         bar.addView(shutter, lp(dpi(72f), dpi(72f)))
         val flip = roundIcon(R.drawable.ic_flip, 44f, "Switch camera") {
-            front = !front; tracker.clear(); trackState = null; overlay.target = null; tapFocus = null; bindCamera()
+            front = !front; if (front && flashMode == ImageCapture.FLASH_MODE_AUTO) flashMode = ImageCapture.FLASH_MODE_OFF; tracker.clear(); trackState = null; overlay.target = null; tapFocus = null; bindCamera()
         }
         bar.addView(flip)
         val settings = roundIcon(R.drawable.ic_settings, 44f, "Settings") { openSettings() }
@@ -779,17 +784,44 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
         coachBtn.contentDescription = if (coach) "Coach on" else "Coach off"
     }
 
+    private fun flashLabel(): String = when {
+        flashMode == ImageCapture.FLASH_MODE_OFF -> "Flash off"
+        front -> "Screen flash on"
+        flashMode == ImageCapture.FLASH_MODE_AUTO -> "Flash auto"
+        else -> "Flash on"
+    }
+
     private fun syncFlashBtn() {
         val on = flashMode != ImageCapture.FLASH_MODE_OFF
         setActive(flashBtn, flashIcon, on)
         flashAuto.visibility = if (flashMode == ImageCapture.FLASH_MODE_AUTO) View.VISIBLE else View.GONE
-        flashBtn.contentDescription = when (flashMode) { ImageCapture.FLASH_MODE_AUTO -> "Flash auto"; ImageCapture.FLASH_MODE_ON -> "Flash on"; else -> "Flash off" }
+        flashBtn.contentDescription = flashLabel()
+    }
+
+    /** Hands the chosen flash to the camera: the real flash on the back, the screen as a flash on the front. */
+    private fun applyFlash() {
+        val cap = imageCapture ?: return
+        runCatching {
+            if (front) {
+                if (flashMode == ImageCapture.FLASH_MODE_ON) { cap.screenFlash = screenFlash.screenFlash; cap.flashMode = ImageCapture.FLASH_MODE_SCREEN }
+                else cap.flashMode = ImageCapture.FLASH_MODE_OFF
+            } else {
+                cap.flashMode = if (camera?.cameraInfo?.hasFlashUnit() == false) ImageCapture.FLASH_MODE_OFF else flashMode
+            }
+        }
     }
 
     private fun cycleFlash() {
-        flashMode = when (flashMode) { ImageCapture.FLASH_MODE_OFF -> ImageCapture.FLASH_MODE_AUTO; ImageCapture.FLASH_MODE_AUTO -> ImageCapture.FLASH_MODE_ON; else -> ImageCapture.FLASH_MODE_OFF }
-        imageCapture?.flashMode = flashMode
+        if (!front && camera?.cameraInfo?.hasFlashUnit() == false) {
+            Toast.makeText(this, "This camera has no flash", Toast.LENGTH_SHORT).show(); return
+        }
+        // Off → On → Auto, so the first tap does what the icon promises. The front camera has no Auto: Off ↔ screen flash.
+        flashMode = if (front) { if (flashMode == ImageCapture.FLASH_MODE_ON) ImageCapture.FLASH_MODE_OFF else ImageCapture.FLASH_MODE_ON }
+            else when (flashMode) { ImageCapture.FLASH_MODE_OFF -> ImageCapture.FLASH_MODE_ON; ImageCapture.FLASH_MODE_ON -> ImageCapture.FLASH_MODE_AUTO; else -> ImageCapture.FLASH_MODE_OFF }
+        applyFlash()
         syncFlashBtn()
+        Haptics.neutral(flashBtn)
+        Toast.makeText(this, flashLabel(), Toast.LENGTH_SHORT).show()
     }
 
     // ---- compose
@@ -1198,7 +1230,7 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
         val cap = ImageCapture.Builder()
             .setResolutionSelector(ResolutionSelector.Builder().setAspectRatioStrategy(ratio43).build())
             .setCaptureMode(ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY)
-            .setFlashMode(flashMode)
+            .setFlashMode(if (front) ImageCapture.FLASH_MODE_OFF else flashMode)
             .build()
         imageCapture = cap
         val analysis = ImageAnalysis.Builder()
@@ -1217,6 +1249,7 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
             gate("The camera could not start: ${e.message}"); return
         }
         gateMsg.visibility = View.GONE
+        applyFlash(); syncFlashBtn()
         chipsFor = ""
         lensStops = camera?.let { measureLenses(it) }
         camera?.cameraInfo?.zoomState?.observe(this) { z -> onZoom(z) }
