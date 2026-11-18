@@ -493,7 +493,9 @@ half4 main(float2 p) {
     c += float3(0.008, 0.022, -0.022) * mid;
     c += float3(-0.012, 0.012, 0.016) * (1.0 - l) * (1.0 - l);
     // warmth as white balance (it multiplies, so the blacks keep their own tint)
-    c *= 1.0 + float3(0.10, 0.035, -0.13) * (p1 * 2.0 - 1.0);
+    // (cool side leans green-teal like aged SX-70, not blue)
+    float w = p1 * 2.0 - 1.0;
+    c *= 1.0 + (w >= 0.0 ? float3(0.10, 0.035, -0.13) * w : float3(-0.09, 0.02, 0.05) * -w);
     c = clamp(c, 0.0, 1.0);
     // softer contrast: a shoulder so highlights roll off, then a little flatter
     float k = 0.2 + 0.3 * p2;
