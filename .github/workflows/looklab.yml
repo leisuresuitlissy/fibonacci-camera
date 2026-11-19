@@ -5,6 +5,8 @@ on:
   push:
     paths: ['.github/looklab/**', '.github/workflows/looklab.yml']
   workflow_dispatch:
+permissions:
+  contents: write
 jobs:
   lab:
     runs-on: ubuntu-latest
@@ -42,9 +44,21 @@ jobs:
           ram-size: 4096M
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back emulated
           script: bash .github/looklab/run.sh android/app/build/outputs/apk/direct/release/app-direct-release.apk lab out
-      - uses: actions/upload-artifact@v4
+      - name: Contact sheets
+        run: |
+          python3 .github/looklab/sheets.py out lab sheets
+          cd sheets && zip -q ../looklab-sheets.zip *.jpg && cd ..
+          mkdir -p keep && cp out/*__desk__def.jpg out/*__deskbig__def.jpg keep/ 2>/dev/null || true
+          cd keep && zip -q ../looklab-full.zip *.jpg && cd ..
+      - uses: ncipollo/release-action@v1
         with:
-          name: looklab
-          path: |
-            out
-            lab/*.jpg
+          tag: looklab
+          commit: ${{ github.sha }}
+          name: Look lab renders (not a release)
+          body: Look lab contact sheets for ${{ github.sha }}.
+          artifacts: looklab-sheets.zip,looklab-full.zip
+          allowUpdates: true
+          replacesArtifacts: true
+          removeArtifacts: true
+          prerelease: true
+          makeLatest: false
