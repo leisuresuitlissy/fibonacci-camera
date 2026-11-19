@@ -29,7 +29,7 @@ enum ArtMode: String, CaseIterable {
         case .KINO: return [("Intensity", 0.5), ("Halation", 0.5), ("Coolness", 0.5), ("Grain", 0.35), ("Depth", 0)]
         case .EXPIRED: return [("Intensity", 0.5), ("Age", 0.5), ("Grain", 0.45), ("", 0), ("Depth", 0)]
         case .REDSCALE: return [("Intensity", 0.5), ("Tone", 0.45), ("Grain", 0.3), ("", 0), ("Depth", 0)]
-        case .SOLARISED: return [("Intensity", 0.5), ("Reversal", 0.7), ("Threshold", 0.45), ("Contour", 0.35), ("Depth", 0)]
+        case .SOLARISED: return [("Intensity", 0.5), ("Reversal", 0.5), ("Threshold", 0.45), ("Contour", 0.35), ("Depth", 0)]
         case .INSTANT: return [("Intensity", 0.5), ("Warmth", 0.62), ("Fade", 0.5), ("Softness", 0.4), ("Depth", 0)]
         }
     }

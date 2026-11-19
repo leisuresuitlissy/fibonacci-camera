@@ -92,7 +92,7 @@ enum class ArtMode(
         variations = listOf("WARM", "MAGENTA", "COOL", "RANDOM"), variationLabel = "COLOUR", defaultVariation = 1),
     REDSCALE("REDSCALE", listOf("Intensity" to 0.5f, "Tone" to 0.45f, "Grain" to 0.3f, "" to 0f, "Depth" to DEPTH_50),
         listOf(INTENSITY, c("Tone", 1), c("Grain", 2), VIGNETTE, DEPTH)),
-    SOLARISED("SOLARISED", listOf("Intensity" to 0.5f, "Reversal" to 0.7f, "Threshold" to 0.45f, "Contour" to 0.35f, "Depth" to DEPTH_50),
+    SOLARISED("SOLARISED", listOf("Intensity" to 0.5f, "Reversal" to 0.5f, "Threshold" to 0.45f, "Contour" to 0.35f, "Depth" to DEPTH_50),
         listOf(INTENSITY, c("Reversal", 1), c("Threshold", 2), c("Contour", 3), VIGNETTE, DEPTH)),
     // SX-70: Warmth cool → creamy → honey, Fade lifts blacks and softens contrast, Texture is grain (values[6]);
     // the slight softness stays at its calibrated 0.4, and the vignette starts much lighter than other looks.
@@ -211,7 +211,8 @@ object Focus {
     fun tiltBand(v: FloatArray, aspect: Float): FocusMask {
         val a = (v[3] - 0.5f) * HALF_PI
         val d = v[1] - 0.5f
-        return FocusMask(3, 0.5f - kotlin.math.sin(a) * d / aspect, 0.5f + kotlin.math.cos(a) * d, a, 0.02f + v[2] * 0.3f, v[4], v.getOrElse(7) { 0f })
+        // Width: half-width 0.02 to 0.24 frame heights (eases in), so even the widest band leaves blurred room
+        return FocusMask(3, 0.5f - kotlin.math.sin(a) * d / aspect, 0.5f + kotlin.math.cos(a) * d, a, 0.02f + 0.22f * Math.pow(v[2].toDouble(), 0.75).toFloat(), v[4], v.getOrElse(7) { 0f })
     }
 
     /** The mask's fade length in frame heights, as the shaders work it out (bandFeather / maskSoft). */

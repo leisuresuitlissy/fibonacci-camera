@@ -4,7 +4,7 @@ kt = open(sys.argv[1]).read()
 common = re.search(r'const val COMMON = """(.*?)"""', kt, re.S).group(1)
 bodies = re.findall(r'ArtMode\.(\w+) to """(.*?)"""', kt, re.S)
 common = "\n".join(l for l in common.splitlines() if not l.strip().startswith("uniform "))
-helpers = ["hash", "px", "uvOf", "inFrame", "edgeOf", "vig", "blurAt", "blurWide", "bandFeather", "maskSoft", "tiltRamp", "tiltR", "tiltGrade", "depthR", "focusAt", "bloomAt", "grainAt", "vnoise", "filmGrain", "vignette"]
+helpers = ["hash", "px", "uvOf", "inFrame", "edgeOf", "vig", "blurAt", "blurWide", "bandFeather", "maskSoft", "tiltRamp", "tiltR", "tiltGrade", "depthR", "focusAt", "bloomAt", "grainAt", "vnoise", "filmGrain", "fineGrain", "vignette"]
 out_common = []
 lines = common.splitlines()
 i = 0

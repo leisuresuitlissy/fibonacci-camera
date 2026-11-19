@@ -5,7 +5,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 from looks import LOOKS
 lab = sys.argv[1]
 have = set(os.listdir(lab))
-photos = [f for f in ["k04.jpg", "k07.jpg", "k13.jpg", "k16.jpg", "k19.jpg", "k22.jpg", "k23.jpg", "k24.jpg", "k08.jpg", "k11.jpg"] if f in have]
+photos = [f for f in ["k04.jpg", "k07.jpg", "k13.jpg", "k16.jpg", "k19.jpg", "k22.jpg", "k23.jpg", "k14.jpg", "k08.jpg", "k05.jpg"] if f in have]
 out = []
 for f in ["desk.jpg"] + photos:
     out.append(f"ref__{f[:-4]}|{f}|OFF|")
