@@ -49,7 +49,7 @@ jobs:
           python3 .github/looklab/sheets.py out lab sheets
           cd sheets && zip -q ../looklab-sheets.zip *.jpg && cd ..
           mkdir -p keep && cp out/*__desk__def.jpg out/*__deskbig__def.jpg keep/ 2>/dev/null || true
-          cd keep && zip -q ../looklab-full.zip *.jpg && cd ..
+          (cd keep && zip -q ../looklab-full.zip *.jpg) || touch looklab-full.zip
       - uses: ncipollo/release-action@v1
         with:
           tag: looklab

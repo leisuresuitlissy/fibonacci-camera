@@ -18,6 +18,6 @@ for i in $(seq 1 600); do
   if adb shell ls $D/done > /dev/null 2>&1; then echo "done"; break; fi
   n=$(adb shell ls $D/out 2>/dev/null | wc -l); echo "rendered $n / $total"; sleep 6
 done
-adb pull $D/out "$OUT"/ > /dev/null
+adb pull "$D/out/." "$OUT/" > /dev/null
 adb logcat -d -s AndroidRuntime:E > "$OUT/crash.txt" || true
 ls "$OUT" | head
