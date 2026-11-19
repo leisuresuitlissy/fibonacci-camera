@@ -522,7 +522,7 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
         selector.addView(composeScroller, lp(match, match))
         lookScroller = FadeScroller(this, dp(36f))
         val lRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(dpi(16f), 0, dpi(16f), 0) }
-        val looks = listOf(ArtMode.OFF to ("Original" to R.drawable.look_original), ArtMode.HOLGA to ("Holga" to R.drawable.look_holga),
+        val looks = listOf(ArtMode.OFF to ("Original" to R.drawable.look_original), ArtMode.HOLGA to ("Plastic" to R.drawable.look_holga),
             ArtMode.PINHOLE to ("Pinhole" to R.drawable.look_pinhole), ArtMode.TILT_SHIFT to ("Tilt shift" to R.drawable.look_tilt_shift),
             ArtMode.GRAINY_FILM to ("Grainy film" to R.drawable.look_grainy_film), ArtMode.CROSS_PROCESS to ("Cross process" to R.drawable.look_cross_process),
             ArtMode.CYANOTYPE to ("Cyanotype" to R.drawable.look_cyanotype), ArtMode.DREAM_LENS to ("Dream lens" to R.drawable.look_dream_lens),

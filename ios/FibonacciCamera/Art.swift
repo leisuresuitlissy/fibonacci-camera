@@ -10,8 +10,8 @@ enum ArtMode: String, CaseIterable {
     case OFF, TILT_SHIFT, HOLGA, PINHOLE, GRAINY_FILM, CROSS_PROCESS, DREAM_LENS, INFRARED, CYANOTYPE, BLEACH_BYPASS
     case KINO, EXPIRED, REDSCALE, SOLARISED, INSTANT
 
-    var label: String { rawValue.replacingOccurrences(of: "_", with: " ") }
-    var fileTag: String { rawValue.lowercased().replacingOccurrences(of: "_", with: "-") }
+    var label: String { self == .HOLGA ? "PLASTIC" : rawValue.replacingOccurrences(of: "_", with: " ") }
+    var fileTag: String { label.lowercased().replacingOccurrences(of: " ", with: "-") }
 
     var sliders: [(String, Float)] {
         switch self {

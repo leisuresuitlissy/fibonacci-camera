@@ -64,7 +64,7 @@ enum class ArtMode(
     OFF("OFF", emptyList()),
     TILT_SHIFT("TILT SHIFT", listOf("Intensity" to 0.5f, "Focus" to 0.5f, "Width" to 0.3f, "Angle" to 0.5f, "Feather" to 0.5f),
         listOf(INTENSITY, c("Focus", 1), c("Width", 2), c("Angle", 3, degrees = true), c("Feather", 4), VIGNETTE, c("Depth", 7)), extra = 0f to 0.5f, vig50 = 0.15f),
-    HOLGA("HOLGA", listOf("Intensity" to 0.5f, "Vignette" to 0.55f, "Softness" to 0.3f, "Leaks" to 0.45f, "Depth" to DEPTH_50),
+    HOLGA("PLASTIC", listOf("Intensity" to 0.5f, "Vignette" to 0.55f, "Softness" to 0.3f, "Leaks" to 0.45f, "Depth" to DEPTH_50),
         listOf(INTENSITY, c("Softness", 2), VIGNETTE, c("Leaks", 3, choices = true), c("Saturation", 6), DEPTH),
         variations = listOf("OFF", "WARM", "COOL", "NEUTRAL", "MIXED", "RANDOM"), variationLabel = "LEAK", defaultVariation = 1, extra = 0.5f to 0f),
     PINHOLE("PINHOLE", listOf("Intensity" to 0.5f, "Softness" to 0.3f, "Vignette" to 0.5f, "" to 0f, "Depth" to DEPTH_50),
@@ -113,7 +113,8 @@ enum class ArtMode(
     /** The value slots that have a slider, in display order (the editor uses these too). */
     val shown: List<Int> get() = controls.filter { it.slot >= 0 }.map { it.slot }
     fun labelOf(slot: Int): String = controls.firstOrNull { it.slot == slot }?.label ?: sliders.getOrNull(slot)?.first ?: ""
-    val fileTag: String get() = name.lowercase().replace('_', '-')
+    /** Saved-file suffix: the look's display name (HOLGA shows and saves as Plastic; its id stays for stored settings). */
+    val fileTag: String get() = label.lowercase().replace(' ', '-').replace('_', '-')
     val hasDepth: Boolean get() = sliders.getOrNull(4)?.first == "Depth"
     /** The slot Depth lives in (Tilt Shift keeps Feather in 4). */
     val depthSlot: Int get() = if (this == TILT_SHIFT) 7 else 4
