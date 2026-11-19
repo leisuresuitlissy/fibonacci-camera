@@ -321,6 +321,7 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
                 p.getOrNull(8)?.removePrefix("set")?.toIntOrNull()?.let { n -> art.controls.getOrNull(artParam)?.slot?.takeIf { it >= 0 }?.let { artValues[it] = n / 100f } } }
             "exposure" -> evAtStart = true
             "render" -> renderShot = s
+            "batch" -> labBatch()
             "double" -> { double = true; coach = true; flashMode = ImageCapture.FLASH_MODE_ON }
         }
     }
@@ -1517,6 +1518,42 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
      * photo would be (Art.render with the mask the camera would use), then draws the guide on top of the
      * on-screen copy only, so the sharp region can be compared with the anchor.
      */
+    /**
+     * Look lab (CI only, via `-e fibShot batch`): renders every line of files/lab/spec.txt through the same
+     * Art.render + Art.finish path a saved photo takes, and writes JPEGs to files/lab/out. Line format:
+     * `name|fixture file|MODE|slot=percent,...` (slot 5 takes a variation index). Depth is 0 unless set.
+     */
+    private fun labBatch() {
+        if (Build.VERSION.SDK_INT < 33) return
+        val dir = getExternalFilesDir("lab") ?: return
+        val spec = java.io.File(dir, "spec.txt")
+        if (!spec.exists()) return
+        Thread {
+            val out = java.io.File(dir, "out").apply { mkdirs() }
+            val cache = HashMap<String, Bitmap>()
+            spec.readLines().filter { it.isNotBlank() && !it.startsWith("#") }.forEach { line ->
+                val f = line.split("|")
+                runCatching {
+                    val mode = ArtMode.valueOf(f[2])
+                    val v = mode.defaults
+                    if (mode != ArtMode.OFF) v[mode.depthSlot] = 0f
+                    f.getOrNull(3)?.takeIf { it.isNotBlank() }?.split(",")?.forEach { kv ->
+                        val (k, x) = kv.split("="); val i = k.toInt()
+                        v[i] = if (i == 5) x.toFloat() else x.toFloat() / 100f
+                    }
+                    val src = cache.getOrPut(f[1]) {
+                        android.graphics.BitmapFactory.decodeFile(java.io.File(dir, f[1]).path).copy(Bitmap.Config.ARGB_8888, false)
+                    }
+                    val m = Focus.resolve(mode, v, false, null, null, null, src.width.toFloat() / src.height)
+                    val img = if (mode == ArtMode.OFF) src else Art.finish(Art.render(src, Recipe(mode, v, 0.37f, false, m)), mode)
+                    java.io.FileOutputStream(java.io.File(out, f[0] + ".jpg")).use { img.compress(Bitmap.CompressFormat.JPEG, 90, it) }
+                    if (img !== src) img.recycle()
+                }.onFailure { java.io.File(out, f[0] + ".err").writeText(it.toString()) }
+            }
+            java.io.File(dir, "done").writeText("ok")
+        }.start()
+    }
+
     private fun showRenderTest(spec: String) {
         if (Build.VERSION.SDK_INT < 33) return
         val p = spec.split(":")
