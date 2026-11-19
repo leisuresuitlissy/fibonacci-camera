@@ -3,7 +3,7 @@ name: Look lab
 # Art.render path saved photos take, on an emulator. For tuning only: nothing is published.
 on:
   push:
-    paths: ['.github/looklab/**', '.github/workflows/looklab.yml']
+    paths: ['.github/looklab/**', '.github/workflows/looklab.yml', 'android/app/src/main/java/com/lissy/fibcam/ArtShaders.kt', 'android/app/src/main/java/com/lissy/fibcam/Art.kt']
   workflow_dispatch:
 permissions:
   contents: write
