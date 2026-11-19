@@ -331,8 +331,8 @@ static float4 fx_GRAINY_FILM(texture2d<float> T, constant U& uu, float2 p) {
     float l0 = luma(o.rgb);
     // Contrast (p2): a steep curve that rolls off at both ends instead of clipping, and keeps a little of
     // the original separation in the deep shadows so dark surfaces hold their texture.
-    float l = tcurve(l0, 1.2 + (1.4 + 4.4 * p2) * a);
-    l = mix(l, l0, 0.2 * (1.0 - smoothstep(0.0, 0.35, l0)));
+    float l = tcurve(pow(l0, 0.85), 1.2 + (1.4 + 4.4 * p2) * a);
+    l = mix(l, l0 * 1.1, 0.4 * (1.0 - smoothstep(0.0, 0.3, l0)));
     // Grain (p1): fine, film-like, strongest in the midtones and gone in pure black and white.
     l = clamp(l + fineGrain(p, l) * (0.04 + p1 * 0.24) * a, 0.0, 1.0);
     float3 mono = float3(l);
