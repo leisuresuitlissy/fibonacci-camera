@@ -350,9 +350,9 @@ half4 main(float2 p) {
     c = mix(c, soft, 0.1 * p2 * a);
     // Glow (p1): bloom out of the brightest areas into what's around them, not piled onto areas that are
     // already pale (which is what turned them to fog).
-    float3 halo = bloomAt(p, s * (0.014 + p1 * 0.03), 0.68);
+    float3 halo = bloomAt(p, s * (0.016 + p1 * 0.03), 0.58);
     float room = 1.0 - luma(c);
-    c = screen(c, halo * (0.25 + 1.0 * p1) * a * (0.3 + 0.7 * room));
+    c = screen(c, halo * (0.3 + 1.0 * p1) * a * (0.3 + 0.7 * room));
     c = mix(c, c * 0.97 + 0.012, a);
     c = satur(c, 1.0 - 0.06 * a);
     return half4(vignette(p, float4(clamp(c, 0.0, 1.0), o.a)));
@@ -371,7 +371,7 @@ half4 main(float2 p) {
     float sky = smoothstep(-0.04, 0.26, c.b - 0.5 * (c.r + c.g)) * smoothstep(0.08, 0.45, l);
     float ir = 0.42 * c.r + 0.5 * c.g + 0.08 * c.b;
     // Foliage glows: brighter by a share of its own value, so leaves keep their differences.
-    ir *= 1.0 + veg * (0.9 + 0.5 * l);
+    ir = ir * (1.0 + veg * (0.6 + 0.4 * l)) + veg * (0.16 + 0.18 * l);
     ir *= 1.0 - 0.55 * sky;
     // Roll the highlights off before white, then a contrast curve (p1) that never clips at either end.
     ir = tcurve(shoulder(ir, 0.7), 1.4 + p1 * 3.2);
@@ -381,7 +381,8 @@ half4 main(float2 p) {
     // Halation: a soft glow, held back on areas that are already near white.
     float glow = luma(bloomAt(p, min(res.x, res.y) * 0.02, 0.62));
     ir = 1.0 - (1.0 - ir) * (1.0 - glow * p2 * 0.7 * clamp(1.0 - ir, 0.0, 1.0));
-    return half4(vignette(p, float4(mix(c, float3(clamp(ir, 0.0, 1.0)), a), o.a)));
+    // Intensity: most of the way to infrared by 50%, fully there at 100%.
+    return half4(vignette(p, float4(mix(c, float3(clamp(ir, 0.0, 1.0)), 1.0 - pow(1.0 - a, 2.5)), o.a)));
 }
 """,
         // A cyanotype print: Prussian-blue shadows, warm paper whites, a little paper grain.
@@ -453,8 +454,8 @@ half4 main(float2 p) {
     // Halation (p1): 0 = none, up to about twice the default; a red glow that spreads around bright edges
     // and stays off the bright areas themselves, so pale keys keep their edges.
     float3 b = bloomAt(p, s * (0.012 + 0.035 * p1), 0.66);
-    float near = luma(bloomAt(p, s * 0.005, 0.66));
-    float glow = max(luma(b) - 0.8 * near, 0.0) * 4.6 * p1 * a;
+    float near = luma(bloomAt(p, s * 0.01, 0.66));
+    float glow = max(luma(b) - near - 0.04, 0.0) * 4.6 * p1 * a;
     c = screen(c, float3(1.0, 0.28, 0.08) * glow * (0.15 + 0.85 * pow(1.0 - l, 0.7)));
     // Grain (p3): 0 = none.
     c += fineGrain(p, l) * 0.11 * p3 * a;

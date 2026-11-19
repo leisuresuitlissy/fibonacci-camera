@@ -74,7 +74,7 @@ enum class ArtMode(
         listOf(INTENSITY, c("Grain", 1), c("Contrast", 2), c("Saturation", 3), VIGNETTE, DEPTH), start = mapOf(3 to 0f)),
     CROSS_PROCESS("CROSS PROCESS", listOf("Intensity" to 0.5f, "Colour" to 0.5f, "Contrast" to 0.5f, "" to 0f, "Depth" to DEPTH_50),
         listOf(INTENSITY, c("Colour", 1), c("Contrast", 2), VIGNETTE, DEPTH)),
-    DREAM_LENS("DREAM LENS", listOf("Intensity" to 0.5f, "Glow" to 0.5f, "Softness" to 0.3f, "" to 0f, "Depth" to DEPTH_50),
+    DREAM_LENS("DREAM LENS", listOf("Intensity" to 0.5f, "Glow" to 0.5f, "Softness" to 0.5f, "" to 0f, "Depth" to DEPTH_50),
         listOf(INTENSITY, c("Glow", 1), c("Softness", 2), VIGNETTE, DEPTH)),
     // Halation stays at its calibrated 0.3; the camera shows Contrast and Depth only.
     INFRARED("INFRARED", listOf("Intensity" to 0.5f, "Contrast" to 0.5f, "Halation" to 0.3f, "" to 0f, "Depth" to DEPTH_50),
