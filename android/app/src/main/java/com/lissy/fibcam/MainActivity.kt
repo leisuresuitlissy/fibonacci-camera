@@ -1536,7 +1536,7 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
                 runCatching {
                     val mode = ArtMode.valueOf(f[2])
                     val v = mode.defaults
-                    if (mode != ArtMode.OFF) v[mode.depthSlot] = 0f
+                    if (mode != ArtMode.OFF && mode != ArtMode.TILT_SHIFT) v[mode.depthSlot] = 0f   // Tilt Shift's Depth is its blur
                     f.getOrNull(3)?.takeIf { it.isNotBlank() }?.split(",")?.forEach { kv ->
                         val (k, x) = kv.split("="); val i = k.toInt()
                         v[i] = if (i == 5) x.toFloat() else x.toFloat() / 100f

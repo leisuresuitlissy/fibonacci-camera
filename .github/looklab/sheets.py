@@ -25,7 +25,7 @@ def crop(path, box):
     if not os.path.exists(path): return Image.new("RGB", (box[2] - box[0], box[3] - box[1]))
     return Image.open(path).convert("RGB").crop(box)
 P = lambda n: os.path.join(src, n + ".jpg")
-photos = sorted({n.split("__")[1] for n in os.listdir(src) if n.startswith("ref__k")})
+photos = sorted({n[:-4].split("__")[1] for n in os.listdir(src) if n.startswith("ref__k")})
 for m, slots in LOOKS.items():
     ts = [tile(P("ref__desk"), 400, 300, "original"), tile(P(f"{m}__desk__def"), 400, 300, "DEFAULT")]
     for s in slots:

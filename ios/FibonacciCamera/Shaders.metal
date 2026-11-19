@@ -257,16 +257,16 @@ static float4 fx_HOLGA(texture2d<float> T, constant U& uu, float2 p) {
         c.b = mix(c.b, blurAt(p - cd * ca, rr).b, 0.5);
     }
     // The toy-camera print: punchy midtones without clipping, cyan-green shadows, warm yellowish highlights.
-    c = tcurve3(c, 1.0 + 1.9 * a);
+    c = tcurve3(c, 1.0 + 2.6 * a);
     float l = luma(c);
-    c += (float3(-0.05, 0.03, 0.07) * (1.0 - l) * (1.0 - l) + float3(0.06, 0.035, -0.06) * l * l) * a;
+    c += (float3(-0.06, 0.035, 0.085) * (1.0 - l) * (1.0 - l) + float3(0.08, 0.045, -0.08) * l * l) * a * 1.25;
     // Saturation (p4): 50% sits just under the original (the curve already adds punch); 0 muted, 100% rich.
     c = satur(c, 1.0 + (0.45 + p4 - 1.0) * a);
     // Imperfect exposure: a hot centre and uneven density across the frame.
-    c *= (1.0 + 0.10 * a * (1.0 - smoothstep(0.0, 0.8, edge))) * (1.0 + (vnoise(sq * 2.2 + seed * 1.7) - 0.5) * 0.16 * a);
+    c *= (1.0 + 0.14 * a * (1.0 - smoothstep(0.0, 0.8, edge))) * (1.0 + (vnoise(sq * 2.2 + seed * 1.7) - 0.5) * 0.16 * a);
     // The lens barely covers the frame: an irregular fall-off on top of the round Vignette (and tied to it,
     // so Vignette 0 really means none).
-    c *= 1.0 - 0.38 * a * min(1.0, vgn / 0.3) * pow(smoothstep(0.5, 1.3, edge), 1.4);
+    c *= 1.0 - 0.5 * a * min(1.0, vgn / 0.3) * pow(smoothstep(0.45, 1.3, edge), 1.4);
     c += fineGrain(p, luma(c)) * 0.05 * a;
     if (lks > 0.5 && p3 > 0.001) {
         float side = floor(hash(float2(seed, 3.0)) * 4.0);
@@ -334,7 +334,7 @@ static float4 fx_GRAINY_FILM(texture2d<float> T, constant U& uu, float2 p) {
     float l = tcurve(l0, 1.2 + (1.4 + 4.4 * p2) * a);
     l = mix(l, l0, 0.2 * (1.0 - smoothstep(0.0, 0.35, l0)));
     // Grain (p1): fine, film-like, strongest in the midtones and gone in pure black and white.
-    l = clamp(l + fineGrain(p, l) * (0.03 + p1 * 0.17) * a, 0.0, 1.0);
+    l = clamp(l + fineGrain(p, l) * (0.04 + p1 * 0.24) * a, 0.0, 1.0);
     float3 mono = float3(l);
     // Saturation (p3): 0 is black and white; higher brings the scene's own colour back under the same
     // contrast curve and grain, up to a little richer than the original at 100%.
@@ -354,7 +354,7 @@ static float4 fx_CROSS_PROCESS(texture2d<float> T, constant U& uu, float2 p) {
     o.rgb = focusAt(p, o.rgb);
     float a = amt;
     float3 c = o.rgb;
-    float k = 0.55 + 0.45 * a;
+    float k = 0.55 + 0.45 * a - 0.2 * max(a - 0.5, 0.0);
     float3 x = float3(mix(c.r, smoothstep(0.0, 0.95, c.r), k), clamp(c.g * (1.0 + 0.08 * k) + 0.03 * k, 0.0, 1.0), mix(c.b, c.b * 0.6 + 0.15, k));
     x.g = mix(x.g, smoothstep(0.0, 1.0, x.g), 0.5 * k);
     float l = luma(c);
@@ -383,13 +383,13 @@ static float4 fx_DREAM_LENS(texture2d<float> T, constant U& uu, float2 p) {
     // Softness (p2): a soft-focus lens keeps the sharp picture and adds a diffuse halo, so light bleeds into
     // darker surroundings (a lighten blend) while edges and lettering stay readable. 0 = none.
     float3 soft = blurAt(p, s * (0.004 + p2 * 0.012));
-    float3 c = mix(base, max(base, soft), p2 * (0.3 + 0.25 * a));
+    float3 c = mix(base, max(base, soft), p2 * (0.35 + 0.25 * a));
     c = mix(c, soft, 0.1 * p2 * a);
     // Glow (p1): bloom out of the brightest areas into what's around them, not piled onto areas that are
     // already pale (which is what turned them to fog).
     float3 halo = bloomAt(p, s * (0.014 + p1 * 0.03), 0.68);
     float room = 1.0 - luma(c);
-    c = screen(c, halo * (0.2 + 0.9 * p1) * a * (0.3 + 0.7 * room));
+    c = screen(c, halo * (0.25 + 1.0 * p1) * a * (0.3 + 0.7 * room));
     c = mix(c, c * 0.97 + 0.012, a);
     c = satur(c, 1.0 - 0.06 * a);
     return float4(vignette(p, float4(clamp(c, 0.0, 1.0), o.a)));
@@ -436,8 +436,8 @@ static float4 fx_CYANOTYPE(texture2d<float> T, constant U& uu, float2 p) {
     // separation, scratches and edges instead of filling in.
     float l = tcurve(pow(luma(o.rgb), 0.8), 1.2 + (2.2 + 3.2 * p1) * a);
     // Prussian blue print: deep navy through blue to the paper, in four stops so the darks still separate.
-    float3 dk = float3(0.01, 0.07, 0.24);
-    float3 sh = float3(0.03, 0.17, 0.42);
+    float3 dk = float3(0.02, 0.10, 0.31);
+    float3 sh = float3(0.04, 0.20, 0.47);
     float3 md = float3(0.18, 0.42, 0.68);
     // Paper (p2): cool white at 0, warm cream at 100%, and how much texture and fibre it carries.
     float3 pp = mix(float3(0.96, 0.96, 0.94), float3(0.95, 0.90, 0.77), p2);
@@ -497,8 +497,9 @@ static float4 fx_KINO(texture2d<float> T, constant U& uu, float2 p) {
     // Halation (p1): 0 = none, up to about twice the default; a red glow that spreads around bright edges
     // and stays off the bright areas themselves, so pale keys keep their edges.
     float3 b = bloomAt(p, s * (0.012 + 0.035 * p1), 0.66);
-    float glow = luma(b) * 4.6 * p1 * a;
-    c = screen(c, float3(1.0, 0.28, 0.08) * glow * (0.1 + 0.9 * pow(1.0 - l, 0.7)));
+    float near = luma(bloomAt(p, s * 0.005, 0.66));
+    float glow = max(luma(b) - 0.8 * near, 0.0) * 4.6 * p1 * a;
+    c = screen(c, float3(1.0, 0.28, 0.08) * glow * (0.15 + 0.85 * pow(1.0 - l, 0.7)));
     // Grain (p3): 0 = none.
     c += fineGrain(p, l) * 0.11 * p3 * a;
     return float4(vignette(p, float4(clamp(c, 0.0, 1.0), o.a)));
@@ -531,14 +532,14 @@ static float4 fx_EXPIRED(texture2d<float> T, constant U& uu, float2 p) {
     float3 d2 = drift(fam2, 0.0) * ws + drift(fam2, 1.0) * wm + drift(fam2, 2.0) * wh;
     float2 uv = uvOf(p);
     // The damage is uneven: some parts of the print faded and shifted much more than others.
-    float patch = vnoise(uv * float2(2.2, 2.8) + seed * 5.0);
-    float uneven = 0.5 + patch;
+    float blotch = vnoise(uv * float2(2.2, 2.8) + seed * 5.0);
+    float uneven = 0.5 + blotch;
     float fog = vnoise(uv * float2(1.4, 1.8) + seed * 3.1);
     c = c * (1.0 - 0.15 * k * uneven) + 0.075 * k * uneven;
     c = mix(c, float3(luma(c)), 0.3 * k);
     // Flatten the contrast less in the shadows, so dark objects and fur keep their separation.
     c = mix(c, smoothstep(float3(-0.15), float3(1.15), c), -0.32 * k * mix(0.55, 1.0, smoothstep(0.1, 0.45, l)));
-    c += mix(d, d2, mixFam) * pow(a, 0.8) * (1.5 + 1.1 * age) * (0.55 + 0.9 * patch);
+    c += mix(d, d2, mixFam) * pow(a, 0.8) * (1.5 + 1.1 * age) * (0.55 + 0.9 * blotch);
     // Chemical fog in patches, not one veil over everything.
     float3 fogCol = mix(drift(fam, 2.0), drift(fam2, 0.0), fog) * 4.0 + 0.6;
     c = screen(c, clamp(fogCol, 0.0, 1.0) * smoothstep(0.5, 0.95, fog) * 0.32 * age * a);
