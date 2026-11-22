@@ -193,7 +193,7 @@ class CropView(ctx: Context) : View(ctx) {
     }
 
     fun fits(x: Float = cx, y: Float = cy, w: Float = cw, t: Float = theta): Boolean =
-        corners(x, y, w, t).all { it.x >= -0.5f && it.y >= -0.5f && it.x <= bw + 0.5f && it.y <= bh + 0.5f }
+        corners(x, y, w, t).all { it.x >= -0.02f && it.y >= -0.02f && it.x <= bw + 0.02f && it.y <= bh + 0.02f }   // never past the photo: a crop of the whole photo saves at its exact size
 
     /** Largest width that fits at the current centre and tilt. */
     fun maxWidth(x: Float = cx, y: Float = cy): Float {

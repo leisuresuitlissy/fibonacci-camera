@@ -642,7 +642,7 @@ class CropActivity : ComponentActivity() {
                         Blend.valueOf(dbl[1] as String), dbl[2] as Float)
                     top.recycle()
                 }
-                val ow = (cw * f).roundToInt().coerceAtLeast(16); val oh = (ch * f).roundToInt().coerceAtLeast(16)
+                val ow = (cw * f).roundToInt().coerceIn(16, max(16, full.width)); val oh = (ch * f).roundToInt().coerceIn(16, max(16, full.height))
                 var out = Bitmap.createBitmap(ow, oh, Bitmap.Config.ARGB_8888)
                 Canvas(out).apply {
                     drawColor(Color.BLACK)
