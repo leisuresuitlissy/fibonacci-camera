@@ -99,7 +99,6 @@ class CropActivity : ComponentActivity() {
     private lateinit var lookScroller: FadeScroller
     private lateinit var ctxArea: FrameLayout
     private lateinit var composeSub: LinearLayout
-    private lateinit var followBtn: FollowToggle
     private lateinit var lookControls: LookControls
     // Crop, from Compose: on, the whole photo with the crop box; off, the crop fills the frame like the viewfinder.
     private lateinit var cropPanel: LinearLayout
@@ -318,18 +317,12 @@ class CropActivity : ComponentActivity() {
         selector.addView(lookScroller, lp(match, match))
         root.addView(selector, lp(0, 0))
 
-        // contextual area: the camera's guide variants and Follow guide, or the Look controls
+        // contextual area: the camera's guide variants with Crop where the camera has Follow guide, or the Look controls
         ctxArea = FrameLayout(this)
         composeSub = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         ctxArea.addView(composeSub, lp(wrap, wrap))
-        // Compose's actions, right-aligned: Follow guide exactly where the camera has it, Crop under it
-        // (beside it there isn't room next to Spiral's four corner tiles on a narrow phone)
-        val actions = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.END }
-        followBtn = FollowToggle(this).apply { setOnClickListener { toggleFollow() } }
-        actions.addView(followBtn, LinearLayout.LayoutParams(wrap, dpi(44f)))
         cropPill = cropToggle()
-        actions.addView(cropPill, LinearLayout.LayoutParams(wrap, dpi(44f)).apply { topMargin = -dpi(4f) })
-        ctxArea.addView(actions, lp(wrap, wrap, Gravity.END or Gravity.TOP).apply { topMargin = -dpi(6f) })
+        ctxArea.addView(cropPill, lp(wrap, dpi(44f), Gravity.END or Gravity.TOP).apply { topMargin = -dpi(6f) })
         lookControls = LookControls(this).apply {
             onSelect = { i -> artParam = i; applyArtUi(); if (recipe.mode.isFocusSlider(artSlot)) crop.flashMask() }
             onChoice = { i ->
@@ -370,7 +363,7 @@ class CropActivity : ComponentActivity() {
         bottomRow = FrameLayout(this).apply { setBackgroundColor(T.CARBON) }
         bottomRow.addView(roundIcon(R.drawable.ic_back, 44f, "Back to the camera") { finish() })
         bottomRow.addView(roundIcon(R.drawable.ic_import, 44f, "Edit another photo") { pick.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) })
-        bottomRow.addView(text("Save a copy", 14f, T.GRAPHITE, T.semibold).apply {
+        bottomRow.addView(text("Save", 14f, T.GRAPHITE, T.semibold).apply {
             gravity = Gravity.CENTER; background = pill(T.AMBER, dp(24f)); contentDescription = "Save a copy. The original is never changed."
             setOnClickListener { save() }
         }, lp(0, 0))
@@ -425,7 +418,7 @@ class CropActivity : ComponentActivity() {
         composeScroller.visibility = if (c) View.VISIBLE else View.GONE
         lookScroller.visibility = if (a) View.VISIBLE else View.GONE
         composeSub.visibility = if (c) View.VISIBLE else View.GONE
-        (followBtn.parent as View).visibility = if (c) View.VISIBLE else View.GONE
+        cropPill.visibility = if (c) View.VISIBLE else View.GONE
         lookControls.visibility = if (a) View.VISIBLE else View.GONE
         if (c) composeTiles[crop.guide]?.let { composeScroller.reveal(it, smooth = false) }
         if (a) lookTiles[recipe.mode]?.let { lookScroller.reveal(it, smooth = false) }
@@ -476,22 +469,14 @@ class CropActivity : ComponentActivity() {
         syncFollow(); crop.invalidate(); syncReadout()
     }
 
-    /** Follow guide, as in the camera: the look's sharp area goes to the guide's focal point. Dimmed for guides without one. */
+    /**
+     * Follow guide has no switch here: a photo starts with your camera setting (the look's sharp area on the
+     * guide's focal point), and tapping the photo in Look pins it to the spot you tap instead.
+     */
     private fun syncFollow() {
         val available = GuideShape.hasAnchors(crop.guide)
-        followBtn.set(recipe.follow, available)
         crop.selectedAnchor = if (recipe.follow && available && recipe.mode != ArtMode.OFF) crop.anchor else -1
         crop.invalidate()
-    }
-
-    private fun toggleFollow() {
-        // switching off keeps the region where the guide had put it, now pinned to the photo
-        val m = crop.cropMask(recipe)
-        val ip = crop.cropToImage(m.cx, m.cy)
-        recipe = recipe.copy(follow = !recipe.follow, mask = recipe.mask.copy(cx = ip.x, cy = ip.y))
-        if (!recipe.follow && recipe.mode == ArtMode.TILT_SHIFT && (m.type == 1 || m.type == 3)) { recipe.values[1] = m.cy.coerceIn(0f, 1f); recipe.values[3] = (m.angle / 1.5707964f + 0.5f).coerceIn(0f, 1f) }
-        placeTiltOnGuide()
-        crop.recipe = recipe; crop.flashMask(); rememberArt(); syncFollow(); applyArtUi()
     }
 
     // ------------------------------------------------------------- double exposure
