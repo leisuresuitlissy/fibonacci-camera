@@ -101,6 +101,8 @@ adb logcat -c
 for s in portrait landscape exif6; do shoot "edit-CROP-$s" "edit:CROP:OFF:$s"; done
 shoot edit-COMPOSE "edit:COMPOSE:OFF:portrait"
 shoot edit-DOUBLE "edit:DOUBLE:OFF:portrait"
+shoot edit-CROP-rotated "edit:CROP:KINO:landscape:4x5:8"
+shoot edit-LOOK-framed-rotated "edit:LOOK:KINO:landscape:4x5:8"
 for m in OFF HOLGA PINHOLE TILT_SHIFT GRAINY_FILM CROSS_PROCESS CYANOTYPE DREAM_LENS INFRARED KINO EXPIRED REDSCALE SOLARISED INSTANT BLEACH_BYPASS; do
   shoot "edit-LOOK-$m" "edit:LOOK:$m:portrait"
 done

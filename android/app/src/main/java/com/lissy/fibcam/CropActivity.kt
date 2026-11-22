@@ -19,6 +19,8 @@ import android.view.View
 import android.view.ViewGroup
 import android.os.Build
 import android.widget.FrameLayout
+import android.widget.HorizontalScrollView
+import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.activity.ComponentActivity
@@ -74,32 +76,35 @@ class CropActivity : ComponentActivity() {
     private val io = Executors.newSingleThreadExecutor()
 
     private lateinit var src: Uri
+    private lateinit var root: FrameLayout
+    private lateinit var stage: FrameLayout
     private lateinit var crop: CropView
-    private lateinit var readL: TextView
-    private lateinit var readR: TextView
-    private lateinit var dial: DialView
+    private lateinit var header: FrameLayout
+    private lateinit var cropBtn: TextView
+    private lateinit var doubleBtn: ImageView
+    private lateinit var hudStack: LinearLayout
     private lateinit var noteView: TextView
     private lateinit var tabRow: LinearLayout
-    // selector row (the camera's 65dp tile row) and the contextual area under it, one pair per tab
+    private lateinit var selector: FrameLayout
     private lateinit var composeScroller: FadeScroller
     private lateinit var lookScroller: FadeScroller
-    private lateinit var ratioScroller: FadeScroller
-    private lateinit var ratioRow: LinearLayout
-    private lateinit var doubleRow: LinearLayout
+    private lateinit var ctxArea: FrameLayout
     private lateinit var composeSub: LinearLayout
     private lateinit var followBtn: FollowToggle
     private lateinit var lookControls: LookControls
-    private lateinit var cropCtx: LinearLayout
-    private lateinit var doubleCtx: LinearLayout
-    private lateinit var blendNames: LinearLayout
-    private lateinit var blendSlider: ValueSlider
-    private lateinit var blendValue: TextView
-    private lateinit var blendHint: TextView
-    private lateinit var ctxArea: FrameLayout
+    // Crop: a mode, like the camera's Coach. On, the whole photo with the crop box; off, the crop fills the frame.
+    private lateinit var cropPanel: LinearLayout
+    private lateinit var ratioRow: LinearLayout
+    private lateinit var readL: TextView
+    private lateinit var dial: DialView
+    private lateinit var bottomRow: FrameLayout
     private val composeTiles = HashMap<Guide, TileView>()
     private val lookTiles = HashMap<ArtMode, TileView>()
+    private var insetTop = 0
+    private var insetBottom = 0
     private var secondUri: Uri? = null
-    private var tab = "CROP"
+    private var tab = "ART"              // COMPOSE or ART, as in the camera
+    private var cropMode = false
     /** This photo's editing state. Starts from your shooting settings for a look, but never writes back to them. */
     private var recipe = Recipe(ArtMode.OFF, FloatArray(Art.SLOTS), (Math.random() * 1000).toFloat())
     /** Each look's settings while you edit this photo, so switching away and back keeps them (as in the camera). */
@@ -113,7 +118,6 @@ class CropActivity : ComponentActivity() {
     private var portrait = true
     private var sample = 1
     private var busy = false
-
     private val pickSecond = registerForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
         if (uri != null) loadSecond(uri, restoring = null)
     }
@@ -136,12 +140,12 @@ class CropActivity : ComponentActivity() {
             android.util.Log.i("fibParity", "done ${d?.path}")
         }.start()
         setContentView(buildUi())
-        // Back steps out one level at a time: a Look's setting → its first; any other tab → Crop; Crop → camera
+        // Back steps out one level at a time: Crop → off; a Look's setting → its first; then the camera
         onBackPressedDispatcher.addCallback(this, object : androidx.activity.OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
                 when {
+                    cropMode -> setCropMode(false)
                     tab == "ART" && recipe.mode != ArtMode.OFF && artParam != 0 -> { artParam = 0; applyArtUi() }
-                    tab != "CROP" -> { tab = "CROP"; applyTab() }
                     else -> { isEnabled = false; onBackPressedDispatcher.onBackPressed() }
                 }
             }
@@ -163,9 +167,9 @@ class CropActivity : ComponentActivity() {
                         intent.getStringExtra("editRatio")?.let { r -> if (r != "-") { ratio = r.replace('x', ':'); applyRatio(reset = true) } }
                         intent.getFloatExtra("editTheta", 0f).takeIf { it != 0f }?.let { t -> dial.value = t; crop.theta = Math.toRadians(t.toDouble()).toFloat(); crop.refit() }
                         intent.getStringExtra("editMode")?.let { m -> runCatching { ArtMode.valueOf(m) }.getOrNull()?.let { if (it != ArtMode.OFF) selectLook(it) } }
-                        intent.getStringExtra("editTab")?.let { t -> tab = when (t) { "LOOK" -> "ART"; "DOUBLE" -> "BLEND"; else -> t } }
+                        intent.getStringExtra("editTab")?.let { t -> when (t) { "CROP" -> cropMode = true; "COMPOSE" -> tab = "COMPOSE"; "DOUBLE" -> crop.post { showDoubleSheet() }; else -> tab = "ART" } }
                     }
-                    applyTab(); applyGuideUi(); applyArtUi(); applyBlendUi(); note(null); restoreSecond()
+                    applyTab(); applyGuideUi(); applyArtUi(); note(null); restoreSecond()
                     if (intent.getBooleanExtra("editSave", false)) crop.postDelayed({ save() }, 800)
                     if (intent.hasExtra("editFile")) crop.postDelayed({
                         // CI: where the crop sits on screen, so the preview can be compared with the saved copy
@@ -184,36 +188,63 @@ class CropActivity : ComponentActivity() {
     private fun dpi(v: Float) = dp(v).roundToInt()
     private fun bmp(id: Int): Bitmap? = android.graphics.BitmapFactory.decodeResource(resources, id, android.graphics.BitmapFactory.Options().apply { inScaled = false })
 
-    /** The camera's header pill (Coach style): Ivory caps on Graphite, 34dp. */
-    private fun headerPill(t: String, click: () -> Unit) = text(t, 11f, T.IVORY, T.medium, caps = true).apply {
-        gravity = Gravity.CENTER; background = pill(T.GRAPHITE, dp(17f)); setPadding(dpi(14f), 0, dpi(14f), 0)
-        setOnClickListener { click() }
-    }
-    /** An outlined action pill, like the Look controls' Reset all: Ivory outline on Carbon, 26dp inside a 44dp target. */
-    private fun outlinePill(t: String, click: () -> Unit) = text(t, 11f, T.IVORY, T.medium, caps = true).apply {
-        gravity = Gravity.CENTER
-        background = android.graphics.drawable.InsetDrawable(pill(T.CARBON, dp(13f), T.IVORY, dpi(1f).coerceAtLeast(1)), 0, dpi(9f), 0, dpi(9f))
-        setPadding(dpi(12f), 0, dpi(12f), 0); setOnClickListener { click() }
+    private fun lp(w: Int, h: Int, g: Int = Gravity.NO_GRAVITY) = FrameLayout.LayoutParams(w, h, g)
+    private fun at(v: View, x: Int, y: Int, w: Int, h: Int) {
+        val l = v.layoutParams as FrameLayout.LayoutParams
+        if (l.leftMargin != x || l.topMargin != y || l.width != w || l.height != h) { l.leftMargin = x; l.topMargin = y; l.width = w; l.height = h; l.gravity = Gravity.NO_GRAVITY; v.layoutParams = l }
     }
     private fun row() = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-
-    private fun buildUi(): View {
-        val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(T.CARBON) }
-        ViewCompat.setOnApplyWindowInsetsListener(root) { v, insets ->
-            val b = insets.getInsets(WindowInsetsCompat.Type.systemBars()); v.setPadding(b.left, b.top, b.right, b.bottom); insets
+    /** The camera's round Carbon icon button (MainActivity.roundIcon). */
+    private fun roundIcon(icon: Int, size: Float, desc: String, onClick: () -> Unit) = ImageView(this).apply {
+        setImageResource(icon); scaleType = ImageView.ScaleType.CENTER
+        background = android.graphics.drawable.GradientDrawable().apply { shape = android.graphics.drawable.GradientDrawable.OVAL; setColor(T.CARBON) }
+        contentDescription = desc; setOnClickListener { onClick() }
+        layoutParams = lp(dpi(size), dpi(size))
+    }
+    /** The camera's header toggle state (MainActivity.setActive): a 1dp Amber ring and an Amber icon. */
+    private fun setActive(v: ImageView, on: Boolean) {
+        (v.background as android.graphics.drawable.GradientDrawable).setStroke(if (on) dpi(1f).coerceAtLeast(1) else 0, T.AMBER)
+        v.setColorFilter(if (on) T.AMBER else T.IVORY)
+    }
+    /** The camera's sheet (MainActivity.sheet and sheetButton). */
+    private fun sheet(build: (LinearLayout, android.app.Dialog) -> Unit): android.app.Dialog {
+        val dlg = android.app.Dialog(this)
+        val box = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL; setPadding(dpi(20f), dpi(20f), dpi(20f), dpi(16f))
+            background = android.graphics.drawable.GradientDrawable().apply { setColor(T.GRAPHITE); cornerRadius = dp(16f) }
         }
-        // header: back to the camera, what this screen is, another photo
-        val top = FrameLayout(this).apply { setPadding(dpi(16f), dpi(10f), dpi(16f), dpi(10f)) }
-        top.addView(headerPill("‹ Camera") { finish() }, FrameLayout.LayoutParams(wrap, dpi(34f), Gravity.START or Gravity.CENTER_VERTICAL))
-        val t = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_HORIZONTAL }
-        t.addView(text("Edit a copy", 15f, T.IVORY, T.semibold))
-        t.addView(text("Original is never changed", 11f, T.SUBTLE, T.medium).apply { setPadding(0, dpi(3f), 0, 0) })
-        top.addView(t, FrameLayout.LayoutParams(wrap, wrap, Gravity.CENTER))
-        top.addView(headerPill("Other photo") { pick.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
-            FrameLayout.LayoutParams(wrap, dpi(34f), Gravity.END or Gravity.CENTER_VERTICAL))
-        root.addView(top, LinearLayout.LayoutParams(match, dpi(58f)))
+        build(box, dlg)
+        dlg.setContentView(box)
+        dlg.window?.setBackgroundDrawable(android.graphics.drawable.ColorDrawable(Color.TRANSPARENT))
+        dlg.window?.setLayout((resources.displayMetrics.widthPixels * 0.9f).toInt(), ViewGroup.LayoutParams.WRAP_CONTENT)
+        dlg.show()
+        return dlg
+    }
+    private fun label(t: String, size: Float, color: Int, face: android.graphics.Typeface = T.regular, spacing: Float = 0f) = TextView(this).apply {
+        text = t; setTextSize(TypedValue.COMPLEX_UNIT_SP, size); setTextColor(color); typeface = face; letterSpacing = spacing; includeFontPadding = false
+    }
+    private fun sheetButton(t: String, primary: Boolean, onClick: () -> Unit) = label(t, 14f, if (primary) T.CARBON else T.IVORY, T.medium).apply {
+        gravity = Gravity.CENTER; setPadding(dpi(16f), dpi(12f), dpi(16f), dpi(12f))
+        background = android.graphics.drawable.GradientDrawable().apply { setColor(if (primary) T.AMBER else T.CARBON); cornerRadius = dp(12f); if (!primary) setStroke(dpi(1f).coerceAtLeast(1), T.BORDER) }
+        setOnClickListener { onClick() }
+    }
 
-        val stage = FrameLayout(this).apply { setBackgroundColor(Color.BLACK) }
+    /**
+     * The camera's screen, with the photo as the viewfinder: the same header, tabs, selector row, contextual
+     * area and bottom row, at the same places (see [relayout]). Coach's place holds Crop; Double exposure
+     * sits where it does in the camera; the shutter row holds the editor's own actions.
+     */
+    private fun buildUi(): View {
+        root = FrameLayout(this).apply { setBackgroundColor(T.CARBON) }
+        ViewCompat.setOnApplyWindowInsetsListener(root) { _, insets ->
+            val b = insets.getInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout())
+            if (b.top != insetTop || b.bottom != insetBottom) { insetTop = b.top; insetBottom = b.bottom; root.post { relayout() } }
+            insets
+        }
+        root.addOnLayoutChangeListener { _, l, t, r, b, ol, ot, or, ob -> if (r - l != or - ol || b - t != ob - ot) root.post { relayout() } }
+
+        // the photo, where the viewfinder is
+        stage = FrameLayout(this).apply { setBackgroundColor(Color.BLACK); clipChildren = true }
         crop = CropView(this).apply {
             onChange = { syncReadout() }; onSecondChange = { rememberSecond() }
             onFocusTap = { u, v ->
@@ -225,33 +256,40 @@ class CropActivity : ComponentActivity() {
                 this@CropActivity.recipe = r; recipe = r; lookValues[r.mode] = r.values; flashMask(); rememberArt(); applyArtUi(); syncFollow()
             }
         }
-        stage.addView(crop, FrameLayout.LayoutParams(match, match))
+        stage.addView(crop, lp(match, match))
+        root.addView(stage, lp(0, 0))
+
+        // messages under the header, as in the camera
+        hudStack = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_HORIZONTAL }
         noteView = text("", 12f, T.AMBER, T.medium).apply {
-            background = pill(T.alpha(T.CARBON, 0.9f), dp(16f), T.alpha(T.AMBER, 0.8f)); setPadding(dpi(14f), dpi(9f), dpi(14f), dpi(9f)); visibility = View.GONE
+            background = pill(T.alpha(T.CARBON, 0.85f), dp(16f), T.AMBER, dpi(1f)); setPadding(dpi(14f), dpi(8f), dpi(14f), dpi(8f)); visibility = View.GONE
         }
-        stage.addView(noteView, FrameLayout.LayoutParams(wrap, wrap, Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL).apply { bottomMargin = dpi(16f) })
-        root.addView(stage, LinearLayout.LayoutParams(match, 0, 1f))
+        hudStack.addView(noteView, LinearLayout.LayoutParams(wrap, wrap))
+        root.addView(hudStack, lp(0, 0))
 
-        // the crop's size and ratio
-        val read = row().apply { setPadding(dpi(16f), 0, dpi(16f), 0) }
-        readL = text("", 12f, T.SUBTLE, T.medium)
-        read.addView(readL, LinearLayout.LayoutParams(0, wrap, 1f))
-        readR = text("", 12f, T.AMBER, T.medium).apply { gravity = Gravity.CENTER; background = pill(T.GRAPHITE, dp(12f)); setPadding(dpi(10f), 0, dpi(10f), 0) }
-        read.addView(readR, LinearLayout.LayoutParams(wrap, dpi(24f)))
-        root.addView(read, LinearLayout.LayoutParams(match, dpi(40f)))
+        // header: Crop where Coach is; Double exposure where it is in the camera
+        header = FrameLayout(this)
+        cropBtn = text("Crop", 11f, T.IVORY, T.medium, caps = true).apply {
+            gravity = Gravity.CENTER; setPadding(dpi(12f), 0, dpi(12f), 0)
+            setOnClickListener { setCropMode(!cropMode) }
+        }
+        header.addView(cropBtn, lp(wrap, dpi(32f), Gravity.START or Gravity.CENTER_VERTICAL))
+        doubleBtn = roundIcon(R.drawable.ic_double, 34f, "Double exposure") { onDoubleBtn() }
+        header.addView(doubleBtn, lp(dpi(34f), dpi(34f), Gravity.END or Gravity.CENTER_VERTICAL).apply { rightMargin = dpi(48f) })
+        root.addView(header, lp(0, 0))
 
-        // tabs: the camera's pill, with the editor's own Crop and Double alongside Compose and Look
+        // tabs: the camera's
         tabRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(dpi(2f), dpi(2f), dpi(2f), dpi(2f)); background = pill(T.GRAPHITE, dp(16f)) }
-        for ((key, name) in listOf("CROP" to "Crop", "COMPOSE" to "Compose", "ART" to "Look", "BLEND" to "Double")) {
+        for ((key, name) in listOf("COMPOSE" to "Compose", "ART" to "Look")) {
             tabRow.addView(text(name, 13f, T.IVORY, T.medium).apply {
                 gravity = Gravity.CENTER; tag = key
                 setOnClickListener { if (tab != key) { tab = key; applyTab() } }
-            }, LinearLayout.LayoutParams(0, match, 1f).apply { if (key != "CROP") leftMargin = dpi(8f) })
+            }, LinearLayout.LayoutParams(0, match, 1f).apply { if (key != "COMPOSE") leftMargin = dpi(8f) })
         }
-        root.addView(tabRow, LinearLayout.LayoutParams(match, dpi(31f)).apply { leftMargin = dpi(16f); rightMargin = dpi(16f) })
+        root.addView(tabRow, lp(0, 0))
 
-        // selector row: guides, looks, ratios, or the second photo's actions
-        val selector = FrameLayout(this)
+        // selector row: the camera's guides or looks
+        selector = FrameLayout(this)
         composeScroller = FadeScroller(this, dp(36f))
         val cRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(dpi(16f), 0, dpi(16f), 0) }
         Catalog.guides.forEachIndexed { i, (g, name, res) ->
@@ -262,7 +300,7 @@ class CropActivity : ComponentActivity() {
             cRow.addView(tile, LinearLayout.LayoutParams(wrap, wrap).apply { if (i > 0) leftMargin = dpi(8f) })
         }
         composeScroller.addView(cRow, FrameLayout.LayoutParams(wrap, match))
-        selector.addView(composeScroller, FrameLayout.LayoutParams(match, match))
+        selector.addView(composeScroller, lp(match, match))
         lookScroller = FadeScroller(this, dp(36f))
         val lRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(dpi(16f), 0, dpi(16f), 0) }
         Catalog.looks.forEachIndexed { i, (m, name, res) ->
@@ -273,23 +311,15 @@ class CropActivity : ComponentActivity() {
             lRow.addView(tile, LinearLayout.LayoutParams(wrap, wrap).apply { if (i > 0) leftMargin = dpi(8f) })
         }
         lookScroller.addView(lRow, FrameLayout.LayoutParams(wrap, match))
-        selector.addView(lookScroller, FrameLayout.LayoutParams(match, match))
-        ratioScroller = FadeScroller(this, dp(24f))
-        ratioRow = row().apply { setPadding(dpi(16f), 0, dpi(16f), 0) }
-        ratioScroller.addView(ratioRow, FrameLayout.LayoutParams(wrap, match))
-        selector.addView(ratioScroller, FrameLayout.LayoutParams(match, match))
-        doubleRow = row().apply { setPadding(dpi(16f), 0, dpi(16f), 0) }
-        selector.addView(doubleRow, FrameLayout.LayoutParams(match, match))
-        root.addView(selector, LinearLayout.LayoutParams(match, dpi(65f)).apply { topMargin = dpi(10f) })
+        selector.addView(lookScroller, lp(match, match))
+        root.addView(selector, lp(0, 0))
 
-        // contextual area
+        // contextual area: the camera's guide variants and Follow guide, or the Look controls
         ctxArea = FrameLayout(this)
         composeSub = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        ctxArea.addView(composeSub, FrameLayout.LayoutParams(wrap, wrap))
-        followBtn = FollowToggle(this).apply {
-            setOnClickListener { toggleFollow() }
-        }
-        ctxArea.addView(followBtn, FrameLayout.LayoutParams(wrap, dpi(44f), Gravity.END or Gravity.TOP).apply { topMargin = -dpi(6f) })
+        ctxArea.addView(composeSub, lp(wrap, wrap))
+        followBtn = FollowToggle(this).apply { setOnClickListener { toggleFollow() } }
+        ctxArea.addView(followBtn, lp(wrap, dpi(44f), Gravity.END or Gravity.TOP).apply { topMargin = -dpi(6f) })
         lookControls = LookControls(this).apply {
             onSelect = { i -> artParam = i; applyArtUi(); if (recipe.mode.isFocusSlider(artSlot)) crop.flashMask() }
             onChoice = { i ->
@@ -304,42 +334,65 @@ class CropActivity : ComponentActivity() {
             }
             slider.onChange = { v -> onArtSlider(v) }
         }
-        ctxArea.addView(lookControls, FrameLayout.LayoutParams(match, wrap))
-        cropCtx = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        cropCtx.addView(text("Straighten", 11f, T.IVORY, T.medium, caps = true))
-        dial = DialView(this).apply { onChange = { v -> crop.theta = Math.toRadians(v.toDouble()).toFloat(); crop.refit() } }
-        cropCtx.addView(dial, LinearLayout.LayoutParams(match, dpi(58f)))
-        ctxArea.addView(cropCtx, FrameLayout.LayoutParams(match, wrap))
-        doubleCtx = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        blendHint = text("Lay another photo over this one, then crop and style the pair.", 12f, T.SUBTLE, T.medium).apply { maxLines = 2 }
-        doubleCtx.addView(blendHint, LinearLayout.LayoutParams(match, wrap))
-        val bn = FadeScroller(this, dp(24f))
-        blendNames = row(); bn.addView(blendNames, FrameLayout.LayoutParams(wrap, match))
-        doubleCtx.addView(bn, LinearLayout.LayoutParams(match, dpi(32f)))
-        val bs = row()
-        blendSlider = ValueSlider(this).apply {
-            onChange = { v -> crop.strength = v; blendValue.text = "${(v * 100).roundToInt()}"; rememberSecond() }
-        }
-        bs.addView(blendSlider, LinearLayout.LayoutParams(0, dpi(18f), 1f))
-        blendValue = text("60", 12f, T.AMBER, T.medium, 0.08f).apply { gravity = Gravity.END }
-        bs.addView(blendValue, LinearLayout.LayoutParams(dpi(30f), wrap).apply { leftMargin = dpi(10f) })
-        doubleCtx.addView(bs, LinearLayout.LayoutParams(match, dpi(18f)).apply { topMargin = dpi(6f) })
-        ctxArea.addView(doubleCtx, FrameLayout.LayoutParams(match, wrap))
-        root.addView(ctxArea, LinearLayout.LayoutParams(match, dpi(84f)).apply { leftMargin = dpi(16f); rightMargin = dpi(16f); topMargin = dpi(10f) })
-        lookControls.available = dpi(84f)
+        ctxArea.addView(lookControls, lp(match, wrap))
+        root.addView(ctxArea, lp(0, 0))
 
-        // two equal buttons
-        val bar = row().apply { setPadding(dpi(16f), dpi(4f), dpi(16f), dpi(12f)) }
-        bar.addView(text("Reset", 14f, T.IVORY, T.medium).apply {
-            gravity = Gravity.CENTER; background = pill(T.GRAPHITE, dp(24f)); contentDescription = "Reset the crop and straightening"
-            setOnClickListener { dial.value = 0f; crop.theta = 0f; applyRatio(reset = true) }
-        }, LinearLayout.LayoutParams(0, dpi(48f), 1f))
-        bar.addView(text("Save a copy", 14f, T.GRAPHITE, T.semibold).apply {
-            gravity = Gravity.CENTER; background = pill(T.AMBER, dp(24f))
+        // Crop's own controls take the tabs' and selector's place while it's on
+        cropPanel = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; visibility = View.GONE }
+        ratioRow = row()
+        cropPanel.addView(ratioRow, LinearLayout.LayoutParams(match, dpi(31f)))
+        val read = row()
+        read.addView(text("Straighten", 11f, T.IVORY, T.medium, caps = true), LinearLayout.LayoutParams(0, wrap, 1f))
+        readL = text("", 12f, T.SUBTLE, T.medium)
+        read.addView(readL, LinearLayout.LayoutParams(wrap, wrap))
+        cropPanel.addView(read, LinearLayout.LayoutParams(match, wrap).apply { topMargin = dpi(22f) })
+        dial = DialView(this).apply { onChange = { v -> crop.theta = Math.toRadians(v.toDouble()).toFloat(); crop.refit() } }
+        cropPanel.addView(dial, LinearLayout.LayoutParams(match, dpi(58f)).apply { topMargin = dpi(4f) })
+        root.addView(cropPanel, lp(0, 0))
+
+        // the shutter row's places: back to the camera, another photo, save, reset
+        bottomRow = FrameLayout(this).apply { setBackgroundColor(T.CARBON) }
+        bottomRow.addView(roundIcon(R.drawable.ic_back, 44f, "Back to the camera") { finish() })
+        bottomRow.addView(roundIcon(R.drawable.ic_import, 44f, "Edit another photo") { pick.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) })
+        bottomRow.addView(text("Save a copy", 14f, T.GRAPHITE, T.semibold).apply {
+            gravity = Gravity.CENTER; background = pill(T.AMBER, dp(24f)); contentDescription = "Save a copy. The original is never changed."
             setOnClickListener { save() }
-        }, LinearLayout.LayoutParams(0, dpi(48f), 1f).apply { leftMargin = dpi(10f) })
-        root.addView(bar, LinearLayout.LayoutParams(match, wrap))
+        }, lp(0, 0))
+        bottomRow.addView(roundIcon(R.drawable.ic_reset_cam, 44f, "Reset the crop and straightening") { dial.value = 0f; crop.theta = 0f; applyRatio(reset = true); remember() })
+        root.addView(bottomRow, lp(0, 0))
         return root
+    }
+
+    /** The camera's layout (MainActivity.relayout), with the photo in the viewfinder's place. */
+    private fun relayout() {
+        val w = root.width; val h = root.height
+        if (w <= 0 || h <= 0) return
+        val rowTop = h - insetBottom - dpi(81f)
+        val maxBottom = rowTop - dpi(200f)
+        val fullH = w * 4 / 3
+        var vfTop = insetTop
+        if (vfTop + fullH > maxBottom) vfTop = max(0, maxBottom - fullH)
+        val vfH = max(dpi(200f), min(fullH, maxBottom - vfTop))
+        val vfBottom = vfTop + vfH
+        at(stage, 0, vfTop, w, vfH)
+        val headTop = max(vfTop, insetTop) + dpi(12f)
+        at(header, dpi(16f), headTop, w - dpi(32f), dpi(34f))
+        at(hudStack, 0, headTop + dpi(46f), w, wrap)
+        crop.inset = (headTop + dpi(46f) - vfTop).toFloat()   // the whole photo sits clear of the header while cropping
+        at(tabRow, dpi(16f), vfBottom + dpi(12f), w - dpi(32f), dpi(31f))
+        at(selector, 0, vfBottom + dpi(53f), w, dpi(65f))
+        val ctxTop = vfBottom + dpi(128f)
+        val ctxH = max(0, rowTop + dpi(12f) - ctxTop)
+        at(ctxArea, dpi(16f), ctxTop, w - dpi(32f), ctxH)
+        lookControls.available = ctxH
+        at(cropPanel, dpi(16f), vfBottom + dpi(12f), w - dpi(32f), max(0, rowTop + dpi(12f) - vfBottom - dpi(12f)))
+        at(bottomRow, 0, rowTop, w, h - rowTop)
+        val cx = w / 2
+        val kids = (0 until bottomRow.childCount).map { bottomRow.getChildAt(it) }
+        at(kids[0], dpi(16f), dpi(26f), dpi(44f), dpi(44f))
+        at(kids[1], cx - dpi(84f) - dpi(22f), dpi(26f), dpi(44f), dpi(44f))
+        at(kids[2], cx - dpi(54f), dpi(24f), dpi(108f), dpi(48f))
+        at(kids[3], cx + dpi(84f) - dpi(22f), dpi(26f), dpi(44f), dpi(44f))
     }
 
     private fun applyTab() {
@@ -349,22 +402,35 @@ class CropActivity : ComponentActivity() {
             v.typeface = if (on) T.semibold else T.medium
             v.background = if (on) pill(T.AMBER, dp(24f)) else null
         }
-        val c = tab == "COMPOSE"; val a = tab == "ART"; val r = tab == "CROP"; val b = tab == "BLEND"
+        val c = tab == "COMPOSE" && !cropMode; val a = tab == "ART" && !cropMode
+        val main = if (cropMode) View.GONE else View.VISIBLE
+        tabRow.visibility = main; selector.visibility = main; ctxArea.visibility = main
+        cropPanel.visibility = if (cropMode) View.VISIBLE else View.GONE
         composeScroller.visibility = if (c) View.VISIBLE else View.GONE
         lookScroller.visibility = if (a) View.VISIBLE else View.GONE
-        ratioScroller.visibility = if (r) View.VISIBLE else View.GONE
-        doubleRow.visibility = if (b) View.VISIBLE else View.GONE
         composeSub.visibility = if (c) View.VISIBLE else View.GONE
         followBtn.visibility = if (c) View.VISIBLE else View.GONE
         lookControls.visibility = if (a) View.VISIBLE else View.GONE
-        cropCtx.visibility = if (r) View.VISIBLE else View.GONE
-        doubleCtx.visibility = if (b) View.VISIBLE else View.GONE
         if (c) composeTiles[crop.guide]?.let { composeScroller.reveal(it, smooth = false) }
         if (a) lookTiles[recipe.mode]?.let { lookScroller.reveal(it, smooth = false) }
-        crop.editingSecond = b && secondUri != null   // in Double, your fingers move the second photo; elsewhere, the crop
-        crop.focusMode = a                            // in Look, a tap picks what stays sharp
+        // Crop on: the whole photo and the crop box, and your fingers move the box. Off: the crop fills the
+        // frame like the viewfinder; with a second photo, your fingers move that instead
+        cropBtn.background = pill(T.CARBON, dp(16f), if (cropMode) T.AMBER else null, dpi(1f))
+        cropBtn.setTextColor(if (cropMode) T.AMBER else T.IVORY)
+        cropBtn.contentDescription = if (cropMode) "Crop on" else "Crop off"
+        crop.framed = !cropMode
+        crop.editingSecond = !cropMode && secondUri != null
+        crop.focusMode = a
+        setActive(doubleBtn, secondUri != null)
+        doubleBtn.contentDescription = if (secondUri != null) "Double exposure on" else "Double exposure off"
     }
 
+    private fun setCropMode(on: Boolean) {
+        if (cropMode == on) return
+        cropMode = on
+        if (!on) remember()
+        applyTab(); syncReadout()
+    }
     // ------------------------------------------------------------- composition (the camera's guides, on the crop)
     private fun onGuideChanged() {
         placeTiltOnGuide(); crop.recipe = recipe
@@ -404,37 +470,41 @@ class CropActivity : ComponentActivity() {
     }
 
     // ------------------------------------------------------------- double exposure
-    private fun applyBlendUi() {
-        doubleRow.removeAllViews(); blendNames.removeAllViews()
-        val add = { pickSecond.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }
-        if (secondUri == null) {
-            doubleRow.addView(outlinePill("+ Add second photo") { add() }, LinearLayout.LayoutParams(wrap, dpi(44f)))
-            blendHint.visibility = View.VISIBLE
-            (blendNames.parent as View).visibility = View.GONE
-            (blendSlider.parent as View).visibility = View.GONE
-            applyTab(); return
-        }
-        doubleRow.addView(outlinePill("Replace") { add() }, LinearLayout.LayoutParams(wrap, dpi(44f)))
-        doubleRow.addView(outlinePill("Fit") { crop.resetSecond() }, LinearLayout.LayoutParams(wrap, dpi(44f)).apply { leftMargin = dpi(8f) })
-        doubleRow.addView(outlinePill("Remove") { removeSecond() }, LinearLayout.LayoutParams(wrap, dpi(44f)).apply { leftMargin = dpi(8f) })
-        doubleRow.addView(View(this), LinearLayout.LayoutParams(0, 1, 1f))
-        doubleRow.addView(text("Drag · pinch · twist", 11f, T.SUBTLE, T.medium))
-        // the blend names: the Look controls' name row (Ivory, Amber when chosen)
-        Blend.values().forEachIndexed { i, bl ->
-            val on = bl == crop.blend
-            blendNames.addView(text(bl.label, 11f, if (on) T.AMBER else T.IVORY, if (on) T.semibold else T.medium, caps = true).apply {
-                gravity = Gravity.CENTER_VERTICAL; setPadding(0, 0, dpi(16f), 0)
-                setOnClickListener { crop.blend = bl; rememberSecond(); applyBlendUi() }
-            }, LinearLayout.LayoutParams(wrap, match))
-        }
-        blendHint.visibility = View.GONE
-        (blendNames.parent as View).visibility = View.VISIBLE
-        (blendSlider.parent as View).visibility = View.VISIBLE
-        blendSlider.value = crop.strength
-        blendValue.text = "${(crop.strength * 100).roundToInt()}"
-        applyTab()
+    /** Off: pick the second photo. On: its options, in the camera's sheet. */
+    private fun onDoubleBtn() {
+        if (secondUri == null) pickSecond.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) else showDoubleSheet()
     }
 
+    private fun showDoubleSheet() {
+        sheet { box, dlg ->
+            box.addView(label("Double exposure", 17f, T.IVORY, T.semibold))
+            box.addView(label("The second photo lies over this one. Drag, pinch or twist it on the photo; turn Crop on to frame the pair.", 13f, T.SUBTLE).apply { setPadding(0, dpi(6f), 0, dpi(16f)) })
+            box.addView(label("BLEND", 10f, T.AMBER, T.medium, 0.08f))
+            val modes = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(0, dpi(8f), 0, dpi(14f)) }
+            fun paint() { for (i in 0 until modes.childCount) { val t = modes.getChildAt(i) as TextView; val on = t.tag == crop.blend
+                t.setTextColor(if (on) T.AMBER else T.IVORY); t.background = pill(T.CARBON, dp(13f), if (on) T.AMBER else T.BORDER, dpi(1f)) } }
+            for (b in Blend.values()) modes.addView(text(b.label, 11f, T.IVORY, T.medium, caps = true).apply {
+                tag = b; gravity = Gravity.CENTER; setPadding(dpi(10f), 0, dpi(10f), 0)
+                setOnClickListener { crop.blend = b; rememberSecond(); paint() }
+            }, LinearLayout.LayoutParams(wrap, dpi(26f)).apply { rightMargin = dpi(8f) })
+            paint()
+            box.addView(HorizontalScrollView(this).apply { isHorizontalScrollBarEnabled = false; addView(modes) })
+            val head = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+            head.addView(label("STRENGTH", 10f, T.AMBER, T.medium, 0.08f)); head.addView(View(this), LinearLayout.LayoutParams(0, 1, 1f))
+            val sv = label("${(crop.strength * 100).roundToInt()}%", 11f, T.AMBER, T.medium); head.addView(sv)
+            box.addView(head)
+            box.addView(ValueSlider(this).apply { value = crop.strength
+                onChange = { v -> crop.strength = v; sv.text = "${(v * 100).roundToInt()}%" }
+                onStop = { rememberSecond() } }, LinearLayout.LayoutParams(match, dpi(18f)).apply { topMargin = dpi(10f); bottomMargin = dpi(18f) })
+            box.addView(sheetButton(if (secondUri == null) "Choose the second photo" else "Replace the second photo", false) { dlg.dismiss(); pickSecond.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
+                LinearLayout.LayoutParams(match, wrap).apply { bottomMargin = dpi(8f) })
+            if (secondUri != null) {
+                box.addView(sheetButton("Fit it to the photo", false) { crop.resetSecond(); rememberSecond(); dlg.dismiss() }, LinearLayout.LayoutParams(match, wrap).apply { bottomMargin = dpi(8f) })
+                box.addView(sheetButton("Remove the second photo", false) { removeSecond(); dlg.dismiss() }, LinearLayout.LayoutParams(match, wrap).apply { bottomMargin = dpi(8f) })
+            }
+            box.addView(sheetButton("Done", true) { dlg.dismiss() }, LinearLayout.LayoutParams(match, wrap))
+        }
+    }
     /** [restoring] carries a remembered placement; null means fit it fresh. */
     private fun loadSecond(uri: Uri, restoring: List<String>?) {
         note("Adding the second photo…")
@@ -451,7 +521,7 @@ class CropActivity : ComponentActivity() {
                     crop.s2w = restoring[5].toFloat(); crop.s2r = restoring[6].toFloat()
                     crop.second = t
                 } else crop.resetSecond()
-                rememberSecond(); applyBlendUi(); note(null)
+                rememberSecond(); applyTab(); note(null)
             }
         }
     }
@@ -459,7 +529,7 @@ class CropActivity : ComponentActivity() {
     private fun removeSecond() {
         secondUri = null; crop.second = null
         prefs.edit().remove("dbl:$src").apply()
-        applyBlendUi()
+        applyTab()
     }
 
     private fun rememberSecond() {
@@ -583,14 +653,14 @@ class CropActivity : ComponentActivity() {
             }, LinearLayout.LayoutParams(wrap, dpi(27f)))
         }
         ratioRow.addView(pillRow, LinearLayout.LayoutParams(wrap, dpi(31f)))
-        ratioRow.addView(text(if (portrait) "↕  Portrait" else "↔  Landscape", 11f, T.IVORY, T.medium, caps = true).apply {
+        ratioRow.addView(View(this), LinearLayout.LayoutParams(0, 1, 1f))
+        ratioRow.addView(text(if (portrait) "↕ Portrait" else "↔ Landscape", 11f, T.IVORY, T.medium, caps = true).apply {
             gravity = Gravity.CENTER; background = pill(T.GRAPHITE, dp(16f)); setPadding(dpi(12f), 0, dpi(12f), 0)
             contentDescription = if (portrait) "Portrait crop, switch to landscape" else "Landscape crop, switch to portrait"
             setOnClickListener { portrait = !portrait; applyRatio(reset = false); remember() }
-        }, LinearLayout.LayoutParams(wrap, dpi(31f)).apply { leftMargin = dpi(10f) })
+        }, LinearLayout.LayoutParams(wrap, dpi(31f)))
         syncReadout()
     }
-
     private fun ratioText(): String = when (ratio) {
         "PHI" -> if (portrait) "1 : 1.618" else "1.618 : 1"
         "4:5" -> if (portrait) "4 : 5" else "5 : 4"
@@ -602,8 +672,7 @@ class CropActivity : ComponentActivity() {
     private fun syncReadout() {
         if (!::readL.isInitialized || crop.bmp == null) return
         val w = (crop.cw * sample).roundToInt(); val h = (crop.ch * sample).roundToInt()
-        readL.text = "$w × $h px"
-        readR.text = (if (ratio == "PHI") "φ  " else "") + ratioText()
+        readL.text = "$w × $h px · " + (if (ratio == "PHI") "φ " else "") + ratioText()
         if (tiltFollows) { placeTiltOnGuide(); crop.recipe = recipe }
     }
 

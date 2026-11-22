@@ -178,13 +178,43 @@ class CropView(ctx: Context) : View(ctx) {
     private fun fit() {
         val b = bmp ?: return
         val pad = 20 * d
-        k = min((width - 2 * pad) / b.width, (height - 2 * pad) / b.height)
-        ox = (width - b.width * k) / 2; oy = (height - b.height * k) / 2
+        val top = max(pad, inset)
+        k = min((width - 2 * pad) / b.width, (height - top - pad) / b.height)
+        ox = (width - b.width * k) / 2; oy = top + (height - top - pad - b.height * k) / 2
+    }
+
+    /** Off (Crop on): the whole photo with the crop box. On: the crop fills the view, upright, like the viewfinder. */
+    var framed = false
+        set(v) { field = v; mode = Mode.NONE; invalidate() }
+    /** Room kept clear at the top (for the header) while the whole photo is shown. */
+    var inset = 0f
+        set(v) { if (field != v) { field = v; if (width > 0) fit(); invalidate() } }
+    // where the crop sits on screen: its centre, screen px per photo px, and its turn on screen
+    private val sc = PointF(); private var sk = 1f; private var sdeg = 0f
+    /** Photo px → view px, and back. */
+    private val vm = Matrix(); private val vmInv = Matrix()
+    private fun place() {
+        if (framed && cw > 0f) {
+            sk = min(width / cw, height / ch); sc.set(width / 2f, height / 2f); sdeg = 0f
+            vm.reset(); vm.postTranslate(-cx, -cy); vm.postRotate(-Math.toDegrees(theta.toDouble()).toFloat()); vm.postScale(sk, sk); vm.postTranslate(sc.x, sc.y)
+        } else {
+            sk = k; val p = toScreen(PointF(cx, cy)); sc.set(p.x, p.y); sdeg = Math.toDegrees(theta.toDouble()).toFloat()
+            vm.reset(); vm.postScale(k, k); vm.postTranslate(ox, oy)
+        }
+        vm.invert(vmInv)
+    }
+    /** A view point as photo uv (0..1 across the photo). */
+    private fun viewToUv(x: Float, y: Float): PointF {
+        val pt = floatArrayOf(x, y); vmInv.mapPoints(pt)
+        return PointF((pt[0] / bw).coerceIn(0f, 1f), (pt[1] / bh).coerceIn(0f, 1f))
     }
 
     private fun toScreen(p: PointF) = PointF(ox + p.x * k, oy + p.y * k)
     /** The crop's corners in view pixels: top-left, top-right, bottom-right, bottom-left (CI comparisons). */
-    fun screenCorners(): List<PointF> = corners().map { toScreen(it) }
+    fun screenCorners(): List<PointF> {
+        place()
+        return corners().map { p -> floatArrayOf(p.x, p.y).also { vm.mapPoints(it) }.let { PointF(it[0], it[1]) } }
+    }
 
     fun corners(x: Float = cx, y: Float = cy, w: Float = cw, t: Float = theta): Array<PointF> {
         val h = w / aspect; val c = cos(t); val s = sin(t)
@@ -220,43 +250,49 @@ class CropView(ctx: Context) : View(ctx) {
     override fun onDraw(c: Canvas) {
         val b = bmp ?: return
         if (k <= 0f || width == 0) return
-        m.reset(); m.postScale(k, k); m.postTranslate(ox, oy)
-        val q = corners().map { toScreen(it) }
+        place()
+        m.set(vm)
         val pic = picture(b)
+        val w = cw * sk; val h = ch * sk
+        c.save()
+        if (framed) c.clipRect(sc.x - w / 2, sc.y - h / 2, sc.x + w / 2, sc.y + h / 2)   // only the crop, like the viewfinder
         c.drawBitmap(pic, m, bmpPaint)
         drawArt(c, pic)
-        // dim everything outside the crop
-        path.reset(); path.fillType = Path.FillType.EVEN_ODD
-        path.addRect(0f, 0f, width.toFloat(), height.toFloat(), Path.Direction.CW)
-        path.moveTo(q[0].x, q[0].y); for (i in 1..3) path.lineTo(q[i].x, q[i].y); path.close()
-        c.drawPath(path, dim)
-        path.reset(); path.moveTo(q[0].x, q[0].y); for (i in 1..3) path.lineTo(q[i].x, q[i].y); path.close()
-        c.drawPath(path, edge)
-        // guide, in the crop's own (tilted) frame
-        val sc = toScreen(PointF(cx, cy)); val w = cw * k; val h = ch * k
-        c.save(); c.translate(sc.x, sc.y); c.rotate(Math.toDegrees(theta.toDouble()).toFloat())
+        c.restore()
+        val q = corners().map { toScreen(it) }
+        if (!framed) {
+            // dim everything outside the crop
+            path.reset(); path.fillType = Path.FillType.EVEN_ODD
+            path.addRect(0f, 0f, width.toFloat(), height.toFloat(), Path.Direction.CW)
+            path.moveTo(q[0].x, q[0].y); for (i in 1..3) path.lineTo(q[i].x, q[i].y); path.close()
+            c.drawPath(path, dim)
+            path.reset(); path.moveTo(q[0].x, q[0].y); for (i in 1..3) path.lineTo(q[i].x, q[i].y); path.close()
+            c.drawPath(path, edge)
+        }
+        // guide, in the crop's own frame
+        c.save(); c.translate(sc.x, sc.y); c.rotate(sdeg)
         c.clipRect(-w / 2, -h / 2, w / 2, h / 2)
         painter.draw(c, RectF(-w / 2, -h / 2, w / 2, h / 2), guide, quadrant, triFlip, trueSpiral = true, selected = selectedAnchor)
         c.restore()
         recipe?.let { r ->
-            // Art tab: briefly show the simulated focus region, in the crop's tilted frame (never saved)
+            // Look tab: briefly show the simulated focus region, in the crop's frame (never saved)
             if (focusMode && System.currentTimeMillis() < maskUntil && r.mode != ArtMode.OFF) {
-                val m = cropMask(r)
-                if (m.type != 0 && (r.mode == ArtMode.TILT_SHIFT || m.strength > 0f)) {
-                    c.save(); c.translate(sc.x, sc.y); c.rotate(Math.toDegrees(theta.toDouble()).toFloat())
+                val fm = cropMask(r)
+                if (fm.type != 0 && (r.mode == ArtMode.TILT_SHIFT || fm.strength > 0f)) {
+                    c.save(); c.translate(sc.x, sc.y); c.rotate(sdeg)
                     c.clipRect(-w / 2, -h / 2, w / 2, h / 2)
-                    val mx = -w / 2 + m.cx * w; val my = -h / 2 + m.cy * h
-                    val inner = m.size * h; val outer = (m.size + Focus.featherLen(m, w / h)) * h
+                    val mx = -w / 2 + fm.cx * w; val my = -h / 2 + fm.cy * h
+                    val inner = fm.size * h; val outer = (fm.size + Focus.featherLen(fm, w / h)) * h
                     // the viewfinder's mask outline (OverlayView): solid edge of the sharp area, dashed end of the fade
                     focusRing.alpha = 220; focusRing.strokeWidth = 1.3f * d
                     focusSoft.alpha = 140; focusSoft.strokeWidth = 1f * d; focusSoft.pathEffect = DashPathEffect(floatArrayOf(4 * d, 5 * d), 0f)
-                    if (m.type == 2) {
+                    if (fm.type == 2) {
                         c.drawCircle(mx, my, inner, focusRing); c.drawCircle(mx, my, outer, focusSoft); c.drawCircle(mx, my, 3 * d, focusRing)
                     } else {
-                        val ux = cos(m.angle); val uy = sin(m.angle); val L = w + h
+                        val ux = cos(fm.angle); val uy = sin(fm.angle); val len = w + h
                         for ((off, p) in listOf(inner to focusRing, -inner to focusRing, outer to focusSoft, -outer to focusSoft)) {
                             val px0 = mx - uy * off; val py0 = my + ux * off
-                            c.drawLine(px0 - ux * L, py0 - uy * L, px0 + ux * L, py0 + uy * L, p)
+                            c.drawLine(px0 - ux * len, py0 - uy * len, px0 + ux * len, py0 + uy * len, p)
                         }
                     }
                     c.restore()
@@ -267,16 +303,14 @@ class CropView(ctx: Context) : View(ctx) {
             second?.let { t ->
                 // outline of the second photo, so you can see what you're moving
                 val pts = floatArrayOf(0f, 0f, t.width.toFloat(), 0f, t.width.toFloat(), t.height.toFloat(), 0f, t.height.toFloat())
-                secondMatrix(t).mapPoints(pts)
-                path.reset(); path.moveTo(ox + pts[0] * k, oy + pts[1] * k)
-                for (i in 1..3) path.lineTo(ox + pts[i * 2] * k, oy + pts[i * 2 + 1] * k)
+                secondMatrix(t).mapPoints(pts); vm.mapPoints(pts)
+                path.reset(); path.moveTo(pts[0], pts[1])
+                for (i in 1..3) path.lineTo(pts[i * 2], pts[i * 2 + 1])
                 path.close(); c.drawPath(path, outline)
             }
-        } else {
-            for (p in q) { c.drawCircle(p.x, p.y, 6 * d, handle); c.drawCircle(p.x, p.y, 6 * d, handleEdge) }
         }
+        if (!framed) for (p in q) { c.drawCircle(p.x, p.y, 6 * d, handle); c.drawCircle(p.x, p.y, 6 * d, handleEdge) }
     }
-
     /**
      * The look, drawn on the crop in the crop's own straightened frame: the same rectangle, mask and uniforms
      * the saved copy is rendered with (CropActivity.save → Art.render), only smaller. So the vignette, focus
@@ -286,9 +320,9 @@ class CropView(ctx: Context) : View(ctx) {
     private fun drawArt(c: Canvas, b: Bitmap): Boolean {
         val r = recipe ?: return false
         if (r.mode == ArtMode.OFF || Build.VERSION.SDK_INT < 33) return false
-        val sc = toScreen(PointF(cx, cy)); val w = cw * k; val h = ch * k
+        val w = cw * sk; val h = ch * sk
         if (w < 2f || h < 2f) return false
-        val deg = Math.toDegrees(theta.toDouble()).toFloat()
+        val deg = sdeg
         // bitmap px → crop-local px (origin at the crop's top-left corner, axes along its edges)
         val local = Matrix(m).apply { postTranslate(-sc.x, -sc.y); postRotate(-deg); postTranslate(w / 2, h / 2) }
         val mask = cropMask(r)
@@ -360,7 +394,17 @@ class CropView(ctx: Context) : View(ctx) {
     private var g0Cx = 0f; private var g0Cy = 0f; private var g0X = 0f; private var g0Y = 0f
     private var twoFinger = false
 
+    /** A view-space movement as photo px. */
+    private fun toPhotoVec(dx: Float, dy: Float): PointF { val v = floatArrayOf(dx, dy); vmInv.mapVectors(v); return PointF(v[0], v[1]) }
+
     private fun secondTouch(e: MotionEvent): Boolean {
+        when (e.actionMasked) {
+            MotionEvent.ACTION_DOWN -> { downX = e.x; downY = e.y; downT = e.eventTime; multi = false }
+            MotionEvent.ACTION_POINTER_DOWN -> multi = true
+            MotionEvent.ACTION_UP -> if (focusMode && !multi && e.eventTime - downT < 350 && hypot(e.x - downX, e.y - downY) < slop) {
+                viewToUv(e.x, e.y).let { onFocusTap?.invoke(it.x, it.y) }
+            }
+        }
         when (e.actionMasked) {
             MotionEvent.ACTION_DOWN -> { lx = e.x; ly = e.y; twoFinger = false }
             MotionEvent.ACTION_POINTER_DOWN -> if (e.pointerCount == 2) {
@@ -379,10 +423,10 @@ class CropView(ctx: Context) : View(ctx) {
                     var r = g0R + (ang - g0Ang)
                     while (r > 180f) r -= 360f; while (r < -180f) r += 360f
                     s2r = if (abs(r) < 1.5f) 0f else r              // sticks at level
-                    s2x = g0X + (mx - g0Cx) / k; s2y = g0Y + (my - g0Cy) / k
+                    val mv = toPhotoVec(mx - g0Cx, my - g0Cy); s2x = g0X + mv.x; s2y = g0Y + mv.y
                     comboDirty = true; invalidate(); onSecondChange?.invoke()
                 } else if (!twoFinger && e.pointerCount == 1) {
-                    s2x += (e.x - lx) / k; s2y += (e.y - ly) / k
+                    val mv = toPhotoVec(e.x - lx, e.y - ly); s2x += mv.x; s2y += mv.y
                     lx = e.x; ly = e.y
                     comboDirty = true; invalidate(); onSecondChange?.invoke()
                 }
@@ -401,15 +445,15 @@ class CropView(ctx: Context) : View(ctx) {
     override fun onTouchEvent(e: MotionEvent): Boolean {
         if (bmp == null) return false
         if (editingSecond && second != null) return secondTouch(e)
-        scaler.onTouchEvent(e)
         when (e.actionMasked) {
             MotionEvent.ACTION_DOWN -> { downX = e.x; downY = e.y; downT = e.eventTime; multi = false }
             MotionEvent.ACTION_POINTER_DOWN -> multi = true
             MotionEvent.ACTION_UP -> if (focusMode && !multi && e.eventTime - downT < 350 && hypot(e.x - downX, e.y - downY) < slop) {
-                val u = ((e.x - ox) / k / bw).coerceIn(0f, 1f); val v = ((e.y - oy) / k / bh).coerceIn(0f, 1f)
-                onFocusTap?.invoke(u, v)
+                viewToUv(e.x, e.y).let { onFocusTap?.invoke(it.x, it.y) }
             }
         }
+        if (framed) return true                    // Crop off: the crop stays put; taps still pick what stays sharp
+        scaler.onTouchEvent(e)
         when (e.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 lx = e.x; ly = e.y
