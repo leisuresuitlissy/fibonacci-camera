@@ -43,6 +43,28 @@ import kotlin.math.roundToInt
  * It is the camera's own screen adapted for a still photo: the same tokens (T), tiles (Catalog, TileView),
  * Look controls (LookControls, ArtMode.controls) and shaders (Art), with the crop as the frame.
  */
+/**
+ * The editor's saved copy, from a full-size photo: crop and straighten in one step, then the look through
+ * Art.render, the same function the camera uses for its look photos. Shared by Save a copy and the CI
+ * check that compares it with the camera (EditParity).
+ */
+object EditRender {
+    fun copy(full: Bitmap, cx: Float, cy: Float, cw: Float, ch: Float, deg: Float, f: Float, r: Recipe, mask: FocusMask): Bitmap {
+        val ow = (cw * f).roundToInt().coerceIn(16, max(16, full.width)); val oh = (ch * f).roundToInt().coerceIn(16, max(16, full.height))
+        var out = Bitmap.createBitmap(ow, oh, Bitmap.Config.ARGB_8888)
+        Canvas(out).apply {
+            drawColor(Color.BLACK)
+            translate(ow / 2f, oh / 2f); rotate(-deg); translate(-cx * f, -cy * f)   // crop and straighten in one step
+            drawBitmap(full, 0f, 0f, Paint(Paint.FILTER_BITMAP_FLAG))
+        }
+        if (r.mode != ArtMode.OFF && Build.VERSION.SDK_INT >= 33) {
+            val styled = Art.render(out, r, mask)         // the look, measured against the crop
+            if (styled !== out) { out.recycle(); out = styled }
+        }
+        return out
+    }
+}
+
 class CropActivity : ComponentActivity() {
 
     private val wrap = ViewGroup.LayoutParams.WRAP_CONTENT
@@ -107,6 +129,12 @@ class CropActivity : ComponentActivity() {
         if (u == null) { finish(); return }
         src = u
         if (intent.hasExtra("editFile")) prefs.edit().remove("crop:$src").remove("art:$src").remove("dbl:$src").apply()   // CI: start clean
+        if (intent.getBooleanExtra("editParity", false)) Thread {
+            // CI: every look through the camera's save path and the editor's, compared pixel by pixel
+            android.os.Looper.prepare()
+            val d = runCatching { EditParity.run(this) }.onFailure { android.util.Log.e("fibParity", "failed", it) }.getOrNull()
+            android.util.Log.i("fibParity", "done ${d?.path}")
+        }.start()
         setContentView(buildUi())
         // Back steps out one level at a time: a Look's setting → its first; any other tab → Crop; Crop → camera
         onBackPressedDispatcher.addCallback(this, object : androidx.activity.OnBackPressedCallback(true) {
@@ -642,18 +670,9 @@ class CropActivity : ComponentActivity() {
                         Blend.valueOf(dbl[1] as String), dbl[2] as Float)
                     top.recycle()
                 }
-                val ow = (cw * f).roundToInt().coerceIn(16, max(16, full.width)); val oh = (ch * f).roundToInt().coerceIn(16, max(16, full.height))
-                var out = Bitmap.createBitmap(ow, oh, Bitmap.Config.ARGB_8888)
-                Canvas(out).apply {
-                    drawColor(Color.BLACK)
-                    translate(ow / 2f, oh / 2f); rotate(-deg); translate(-cx * f, -cy * f)   // crop and straighten in one step
-                    drawBitmap(full, 0f, 0f, Paint(Paint.FILTER_BITMAP_FLAG))
-                }
+                val out = EditRender.copy(full, cx, cy, cw, ch, deg, f, r, saveMask)
                 full.recycle()
-                if (r.mode != ArtMode.OFF && Build.VERSION.SDK_INT >= 33) {
-                    val styled = Art.render(out, r, saveMask)         // the look, measured against the crop
-                    if (styled !== out) { out.recycle(); out = styled }
-                }
+                val ow = out.width; val oh = out.height
                 val (name, taken) = originalInfo()
                 val values = ContentValues().apply {
                     put(MediaStore.MediaColumns.DISPLAY_NAME, "${name}_${tag}_" + SimpleDateFormat("HHmmss", Locale.US).format(Date()) + ".jpg")

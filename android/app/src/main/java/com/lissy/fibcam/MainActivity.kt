@@ -1508,7 +1508,7 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
      */
     /**
      * CI only (`-e fibShot edit:TAB:MODE:shape[:ratio[:degrees[:save]]]`): opens Edit a copy on a generated test
-     * photo. shape is portrait, landscape, or exif6 (landscape pixels stored with EXIF "rotate 90", which must open
+     * photo (`edit:PARITY` also runs EditParity, every look through both save paths). shape is portrait, landscape, or exif6 (landscape pixels stored with EXIF "rotate 90", which must open
      * upright); ratio is PHI, ORIGINAL, 4:5, 1:1 or 3:2 ("-" keeps the default); "save" saves a copy once it opens.
      */
     private fun openEditTest(p: List<String>) {
@@ -1533,7 +1533,7 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
         startActivity(Intent(this, CropActivity::class.java).putExtra("editFile", f.path)
             .putExtra("editTab", p.getOrNull(1) ?: "CROP").putExtra("editMode", p.getOrNull(2) ?: "OFF")
             .putExtra("editRatio", p.getOrNull(4)).putExtra("editTheta", p.getOrNull(5)?.toFloatOrNull() ?: 0f)
-            .putExtra("editSave", p.getOrNull(6) == "save"))
+            .putExtra("editSave", p.getOrNull(6) == "save").putExtra("editParity", p.getOrNull(1) == "PARITY"))
     }
 
     /**

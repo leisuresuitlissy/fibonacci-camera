@@ -117,6 +117,14 @@ for run in "save-kino-4x5-tilt8|edit:LOOK:KINO:landscape:4x5:8:save" \
   adb logcat -d -s fibEdit:I | grep corners | tail -1 | sed "s/^.*corners /$n /" >> "$OUT/edit-corners.txt"
   sleep 2
 done
+# every look through the camera's save path and the editor's, pixel by pixel (EditParity)
+adb logcat -c
+adb shell am force-stop com.lissy.fibcam
+adb shell am start -W -n com.lissy.fibcam/.MainActivity -e fibShot "edit:PARITY:OFF:portrait" > /dev/null
+for i in $(seq 1 120); do sleep 3; adb logcat -d -s fibParity:I fibParity:E | grep -q "done\|failed" && break; done
+adb logcat -d -s fibParity:I fibParity:E > "$OUT/parity-log.txt"
+mkdir -p "$OUT/parity"
+adb pull "/sdcard/Android/data/com.lissy.fibcam/files/lab/parity/." "$OUT/parity/" || true
 mkdir -p "$OUT/saved"
 adb pull "/sdcard/Pictures/Fibonacci Camera/." "$OUT/saved/" || true
 ls -la "$OUT/saved" > "$OUT/saved-list.txt" 2>&1 || true
