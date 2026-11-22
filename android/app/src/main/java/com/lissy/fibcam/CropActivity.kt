@@ -89,7 +89,7 @@ class CropActivity : ComponentActivity() {
     private lateinit var stage: FrameLayout
     private lateinit var crop: CropView
     private lateinit var header: FrameLayout
-    private lateinit var cropBtn: TextView
+    private lateinit var cropPill: LinearLayout
     private lateinit var doubleBtn: ImageView
     private lateinit var hudStack: LinearLayout
     private lateinit var noteView: TextView
@@ -101,7 +101,7 @@ class CropActivity : ComponentActivity() {
     private lateinit var composeSub: LinearLayout
     private lateinit var followBtn: FollowToggle
     private lateinit var lookControls: LookControls
-    // Crop: a mode, like the camera's Coach. On, the whole photo with the crop box; off, the crop fills the frame.
+    // Crop, from Compose: on, the whole photo with the crop box; off, the crop fills the frame like the viewfinder.
     private lateinit var cropPanel: LinearLayout
     private lateinit var ratioRow: LinearLayout
     private lateinit var readL: TextView
@@ -112,7 +112,7 @@ class CropActivity : ComponentActivity() {
     private var insetTop = 0
     private var insetBottom = 0
     private var secondUri: Uri? = null
-    private var tab = "ART"              // COMPOSE or ART, as in the camera
+    private var tab = "COMPOSE"          // COMPOSE or ART, as in the camera; framing first
     private var cropMode = false
     /** This photo's editing state. Starts from your shooting settings for a look, but never writes back to them. */
     private var recipe = Recipe(ArtMode.OFF, FloatArray(Art.SLOTS), (Math.random() * 1000).toFloat())
@@ -176,7 +176,7 @@ class CropActivity : ComponentActivity() {
                         intent.getStringExtra("editRatio")?.let { r -> if (r != "-") { ratio = r.replace('x', ':'); applyRatio(reset = true) } }
                         intent.getFloatExtra("editTheta", 0f).takeIf { it != 0f }?.let { t -> dial.value = t; crop.theta = Math.toRadians(t.toDouble()).toFloat(); crop.refit() }
                         intent.getStringExtra("editMode")?.let { m -> runCatching { ArtMode.valueOf(m) }.getOrNull()?.let { if (it != ArtMode.OFF) selectLook(it) } }
-                        intent.getStringExtra("editTab")?.let { t -> when (t) { "CROP" -> cropMode = true; "COMPOSE" -> tab = "COMPOSE"; "DOUBLE" -> crop.post { showDoubleSheet() }; else -> tab = "ART" } }
+                        intent.getStringExtra("editTab")?.let { t -> when (t) { "CROP" -> { tab = "COMPOSE"; cropMode = true }; "COMPOSE" -> tab = "COMPOSE"; "DOUBLE" -> crop.post { showDoubleSheet() }; else -> tab = "ART" } }
                     }
                     applyTab(); applyGuideUi(); applyArtUi(); note(null); restoreSecond()
                     if (intent.getBooleanExtra("editSave", false)) crop.postDelayed({ save() }, 800)
@@ -276,13 +276,8 @@ class CropActivity : ComponentActivity() {
         hudStack.addView(noteView, LinearLayout.LayoutParams(wrap, wrap))
         root.addView(hudStack, lp(0, 0))
 
-        // header: Crop where Coach is; Double exposure where it is in the camera
+        // header: Double exposure where it is in the camera (Coach and flash are camera-only)
         header = FrameLayout(this)
-        cropBtn = text("Crop", 11f, T.IVORY, T.medium, caps = true).apply {
-            gravity = Gravity.CENTER; setPadding(dpi(12f), 0, dpi(12f), 0)
-            setOnClickListener { setCropMode(!cropMode) }
-        }
-        header.addView(cropBtn, lp(wrap, dpi(32f), Gravity.START or Gravity.CENTER_VERTICAL))
         doubleBtn = roundIcon(R.drawable.ic_double, 34f, "Double exposure") { onDoubleBtn() }
         header.addView(doubleBtn, lp(dpi(34f), dpi(34f), Gravity.END or Gravity.CENTER_VERTICAL).apply { rightMargin = dpi(48f) })
         root.addView(header, lp(0, 0))
@@ -292,7 +287,7 @@ class CropActivity : ComponentActivity() {
         for ((key, name) in listOf("COMPOSE" to "Compose", "ART" to "Look")) {
             tabRow.addView(text(name, 13f, T.IVORY, T.medium).apply {
                 gravity = Gravity.CENTER; tag = key
-                setOnClickListener { if (tab != key) { tab = key; applyTab() } }
+                setOnClickListener { if (tab != key || cropMode) { tab = key; cropMode = false; remember(); applyTab(); syncReadout() } }
             }, LinearLayout.LayoutParams(0, match, 1f).apply { if (key != "COMPOSE") leftMargin = dpi(8f) })
         }
         root.addView(tabRow, lp(0, 0))
@@ -327,8 +322,14 @@ class CropActivity : ComponentActivity() {
         ctxArea = FrameLayout(this)
         composeSub = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         ctxArea.addView(composeSub, lp(wrap, wrap))
+        // Compose's actions, right-aligned: Follow guide exactly where the camera has it, Crop under it
+        // (beside it there isn't room next to Spiral's four corner tiles on a narrow phone)
+        val actions = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.END }
         followBtn = FollowToggle(this).apply { setOnClickListener { toggleFollow() } }
-        ctxArea.addView(followBtn, lp(wrap, dpi(44f), Gravity.END or Gravity.TOP).apply { topMargin = -dpi(6f) })
+        actions.addView(followBtn, LinearLayout.LayoutParams(wrap, dpi(44f)))
+        cropPill = cropToggle()
+        actions.addView(cropPill, LinearLayout.LayoutParams(wrap, dpi(44f)).apply { topMargin = -dpi(4f) })
+        ctxArea.addView(actions, lp(wrap, wrap, Gravity.END or Gravity.TOP).apply { topMargin = -dpi(6f) })
         lookControls = LookControls(this).apply {
             onSelect = { i -> artParam = i; applyArtUi(); if (recipe.mode.isFocusSlider(artSlot)) crop.flashMask() }
             onChoice = { i ->
@@ -349,14 +350,19 @@ class CropActivity : ComponentActivity() {
         // Crop's own controls take the tabs' and selector's place while it's on
         cropPanel = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; visibility = View.GONE }
         ratioRow = row()
-        cropPanel.addView(ratioRow, LinearLayout.LayoutParams(match, dpi(31f)))
+        cropPanel.addView(ratioRow, LinearLayout.LayoutParams(match, dpi(31f)).apply { topMargin = dpi(17f) })
         val read = row()
-        read.addView(text("Straighten", 11f, T.IVORY, T.medium, caps = true), LinearLayout.LayoutParams(0, wrap, 1f))
-        readL = text("", 12f, T.SUBTLE, T.medium)
-        read.addView(readL, LinearLayout.LayoutParams(wrap, wrap))
-        cropPanel.addView(read, LinearLayout.LayoutParams(match, wrap).apply { topMargin = dpi(22f) })
+        read.addView(text("Straighten", 11f, T.IVORY, T.medium, caps = true))
+        readL = text("", 12f, T.SUBTLE, T.medium).apply { gravity = Gravity.CENTER; maxLines = 1 }
+        read.addView(readL, LinearLayout.LayoutParams(0, wrap, 1f))
+        read.addView(text("Done", 11f, T.GRAPHITE, T.semibold, caps = true).apply {
+            gravity = Gravity.CENTER; setPadding(dpi(14f), 0, dpi(14f), 0)
+            background = android.graphics.drawable.InsetDrawable(pill(T.AMBER, dp(13f)), 0, dpi(9f), 0, dpi(9f))
+            contentDescription = "Done cropping"; setOnClickListener { setCropMode(false) }
+        }, LinearLayout.LayoutParams(wrap, dpi(44f)))
+        cropPanel.addView(read, LinearLayout.LayoutParams(match, dpi(44f)).apply { topMargin = dpi(17f) })
         dial = DialView(this).apply { onChange = { v -> crop.theta = Math.toRadians(v.toDouble()).toFloat(); crop.refit() } }
-        cropPanel.addView(dial, LinearLayout.LayoutParams(match, dpi(58f)).apply { topMargin = dpi(4f) })
+        cropPanel.addView(dial, LinearLayout.LayoutParams(match, dpi(58f)))
         root.addView(cropPanel, lp(0, 0))
 
         // the shutter row's places: back to the camera, another photo, save, reset
@@ -394,7 +400,7 @@ class CropActivity : ComponentActivity() {
         val ctxH = max(0, rowTop + dpi(12f) - ctxTop)
         at(ctxArea, dpi(16f), ctxTop, w - dpi(32f), ctxH)
         lookControls.available = ctxH
-        at(cropPanel, dpi(16f), vfBottom + dpi(12f), w - dpi(32f), max(0, rowTop + dpi(12f) - vfBottom - dpi(12f)))
+        at(cropPanel, dpi(16f), vfBottom + dpi(53f), w - dpi(32f), max(0, rowTop + dpi(12f) - vfBottom - dpi(53f)))   // the selector's and contextual area's place
         at(bottomRow, 0, rowTop, w, h - rowTop)
         val cx = w / 2
         val kids = (0 until bottomRow.childCount).map { bottomRow.getChildAt(it) }
@@ -413,20 +419,17 @@ class CropActivity : ComponentActivity() {
         }
         val c = tab == "COMPOSE" && !cropMode; val a = tab == "ART" && !cropMode
         val main = if (cropMode) View.GONE else View.VISIBLE
-        tabRow.visibility = main; selector.visibility = main; ctxArea.visibility = main
+        selector.visibility = main; ctxArea.visibility = main
         cropPanel.visibility = if (cropMode) View.VISIBLE else View.GONE
         composeScroller.visibility = if (c) View.VISIBLE else View.GONE
         lookScroller.visibility = if (a) View.VISIBLE else View.GONE
         composeSub.visibility = if (c) View.VISIBLE else View.GONE
-        followBtn.visibility = if (c) View.VISIBLE else View.GONE
+        (followBtn.parent as View).visibility = if (c) View.VISIBLE else View.GONE
         lookControls.visibility = if (a) View.VISIBLE else View.GONE
         if (c) composeTiles[crop.guide]?.let { composeScroller.reveal(it, smooth = false) }
         if (a) lookTiles[recipe.mode]?.let { lookScroller.reveal(it, smooth = false) }
         // Crop on: the whole photo and the crop box, and your fingers move the box. Off: the crop fills the
         // frame like the viewfinder; with a second photo, your fingers move that instead
-        cropBtn.background = pill(T.CARBON, dp(16f), if (cropMode) T.AMBER else null, dpi(1f))
-        cropBtn.setTextColor(if (cropMode) T.AMBER else T.IVORY)
-        cropBtn.contentDescription = if (cropMode) "Crop on" else "Crop off"
         crop.framed = !cropMode
         crop.editingSecond = !cropMode && secondUri != null
         crop.focusMode = a
@@ -434,9 +437,21 @@ class CropActivity : ComponentActivity() {
         doubleBtn.contentDescription = if (secondUri != null) "Double exposure on" else "Double exposure off"
     }
 
+    /** Compose's Crop pill: the camera's Follow guide pill (FollowToggle), with a crop mark. */
+    private fun cropToggle() = row().apply {
+        gravity = Gravity.CENTER
+        addView(ImageView(this@CropActivity).apply { setImageResource(R.drawable.ic_crop); setColorFilter(T.IVORY) }, LinearLayout.LayoutParams(dpi(14f), dpi(14f)))
+        addView(text("Crop", 11f, T.IVORY, T.medium, caps = true), LinearLayout.LayoutParams(wrap, wrap).apply { leftMargin = dpi(5f) })
+        background = android.graphics.drawable.InsetDrawable(pill(T.CARBON, dp(13f), T.IVORY, dpi(1f).coerceAtLeast(1)), 0, dpi(9f), 0, dpi(9f))
+        setPadding(dpi(10f), 0, dpi(10f), 0)
+        contentDescription = "Crop and straighten"
+        setOnClickListener { setCropMode(true) }
+    }
+
     private fun setCropMode(on: Boolean) {
         if (cropMode == on) return
         cropMode = on
+        if (on) tab = "COMPOSE"
         if (!on) remember()
         applyTab(); syncReadout()
     }

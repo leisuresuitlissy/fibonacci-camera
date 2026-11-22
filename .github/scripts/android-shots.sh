@@ -100,6 +100,7 @@ adb shell rm -rf "/sdcard/Pictures/Fibonacci Camera" || true
 adb logcat -c
 for s in portrait landscape exif6; do shoot "edit-CROP-$s" "edit:CROP:OFF:$s"; done
 shoot edit-COMPOSE "edit:COMPOSE:OFF:portrait"
+shoot edit-COMPOSE-spiral-landscape "edit:COMPOSE:OFF:landscape:PHI"
 shoot edit-DOUBLE "edit:DOUBLE:OFF:portrait"
 shoot edit-CROP-rotated "edit:CROP:KINO:landscape:4x5:8"
 shoot edit-LOOK-framed-rotated "edit:LOOK:KINO:landscape:4x5:8"
