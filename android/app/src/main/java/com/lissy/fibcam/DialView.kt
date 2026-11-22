@@ -4,7 +4,6 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Paint
-import android.graphics.Typeface
 import android.view.GestureDetector
 import android.view.MotionEvent
 import android.view.View
@@ -20,10 +19,10 @@ class DialView(ctx: Context) : View(ctx) {
 
     private val d = resources.displayMetrics.density
     private val pxPerDeg = 6 * d
-    private val tick = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFFF5F3EF.toInt(); strokeCap = Paint.Cap.ROUND }
-    private val pointer = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFFE0B252.toInt(); strokeWidth = 2 * d; strokeCap = Paint.Cap.ROUND }
-    private val lab = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFFA3A09A.toInt(); textSize = 9 * d; typeface = Typeface.MONOSPACE; textAlign = Paint.Align.CENTER }
-    private val big = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFFE0B252.toInt(); textSize = 11 * d; typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD); textAlign = Paint.Align.CENTER }
+    private val tick = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = T.IVORY; strokeCap = Paint.Cap.ROUND }
+    private val pointer = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = T.AMBER; strokeWidth = 2 * d; strokeCap = Paint.Cap.ROUND }
+    private val lab = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = T.SUBTLE; textSize = 10 * d; typeface = T.medium; textAlign = Paint.Align.CENTER }
+    private val big = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = T.AMBER; textSize = 12 * d; typeface = T.semibold; textAlign = Paint.Align.CENTER }
     private var lastX = 0f
     private var raw = 0f
     private val taps = GestureDetector(ctx, object : GestureDetector.SimpleOnGestureListener() {

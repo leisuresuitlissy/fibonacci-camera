@@ -156,8 +156,7 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
      * lines (the classic miniature band), and the triangle and dynamic-symmetry diagonals (which also set its
      * angle). With Spiral, Centre, Diagonals or Crop the band stays wherever you tap, drag or slide it.
      */
-    private val tiltFollows: Boolean get() = art == ArtMode.TILT_SHIFT && followActive &&
-        guide in setOf(Guide.THIRDS, Guide.PHI_GRID, Guide.TRIANGLES, Guide.DYNAMIC)
+    private val tiltFollows: Boolean get() = art == ArtMode.TILT_SHIFT && followActive && guide in Catalog.tiltGuides
     /** Whether Follow guide is steering the current Look's target (Tilt Shift only with line-friendly guides). */
     private val lookFollows: Boolean get() = if (art == ArtMode.TILT_SHIFT) tiltFollows else followActive
     /** Follow guide is on and the guide has a focal point to follow. */
@@ -322,6 +321,7 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
             "exposure" -> evAtStart = true
             "render" -> renderShot = s
             "batch" -> labBatch()
+            "edit" -> openEditTest(p)
             "double" -> { double = true; coach = true; flashMode = ImageCapture.FLASH_MODE_ON }
         }
     }
@@ -505,11 +505,7 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
         selector = FrameLayout(this)
         composeScroller = FadeScroller(this, dp(36f))
         val cRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(dpi(16f), 0, dpi(16f), 0) }
-        val comps = listOf(Guide.OFF to ("Off" to R.drawable.comp_off), Guide.THIRDS to ("Thirds" to R.drawable.comp_thirds),
-            Guide.PHI_GRID to ("Grid" to R.drawable.comp_grid), Guide.SPIRAL to ("Spiral" to R.drawable.comp_spiral),
-            Guide.TRIANGLES to ("Triangle" to R.drawable.comp_triangles), Guide.DIAGONALS to ("Diagonals" to R.drawable.comp_diagonals),
-            Guide.DYNAMIC to ("Dynamic" to R.drawable.comp_dynamic), Guide.CENTRE to ("Centre" to R.drawable.comp_centre),
-            Guide.MARKS to ("Crop" to R.drawable.comp_crop))
+        val comps = Catalog.guides.map { (g, name, res) -> g to (name to res) }   // shared with Edit a copy
         comps.forEachIndexed { i, (g, v) ->
             val t = TileView(this, bmp(v.second), 60f, 50f, RectF(0f, 0f, 60f, 50f), 4f, T.GRAPHITE, v.first, 11f, crop = false).apply {
                 contentDescription = "${v.first} guide"
@@ -522,14 +518,7 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
         selector.addView(composeScroller, lp(match, match))
         lookScroller = FadeScroller(this, dp(36f))
         val lRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; setPadding(dpi(16f), 0, dpi(16f), 0) }
-        val looks = listOf(ArtMode.OFF to ("Original" to R.drawable.look_original), ArtMode.HOLGA to ("Plastic" to R.drawable.look_holga),
-            ArtMode.PINHOLE to ("Pinhole" to R.drawable.look_pinhole), ArtMode.TILT_SHIFT to ("Tilt shift" to R.drawable.look_tilt_shift),
-            ArtMode.GRAINY_FILM to ("Grainy film" to R.drawable.look_grainy_film), ArtMode.CROSS_PROCESS to ("Cross process" to R.drawable.look_cross_process),
-            ArtMode.CYANOTYPE to ("Cyanotype" to R.drawable.look_cyanotype), ArtMode.DREAM_LENS to ("Dream lens" to R.drawable.look_dream_lens),
-            ArtMode.INFRARED to ("Infrared" to R.drawable.look_infrared), ArtMode.KINO to ("Kino" to R.drawable.look_kino),
-            ArtMode.EXPIRED to ("Expired" to R.drawable.look_expired), ArtMode.REDSCALE to ("Redscale" to R.drawable.look_redscale),
-            ArtMode.SOLARISED to ("Solarised" to R.drawable.look_solarised), ArtMode.INSTANT to ("Instant" to R.drawable.look_instant),
-            ArtMode.BLEACH_BYPASS to ("Bleach bypass" to R.drawable.look_bleach_bypass))
+        val looks = Catalog.looks.map { (m, name, res) -> m to (name to res) }   // shared with Edit a copy
         looks.forEachIndexed { i, (m, v) ->
             val t = TileView(this, bmp(v.second), 60f, 50f, RectF(0f, 0f, 60f, 50f), 8f, null, v.first, 11f, crop = true).apply {
                 contentDescription = "${v.first} look"
@@ -834,10 +823,9 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
         composeSub.removeAllViews()
         // only guides with real alternatives get a submenu; the space stays empty otherwise
         val alts: List<Triple<String, Int, () -> Unit>> = when (guide) {
-            Guide.SPIRAL -> listOf("Top left" to R.drawable.or_spiral_tl, "Top right" to R.drawable.or_spiral_tr,
-                "Bottom left" to R.drawable.or_spiral_bl, "Bottom right" to R.drawable.or_spiral_br).mapIndexed { q, (n, r) ->
+            Guide.SPIRAL -> Catalog.variants(guide).mapIndexed { q, (n, r) ->
                 Triple(n, r) { quadrant = q; aligned = false; save(); applyGuide(); guideMoved() } }
-            Guide.TRIANGLES -> listOf("Diagonal A" to R.drawable.or_tri_a, "Diagonal B" to R.drawable.or_tri_b).mapIndexed { i, (n, r) ->
+            Guide.TRIANGLES -> Catalog.variants(guide).mapIndexed { i, (n, r) ->
                 Triple(n, r) { triFlip = i == 1; aligned = false; save(); applyGuide(); guideMoved() } }
             else -> emptyList()
         }
@@ -1518,6 +1506,36 @@ class MainActivity : ComponentActivity(), OverlayView.Listener, SensorEventListe
      * photo would be (Art.render with the mask the camera would use), then draws the guide on top of the
      * on-screen copy only, so the sharp region can be compared with the anchor.
      */
+    /**
+     * CI only (`-e fibShot edit:TAB:MODE:shape[:ratio[:degrees[:save]]]`): opens Edit a copy on a generated test
+     * photo. shape is portrait, landscape, or exif6 (landscape pixels stored with EXIF "rotate 90", which must open
+     * upright); ratio is PHI, ORIGINAL, 4:5, 1:1 or 3:2 ("-" keeps the default); "save" saves a copy once it opens.
+     */
+    private fun openEditTest(p: List<String>) {
+        val shape = p.getOrNull(3) ?: "portrait"
+        val land = shape != "portrait"
+        val w = if (land) 1600 else 1200; val h = if (land) 1200 else 1600
+        val b = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+        val c = android.graphics.Canvas(b)
+        val pt = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
+        for (y in 0 until h step 8) for (x in 0 until w step 8) {
+            pt.color = if (((x / 8) + (y / 8)) % 2 == 0) Color.rgb(40 + x * 180 / w, 90, 40 + y * 180 / h) else Color.rgb(225, 205 - y * 60 / h, 180 - x * 80 / w)
+            c.drawRect(x.toFloat(), y.toFloat(), x + 8f, y + 8f, pt)
+        }
+        pt.color = Color.BLACK; pt.textSize = 46f; pt.typeface = T.semibold
+        c.drawText("UP ↑  $shape", 40f, 80f, pt)
+        for (y in 200 until h step 160) for (x in 30 until w step 300) c.drawText("Aa 1:2", x.toFloat(), y.toFloat(), pt)
+        val f = java.io.File(cacheDir, "edit-test-$shape.jpg")
+        val img = if (shape == "exif6") android.graphics.Bitmap.createBitmap(b, 0, 0, w, h, android.graphics.Matrix().apply { postRotate(-90f) }, true) else b
+        java.io.FileOutputStream(f).use { img.compress(Bitmap.CompressFormat.JPEG, 92, it) }
+        if (shape == "exif6") android.media.ExifInterface(f.path).apply { setAttribute(android.media.ExifInterface.TAG_ORIENTATION, "6"); saveAttributes() }
+        // a file path, not a file:// Uri: Android refuses file Uris in intents, even to our own screens
+        startActivity(Intent(this, CropActivity::class.java).putExtra("editFile", f.path)
+            .putExtra("editTab", p.getOrNull(1) ?: "CROP").putExtra("editMode", p.getOrNull(2) ?: "OFF")
+            .putExtra("editRatio", p.getOrNull(4)).putExtra("editTheta", p.getOrNull(5)?.toFloatOrNull() ?: 0f)
+            .putExtra("editSave", p.getOrNull(6) == "save"))
+    }
+
     /**
      * Look lab (CI only, via `-e fibShot batch`): renders every line of files/lab/spec.txt through the same
      * Art.render + Art.finish path a saved photo takes, and writes JPEGs to files/lab/out. Line format:

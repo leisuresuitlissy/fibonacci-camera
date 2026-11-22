@@ -134,7 +134,7 @@ jobs:
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back emulated -skin 1080x2410
           script: bash .github/scripts/android-shots.sh fibonacci-camera.apk shots
       - name: Bundle
-        run: cd shots && zip -q ../android-shots.zip *.png crash-log.txt && cd .. && cp fibonacci-camera.apk crooked-light-check.apk
+        run: cd shots && zip -qr ../android-shots.zip *.png *.txt saved && cd .. && cp fibonacci-camera.apk crooked-light-check.apk
       - name: Publish the screens
         uses: ncipollo/release-action@v1
         with:

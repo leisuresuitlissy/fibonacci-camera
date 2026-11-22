@@ -95,4 +95,29 @@ shoot render-KINO-vig100 "render:KINO:OFF:0:0:-:8=100"
 shoot exposure "exposure"
 shoot settings "settings"
 shoot header-active "double"
+# Edit a copy: the camera's components on a generated photo (portrait, landscape, EXIF-rotated)
+adb shell rm -rf "/sdcard/Pictures/Fibonacci Camera" || true
+adb logcat -c
+for s in portrait landscape exif6; do shoot "edit-CROP-$s" "edit:CROP:OFF:$s"; done
+shoot edit-COMPOSE "edit:COMPOSE:OFF:portrait"
+shoot edit-DOUBLE "edit:DOUBLE:OFF:portrait"
+for m in OFF HOLGA PINHOLE TILT_SHIFT GRAINY_FILM CROSS_PROCESS CYANOTYPE DREAM_LENS INFRARED KINO EXPIRED REDSCALE SOLARISED INSTANT BLEACH_BYPASS; do
+  shoot "edit-LOOK-$m" "edit:LOOK:$m:portrait"
+done
+# preview vs saved copy: each run saves once; the crop's screen corners go to the log (fibEdit)
+for run in "save-kino-4x5-tilt8|edit:LOOK:KINO:landscape:4x5:8:save" \
+           "save-tilt-portrait|edit:LOOK:TILT_SHIFT:portrait:-:0:save" \
+           "save-grainy-exif6-3x2-tiltm6|edit:LOOK:GRAINY_FILM:exif6:3x2:-6:save" \
+           "save-instant-original|edit:LOOK:INSTANT:portrait:ORIGINAL:0:save" \
+           "save-pinhole-1x1|edit:LOOK:PINHOLE:landscape:1x1:0:save" \
+           "save-plastic|edit:LOOK:HOLGA:portrait:-:0:save"; do
+  n="${run%%|*}"; x="${run#*|}"
+  adb logcat -c
+  shoot "$n" "$x"
+  adb logcat -d -s fibEdit:I | grep corners | tail -1 | sed "s/^.*corners /$n /" >> "$OUT/edit-corners.txt"
+  sleep 2
+done
+mkdir -p "$OUT/saved"
+adb pull "/sdcard/Pictures/Fibonacci Camera/." "$OUT/saved/" || true
+ls -la "$OUT/saved" > "$OUT/saved-list.txt" 2>&1 || true
 adb logcat -d -s AndroidRuntime:E > "$OUT/crash-log.txt" || true

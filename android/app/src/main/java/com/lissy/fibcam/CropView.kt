@@ -5,6 +5,7 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapShader
 import android.graphics.Canvas
+import android.graphics.RenderNode
 import android.graphics.RuntimeShader
 import android.graphics.Shader
 import android.os.Build
@@ -23,6 +24,7 @@ import kotlin.math.cos
 import kotlin.math.hypot
 import kotlin.math.max
 import kotlin.math.min
+import kotlin.math.roundToInt
 import kotlin.math.sin
 
 /**
@@ -74,6 +76,10 @@ class CropView(ctx: Context) : View(ctx) {
      * photo however you crop or straighten.
      */
     fun cropMask(r: Recipe): FocusMask {
+        // Tilt Shift on a line-friendly guide: the band runs through the guide's anchor, at its Angle (camera rule)
+        if (r.follow && r.mode == ArtMode.TILT_SHIFT && guide in Catalog.tiltGuides) {
+            guideAnchor()?.let { a -> return Focus.resolve(r.mode, r.values, false, null, null, aspect = cw / ch).copy(cx = a.u, cy = a.v) }
+        }
         if (r.follow && r.mode.follows && r.mode != ArtMode.TILT_SHIFT) {
             val fr = RectF(0f, 0f, cw, ch)
             val g = GuideCtx(guide, quadrant, triFlip, anchor, fr, fr, trueSpiral = true)
@@ -84,13 +90,22 @@ class CropView(ctx: Context) : View(ctx) {
         val m = Focus.resolve(r.mode, r.values, false, null, p, aspect = cw / ch)
         return if (r.mode == ArtMode.TILT_SHIFT) m.copy(cx = p.x, cy = p.y) else m
     }
+    /** The guide's chosen anchor on the crop (crop uv), or null when the guide has none. */
+    fun guideAnchor(): FocusAnchor? {
+        if (cw <= 0f) return null
+        val fr = RectF(0f, 0f, cw, ch)
+        return Focus.linked(GuideCtx(guide, quadrant, triFlip, anchor, fr, fr, trueSpiral = true))
+    }
+    /** The anchor Follow guide is using, marked as in the viewfinder; -1 for none. */
+    var selectedAnchor = -1
+        set(v) { field = v; invalidate() }
     private var downX = 0f; private var downY = 0f; private var downT = 0L; private var multi = false
     private val slop = android.view.ViewConfiguration.get(ctx).scaledTouchSlop
     private var artShader: RuntimeShader? = null
     private var artShaderMode: ArtMode? = null
     private val artPaint = Paint(Paint.FILTER_BITMAP_FLAG)
-    private val focusRing = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; color = 0xFFE9B65B.toInt() }
-    private val focusDot = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFFE9B65B.toInt() }
+    private val focusRing = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; color = T.AMBER }
+    private val focusSoft = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; color = T.AMBER }
 
     // ---- second exposure: centre in base-bitmap px, width as a fraction of base width, rotation in degrees
     var second: Bitmap? = null
@@ -108,7 +123,7 @@ class CropView(ctx: Context) : View(ctx) {
     private var comboDirty = true
     private val s2m = Matrix()
     private val outline = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        style = Paint.Style.STROKE; color = 0xE6E0B252.toInt()
+        style = Paint.Style.STROKE; color = T.alpha(T.AMBER, 0.9f)
         strokeWidth = 1.4f * resources.displayMetrics.density
         pathEffect = DashPathEffect(floatArrayOf(6f * resources.displayMetrics.density, 4f * resources.displayMetrics.density), 0f)
     }
@@ -168,6 +183,8 @@ class CropView(ctx: Context) : View(ctx) {
     }
 
     private fun toScreen(p: PointF) = PointF(ox + p.x * k, oy + p.y * k)
+    /** The crop's corners in view pixels: top-left, top-right, bottom-right, bottom-left (CI comparisons). */
+    fun screenCorners(): List<PointF> = corners().map { toScreen(it) }
 
     fun corners(x: Float = cx, y: Float = cy, w: Float = cw, t: Float = theta): Array<PointF> {
         val h = w / aspect; val c = cos(t); val s = sin(t)
@@ -206,7 +223,8 @@ class CropView(ctx: Context) : View(ctx) {
         m.reset(); m.postScale(k, k); m.postTranslate(ox, oy)
         val q = corners().map { toScreen(it) }
         val pic = picture(b)
-        if (!drawArt(c, pic, q)) c.drawBitmap(pic, m, bmpPaint)
+        c.drawBitmap(pic, m, bmpPaint)
+        drawArt(c, pic)
         // dim everything outside the crop
         path.reset(); path.fillType = Path.FillType.EVEN_ODD
         path.addRect(0f, 0f, width.toFloat(), height.toFloat(), Path.Direction.CW)
@@ -218,7 +236,7 @@ class CropView(ctx: Context) : View(ctx) {
         val sc = toScreen(PointF(cx, cy)); val w = cw * k; val h = ch * k
         c.save(); c.translate(sc.x, sc.y); c.rotate(Math.toDegrees(theta.toDouble()).toFloat())
         c.clipRect(-w / 2, -h / 2, w / 2, h / 2)
-        painter.draw(c, RectF(-w / 2, -h / 2, w / 2, h / 2), guide, quadrant, triFlip, trueSpiral = true)
+        painter.draw(c, RectF(-w / 2, -h / 2, w / 2, h / 2), guide, quadrant, triFlip, trueSpiral = true, selected = selectedAnchor)
         c.restore()
         recipe?.let { r ->
             // Art tab: briefly show the simulated focus region, in the crop's tilted frame (never saved)
@@ -229,19 +247,18 @@ class CropView(ctx: Context) : View(ctx) {
                     c.clipRect(-w / 2, -h / 2, w / 2, h / 2)
                     val mx = -w / 2 + m.cx * w; val my = -h / 2 + m.cy * h
                     val inner = m.size * h; val outer = (m.size + Focus.featherLen(m, w / h)) * h
-                    focusRing.strokeWidth = 1.4f * d; focusRing.pathEffect = null
+                    // the viewfinder's mask outline (OverlayView): solid edge of the sharp area, dashed end of the fade
+                    focusRing.alpha = 220; focusRing.strokeWidth = 1.3f * d
+                    focusSoft.alpha = 140; focusSoft.strokeWidth = 1f * d; focusSoft.pathEffect = DashPathEffect(floatArrayOf(4 * d, 5 * d), 0f)
                     if (m.type == 2) {
-                        c.drawCircle(mx, my, inner, focusRing); c.drawCircle(mx, my, 2.5f * d, focusDot)
-                        focusRing.pathEffect = DashPathEffect(floatArrayOf(4 * d, 5 * d), 0f); c.drawCircle(mx, my, outer, focusRing)
+                        c.drawCircle(mx, my, inner, focusRing); c.drawCircle(mx, my, outer, focusSoft); c.drawCircle(mx, my, 3 * d, focusRing)
                     } else {
                         val ux = cos(m.angle); val uy = sin(m.angle); val L = w + h
-                        for ((off, dash) in listOf(inner to false, -inner to false, outer to true, -outer to true)) {
-                            focusRing.pathEffect = if (dash) DashPathEffect(floatArrayOf(4 * d, 5 * d), 0f) else null
+                        for ((off, p) in listOf(inner to focusRing, -inner to focusRing, outer to focusSoft, -outer to focusSoft)) {
                             val px0 = mx - uy * off; val py0 = my + ux * off
-                            c.drawLine(px0 - ux * L, py0 - uy * L, px0 + ux * L, py0 + uy * L, focusRing)
+                            c.drawLine(px0 - ux * L, py0 - uy * L, px0 + ux * L, py0 + uy * L, p)
                         }
                     }
-                    focusRing.pathEffect = null
                     c.restore()
                 }
             }
@@ -260,24 +277,48 @@ class CropView(ctx: Context) : View(ctx) {
         }
     }
 
-    private fun drawArt(c: Canvas, b: Bitmap, q: List<PointF>): Boolean {
+    /**
+     * The look, drawn on the crop in the crop's own straightened frame: the same rectangle, mask and uniforms
+     * the saved copy is rendered with (CropActivity.save → Art.render), only smaller. So the vignette, focus
+     * band and grain sit where they will on the copy, however the crop is moved, sized or turned.
+     * Tilt Shift goes through TiltFx, the layered blur the camera and saved copies use.
+     */
+    private fun drawArt(c: Canvas, b: Bitmap): Boolean {
         val r = recipe ?: return false
         if (r.mode == ArtMode.OFF || Build.VERSION.SDK_INT < 33) return false
+        val sc = toScreen(PointF(cx, cy)); val w = cw * k; val h = ch * k
+        if (w < 2f || h < 2f) return false
+        val deg = Math.toDegrees(theta.toDouble()).toFloat()
+        // bitmap px → crop-local px (origin at the crop's top-left corner, axes along its edges)
+        val local = Matrix(m).apply { postTranslate(-sc.x, -sc.y); postRotate(-deg); postTranslate(w / 2, h / 2) }
+        val mask = cropMask(r)
+        if (r.mode == ArtMode.TILT_SHIFT && c.isHardwareAccelerated) {
+            val fx = tiltFx ?: TiltFx.create().also { tiltFx = it }
+            if (fx != null) {
+                val node = tiltNode ?: RenderNode("editTilt").also { tiltNode = it }
+                node.setPosition(0, 0, w.roundToInt(), h.roundToInt())
+                node.setRenderEffect(fx.effect(r.values, 0f, 0f, w, h, r.seed, mask))
+                val rc = node.beginRecording()
+                rc.concat(local); rc.drawBitmap(b, 0f, 0f, bmpPaint)
+                node.endRecording()
+                c.save(); c.translate(sc.x, sc.y); c.rotate(deg); c.translate(-w / 2, -h / 2)
+                c.drawRenderNode(node)
+                c.restore()
+                return true
+            }
+        }
         if (artShaderMode != r.mode) { artShader = Art.newShader(r.mode); artShaderMode = r.mode }
         val sh = artShader ?: return false
-        sh.setInputShader("content", BitmapShader(b, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP).apply { setLocalMatrix(m) })
-        val x0 = q.minOf { it.x }; val y0 = q.minOf { it.y }; val x1 = q.maxOf { it.x }; val y1 = q.maxOf { it.y }
-        // the look is measured against the crop's bounding box on screen; move the crop-space mask into it
-        val m = cropMask(r)
-        val ip = cropToImage(m.cx, m.cy)
-        val sx = ox + ip.x * bw * k; val sy = oy + ip.y * bh * k
-        val scale = (ch * k) / (y1 - y0)
-        val shown = m.copy(cx = (sx - x0) / (x1 - x0), cy = (sy - y0) / (y1 - y0), angle = m.angle + theta, size = m.size * scale, feather = if (m.type == 3) m.feather else m.feather * scale)
-        Art.setUniforms(sh, r.mode, r.values, x0, y0, x1 - x0, y1 - y0, r.seed, shown)
+        sh.setInputShader("content", BitmapShader(b, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP).apply { setLocalMatrix(local) })
+        Art.setUniforms(sh, r.mode, r.values, 0f, 0f, w, h, r.seed, mask)
         artPaint.shader = sh
-        c.drawRect(ox, oy, ox + b.width * k, oy + b.height * k, artPaint)
+        c.save(); c.translate(sc.x, sc.y); c.rotate(deg); c.translate(-w / 2, -h / 2)
+        c.drawRect(0f, 0f, w, h, artPaint)
+        c.restore()
         return true
     }
+    private var tiltFx: TiltFx? = null
+    private var tiltNode: RenderNode? = null
 
     // ---------------------------------------------------------------- touch
     private enum class Mode { NONE, MOVE, CORNER }
