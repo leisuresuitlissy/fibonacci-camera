@@ -67,9 +67,9 @@ object EditParity {
             aspect = if (mode == ArtMode.HOLGA) 1f else w.toFloat() / h
             reset()
         }
-        val r = Recipe(mode, raw.copyOf(), SEED, follow)
-        val edMask = crop.cropMask(r)
-        val ed = EditRender.copy(photo, crop.cx, crop.cy, crop.cw, crop.ch, 0f, 1f, r, edMask)
+        // as CropActivity.selectLook sets it up, and as Save a copy renders it
+        val r = Recipe(mode, raw.copyOf(), SEED, follow).let { if (!follow) crop.pinTilt(it) else it }
+        val ed = EditRender.copy(photo, crop.cx, crop.cy, crop.cw, crop.ch, 0f, 1f, r, crop.renderMask(r), crop.renderFactor(r))
 
         val line = StringBuilder("$pname\t${mode.name}\t$cname\t${cam.width}×${cam.height}\t${ed.width}×${ed.height}\t")
         if (cam.width != ed.width || cam.height != ed.height) {

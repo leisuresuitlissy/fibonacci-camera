@@ -75,21 +75,52 @@ class CropView(ctx: Context) : View(ctx) {
      * crop's own guide, so it moves with the crop. Off: the point you chose stays on the same part of the
      * photo however you crop or straighten.
      */
-    fun cropMask(r: Recipe): FocusMask {
+    fun cropMask(r: Recipe): FocusMask = maskIn(r, 1f)
+
+    /**
+     * The frame a look is rendered on, as a multiple of the crop's height. Plastic is the camera's square
+     * guide inside its 3:4 frame: the camera renders it on the 3:4 frame and keeps the square (Art.finish), so
+     * a square crop is rendered the same way, on the 3:4 frame around it. Everything else: the crop itself.
+     */
+    fun renderFactor(r: Recipe): Float = if (r.mode == ArtMode.HOLGA && abs(aspect - 1f) < 0.01f) 4f / 3f else 1f
+
+    /** The look's mask in its render frame (see [renderFactor]): what the preview and the saved copy use. */
+    fun renderMask(r: Recipe): FocusMask = maskIn(r, renderFactor(r))
+
+    /**
+     * The mask in a frame [fh] crop-heights tall, centred on the crop (the crop is the guide's frame inside it,
+     * as the square guide sits inside the camera's frame). [fh] 1: the crop itself.
+     */
+    private fun maskIn(r: Recipe, fh: Float): FocusMask {
+        val off = (fh - 1f) * ch / 2f
+        val fr = RectF(0f, 0f, cw, ch * fh); val gf = RectF(0f, off, cw, off + ch)
+        val aspect = cw / (ch * fh)
+        fun toFrame(p: PointF) = PointF(p.x, (off + p.y * ch) / (ch * fh))
         // Tilt Shift on a line-friendly guide: the band runs through the guide's anchor, at its Angle (camera rule)
         if (r.follow && r.mode == ArtMode.TILT_SHIFT && guide in Catalog.tiltGuides) {
-            guideAnchor()?.let { a -> return Focus.resolve(r.mode, r.values, false, null, null, aspect = cw / ch).copy(cx = a.u, cy = a.v) }
+            guideAnchor()?.let { a -> val q = toFrame(PointF(a.u, a.v)); return Focus.resolve(r.mode, r.values, false, null, null, aspect = aspect).copy(cx = q.x, cy = q.y) }
         }
         if (r.follow && r.mode.follows && r.mode != ArtMode.TILT_SHIFT) {
-            val fr = RectF(0f, 0f, cw, ch)
-            val g = GuideCtx(guide, quadrant, triFlip, anchor, fr, fr, trueSpiral = true)
-            val m = Focus.resolve(r.mode, r.values, true, g, null, aspect = cw / ch)
+            val g = GuideCtx(guide, quadrant, triFlip, anchor, fr, gf, trueSpiral = true)
+            val m = Focus.resolve(r.mode, r.values, true, g, null, aspect = aspect)
             if (Focus.linked(g) != null) return m
         }
-        val p = imageToCrop(r.mask.cx, r.mask.cy)
-        val m = Focus.resolve(r.mode, r.values, false, null, p, aspect = cw / ch)
+        val p = toFrame(imageToCrop(r.mask.cx, r.mask.cy))
+        val m = Focus.resolve(r.mode, r.values, false, null, p, aspect = aspect)
         return if (r.mode == ArtMode.TILT_SHIFT) m.copy(cx = p.x, cy = p.y) else m
     }
+
+    /**
+     * Tilt Shift's band as its Focus and Angle place it on the crop (the camera's rule), pinned to that spot of
+     * the photo from here on. Used whenever the values are set wholesale: choosing the look, Reset all.
+     */
+    fun pinTilt(r: Recipe): Recipe {
+        if (r.mode != ArtMode.TILT_SHIFT || cw <= 0f) return r
+        val m = Focus.resolve(r.mode, r.values, false, null, null, aspect = cw / ch)
+        val ip = cropToImage(m.cx, m.cy)
+        return r.copy(mask = r.mask.copy(cx = ip.x, cy = ip.y))
+    }
+
     /** The guide's chosen anchor on the crop (crop uv), or null when the guide has none. */
     fun guideAnchor(): FocusAnchor? {
         if (cw <= 0f) return null
@@ -277,12 +308,12 @@ class CropView(ctx: Context) : View(ctx) {
         recipe?.let { r ->
             // Look tab: briefly show the simulated focus region, in the crop's frame (never saved)
             if (focusMode && System.currentTimeMillis() < maskUntil && r.mode != ArtMode.OFF) {
-                val fm = cropMask(r)
+                val fm = renderMask(r); val fh = renderFactor(r); val rh = h * fh
                 if (fm.type != 0 && (r.mode == ArtMode.TILT_SHIFT || fm.strength > 0f)) {
                     c.save(); c.translate(sc.x, sc.y); c.rotate(sdeg)
                     c.clipRect(-w / 2, -h / 2, w / 2, h / 2)
-                    val mx = -w / 2 + fm.cx * w; val my = -h / 2 + fm.cy * h
-                    val inner = fm.size * h; val outer = (fm.size + Focus.featherLen(fm, w / h)) * h
+                    val mx = -w / 2 + fm.cx * w; val my = -rh / 2 + fm.cy * rh
+                    val inner = fm.size * rh; val outer = (fm.size + Focus.featherLen(fm, w / rh)) * rh
                     // the viewfinder's mask outline (OverlayView): solid edge of the sharp area, dashed end of the fade
                     focusRing.alpha = 220; focusRing.strokeWidth = 1.3f * d
                     focusSoft.alpha = 140; focusSoft.strokeWidth = 1f * d; focusSoft.pathEffect = DashPathEffect(floatArrayOf(4 * d, 5 * d), 0f)
@@ -325,7 +356,8 @@ class CropView(ctx: Context) : View(ctx) {
         val deg = sdeg
         // bitmap px → crop-local px (origin at the crop's top-left corner, axes along its edges)
         val local = Matrix(m).apply { postTranslate(-sc.x, -sc.y); postRotate(-deg); postTranslate(w / 2, h / 2) }
-        val mask = cropMask(r)
+        val mask = renderMask(r)
+        val fh = renderFactor(r)
         if (r.mode == ArtMode.TILT_SHIFT && c.isHardwareAccelerated) {
             val fx = tiltFx ?: TiltFx.create().also { tiltFx = it }
             if (fx != null) {
@@ -344,7 +376,8 @@ class CropView(ctx: Context) : View(ctx) {
         if (artShaderMode != r.mode) { artShader = Art.newShader(r.mode); artShaderMode = r.mode }
         val sh = artShader ?: return false
         sh.setInputShader("content", BitmapShader(b, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP).apply { setLocalMatrix(local) })
-        Art.setUniforms(sh, r.mode, r.values, 0f, 0f, w, h, r.seed, mask)
+        // the render frame: the crop, or for Plastic the 3:4 frame around it; only the crop is drawn
+        Art.setUniforms(sh, r.mode, r.values, 0f, -(fh - 1f) * h / 2f, w, h * fh, r.seed, mask)
         artPaint.shader = sh
         c.save(); c.translate(sc.x, sc.y); c.rotate(deg); c.translate(-w / 2, -h / 2)
         c.drawRect(0f, 0f, w, h, artPaint)

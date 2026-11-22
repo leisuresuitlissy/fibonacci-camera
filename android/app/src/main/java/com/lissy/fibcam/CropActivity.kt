@@ -51,17 +51,26 @@ import kotlin.math.roundToInt
  * check that compares it with the camera (EditParity).
  */
 object EditRender {
-    fun copy(full: Bitmap, cx: Float, cy: Float, cw: Float, ch: Float, deg: Float, f: Float, r: Recipe, mask: FocusMask): Bitmap {
+    /** [fh] and [mask]: CropView.renderFactor and renderMask (Plastic renders on the 3:4 frame around a square crop). */
+    fun copy(full: Bitmap, cx: Float, cy: Float, cw: Float, ch: Float, deg: Float, f: Float, r: Recipe, mask: FocusMask, fh: Float = 1f): Bitmap {
         val ow = (cw * f).roundToInt().coerceIn(16, max(16, full.width)); val oh = (ch * f).roundToInt().coerceIn(16, max(16, full.height))
-        var out = Bitmap.createBitmap(ow, oh, Bitmap.Config.ARGB_8888)
+        val styling = r.mode != ArtMode.OFF && Build.VERSION.SDK_INT >= 33
+        val rh = if (styling && fh > 1f) (oh * fh).roundToInt() else oh       // the render frame's height
+        var out = Bitmap.createBitmap(ow, rh, Bitmap.Config.ARGB_8888)
         Canvas(out).apply {
             drawColor(Color.BLACK)
-            translate(ow / 2f, oh / 2f); rotate(-deg); translate(-cx * f, -cy * f)   // crop and straighten in one step
-            drawBitmap(full, 0f, 0f, Paint(Paint.FILTER_BITMAP_FLAG))
+            translate(ow / 2f, rh / 2f); rotate(-deg); translate(-cx * f, -cy * f)   // crop and straighten in one step
+            if (rh == oh) drawBitmap(full, 0f, 0f, Paint(Paint.FILTER_BITMAP_FLAG))
+            // Plastic's taller frame can reach past the photo: edge pixels carry on, as in the preview
+            else drawPaint(Paint(Paint.FILTER_BITMAP_FLAG).apply { shader = android.graphics.BitmapShader(full, android.graphics.Shader.TileMode.CLAMP, android.graphics.Shader.TileMode.CLAMP) })
         }
-        if (r.mode != ArtMode.OFF && Build.VERSION.SDK_INT >= 33) {
-            val styled = Art.render(out, r, mask)         // the look, measured against the crop
+        if (styling) {
+            val styled = Art.render(out, r, mask)         // the look, measured against its frame
             if (styled !== out) { out.recycle(); out = styled }
+            if (rh != oh) {                                // keep the crop, as Art.finish keeps Plastic's square
+                val kept = Bitmap.createBitmap(out, 0, (rh - oh) / 2, ow, oh)
+                if (kept !== out) { out.recycle(); out = kept }
+            }
         }
         return out
     }
@@ -329,7 +338,7 @@ class CropActivity : ComponentActivity() {
             }
             onReset = {
                 // this photo's look back to the look's starting settings; your shooting settings are untouched
-                recipe = recipe.copy(values = recipe.mode.defaults, follow = false); lookValues[recipe.mode] = recipe.values
+                recipe = crop.pinTilt(recipe.copy(values = recipe.mode.defaults, follow = false)); lookValues[recipe.mode] = recipe.values
                 crop.recipe = recipe; rememberArt(); applyArtUi(); syncFollow()
             }
             slider.onChange = { v -> onArtSlider(v) }
@@ -555,6 +564,7 @@ class CropActivity : ComponentActivity() {
         val v = lookValues.getOrPut(m) { Art.loadState(prefs, m).values }
         recipe = recipe.copy(mode = m, values = v); artParam = 0
         if (m == ArtMode.HOLGA && ratio != "1:1") { ratio = "1:1"; applyRatio(reset = false) }   // Plastic is a square camera
+        if (!recipe.follow) recipe = crop.pinTilt(recipe)    // the band where its Focus and Angle put it, as in the camera
         placeTiltOnGuide()
         crop.recipe = recipe; rememberArt(); applyArtUi(); syncFollow()
         lookTiles[m]?.let { lookScroller.reveal(it) }
@@ -674,6 +684,11 @@ class CropActivity : ComponentActivity() {
         val w = (crop.cw * sample).roundToInt(); val h = (crop.ch * sample).roundToInt()
         readL.text = "$w × $h px · " + (if (ratio == "PHI") "φ " else "") + ratioText()
         if (tiltFollows) { placeTiltOnGuide(); crop.recipe = recipe }
+        else if (recipe.mode == ArtMode.TILT_SHIFT && crop.cw > 0f) {
+            // the band stays on its spot of the photo; Focus shows where that now is in the crop
+            val p = crop.imageToCrop(recipe.mask.cx, recipe.mask.cy)
+            recipe.values[1] = Focus.tiltFocusThrough(p.x, p.y, (recipe.values[3] - 0.5f) * 1.5707964f, crop.cw / crop.ch)
+        }
     }
 
     // ------------------------------------------------------------- remember per photo
@@ -724,7 +739,7 @@ class CropActivity : ComponentActivity() {
         val cx = crop.cx; val cy = crop.cy; val cw = crop.cw; val ch = crop.ch; val deg = Math.toDegrees(crop.theta.toDouble()).toFloat()
         // the copy is rendered on the cropped, straightened picture, so it uses the crop-space mask
         val r = recipe.copy(values = recipe.values.copyOf())
-        val saveMask = crop.cropMask(recipe)
+        val saveMask = crop.renderMask(recipe); val saveFh = crop.renderFactor(recipe)
         val dbl = secondUri?.let { u -> arrayOf(u.toString(), crop.blend.name, crop.strength, crop.s2x, crop.s2y, crop.s2w, crop.s2r) }
         val tag = (if (dbl != null) "double_" else "") + (if (ratio == "PHI") "phi" else ratio.replace(":", "x").lowercase(Locale.US)) +
             (if (r.mode != ArtMode.OFF && Art.supported) "_" + r.mode.fileTag else "")
@@ -739,7 +754,7 @@ class CropActivity : ComponentActivity() {
                         Blend.valueOf(dbl[1] as String), dbl[2] as Float)
                     top.recycle()
                 }
-                val out = EditRender.copy(full, cx, cy, cw, ch, deg, f, r, saveMask)
+                val out = EditRender.copy(full, cx, cy, cw, ch, deg, f, r, saveMask, saveFh)
                 full.recycle()
                 val ow = out.width; val oh = out.height
                 val (name, taken) = originalInfo()
