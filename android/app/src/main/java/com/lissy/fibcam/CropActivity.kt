@@ -356,8 +356,9 @@ class CropActivity : ComponentActivity() {
         readL = text("", 12f, T.SUBTLE, T.medium).apply { gravity = Gravity.CENTER; maxLines = 1 }
         read.addView(readL, LinearLayout.LayoutParams(0, wrap, 1f))
         read.addView(text("Done", 11f, T.GRAPHITE, T.semibold, caps = true).apply {
-            gravity = Gravity.CENTER; setPadding(dpi(14f), 0, dpi(14f), 0)
+            gravity = Gravity.CENTER
             background = android.graphics.drawable.InsetDrawable(pill(T.AMBER, dp(13f)), 0, dpi(9f), 0, dpi(9f))
+            setPadding(dpi(14f), 0, dpi(14f), 0)   // after the background, which resets padding
             contentDescription = "Done cropping"; setOnClickListener { setCropMode(false) }
         }, LinearLayout.LayoutParams(wrap, dpi(44f)))
         cropPanel.addView(read, LinearLayout.LayoutParams(match, dpi(44f)).apply { topMargin = dpi(17f) })
